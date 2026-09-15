@@ -87,7 +87,10 @@ class DownloadManager:
 
                         total_updated = 0
                         directories = []
+                        only = task.get("model_types") or None
                         for m_type in MODEL_TYPES:
+                            if only and m_type not in only:
+                                continue
                             setting = Setting.query.get(f"dir_{m_type}")
                             if setting and setting.value:
                                 directories.append((setting.value, m_type))

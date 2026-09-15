@@ -211,7 +211,13 @@ def scan():
         return err
     from .download_manager import download_manager
 
-    task = download_manager.add_task(api_key=user.api_key or None, task_type="scan")
+    data = request.get_json(force=True, silent=True) or {}
+    types = data.get("types")
+    if types is not None and (not isinstance(types, list) or not all(isinstance(t, str) for t in types)):
+        return jsonify({"error": "types must be a string list"}), 400
+    task = download_manager.add_task(
+        api_key=user.api_key or None, task_type="scan", model_types=types
+    )
     return jsonify({"ok": True, "status": task.get("status")})
 
 

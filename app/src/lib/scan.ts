@@ -6,6 +6,22 @@ import { fetchModel, fetchVersionByHash } from './civitai';
 import { ensurePermission, getHandle, putHandle } from './idb';
 import { upsertScanned } from './library';
 import { getDirectories } from './settings';
+import { apiGet, apiPost, backendAvailable } from './backend';
+
+/** Server-side scan (no folder picker — the backend reads its own paths). */
+export async function serverScan(types?: string[]): Promise<void> {
+  if (!(await backendAvailable())) throw new Error('backend unreachable');
+  await apiPost('/scan', types ? { types } : {});
+}
+
+export interface ServerScanStatus {
+  current_task: { status?: string; message?: string; progress?: number } | null;
+  queue_length: number;
+}
+
+export async function serverScanStatus(): Promise<ServerScanStatus> {
+  return apiGet<ServerScanStatus>('/downloads/status');
+}
 
 /** Same model extensions OldCode scanner.py accepts. */
 export const MODEL_EXTS = ['.safetensors', '.ckpt', '.pt', '.bin'];

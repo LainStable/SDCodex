@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { FilterPills, GhostButton, PageHeader, PrimaryButton } from '../components/chrome';
 import { TypeBadge } from '../components/ui';
-import { bindDirectory, scanDir } from '../lib/scan';
+import { bindDirectory, scanDir, serverScan, serverScanStatus } from '../lib/scan';
 import { forgetHandle, getHandle } from '../lib/idb';
 import { loadScanned, pruneScanned } from '../lib/library';
 import {
@@ -115,6 +115,15 @@ function Dirs() {
 
   const scanOne = async (type: string) => {
     setScanning(true);
+    try {
+      // Backend first: server scans its own paths, no picker involved.
+      await serverScan([type]);
+      setMsgs((m) => ({ ...m, [type]: 'scan started on server…' }));
+      await pollServer();
+      return;
+    } catch {
+      /* standalone — fall through to the browser flow below */
+    }
     const seen = new Set(loadScanned().map((e) => `${e.dirKey}/${e.filename}`));
     await scanDir(type, resolve, seen, (msg) =>
       setMsgs((m) => ({ ...m, [type]: msg })),
@@ -122,9 +131,36 @@ function Dirs() {
     setScanning(false);
   };
 
+  /** Poll the backend worker until idle (max ~30s), surfacing its message. */
+  const pollServer = async () => {
+    for (let i = 0; i < 12; i++) {
+      await new Promise((r) => setTimeout(r, 2500));
+      try {
+        const s = await serverScanStatus();
+        const msg = s.current_task?.message || (s.queue_length > 0 ? 'queued…' : '');
+        if (msg) say(msg);
+        if (!s.current_task && s.queue_length === 0) {
+          say('Scan complete (server). Refresh Library to see results.');
+          break;
+        }
+      } catch {
+        break;
+      }
+    }
+    setScanning(false);
+  };
+
   const scanAll = async () => {
     setScanning(true);
     setLog([]);
+    try {
+      await serverScan();
+      say('Scan started on server…');
+      await pollServer();
+      return;
+    } catch {
+      /* standalone — fall through */
+    }
     const seen = new Set<string>();
     for (const t of MODEL_TYPES) {
       if (!(dirs[`dir_${t}`] ?? '').trim()) continue;
@@ -154,9 +190,8 @@ function Dirs() {
       </div>
       <p className="mt-1 font-mono text-[11px] text-ink-faint">
         Keys mirror the backend Setting table. In Docker these are container-internal
-        paths served by the volumes you define (the backend scans those directly — no
-        picking needed). In this browser preview, first Scan asks for the folder once,
-        then remembers it.
+        paths the server scans directly — Scan never opens a picker. Standalone
+        (no backend), the first scan asks for the folder once, then remembers it.
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <PrimaryButton disabled={scanning || !supported} onClick={() => void scanAll()}>
