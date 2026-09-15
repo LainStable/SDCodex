@@ -159,3 +159,13 @@ body {
     -12px 0;
   background-color: #101218;
 }
+
+/* Hide scrollbars but keep scrolling (modal, description, thumbs). */
+.noscroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.noscroll::-webkit-scrollbar {
+  display: none;
+}

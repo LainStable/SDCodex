@@ -260,7 +260,7 @@ export default function ModelModal({
 
   return (
     <Overlay onClose={onClose}>
-      <div className="glass-l2 modal-pop max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-lg p-4 md:p-5">
+      <div className="glass-l2 modal-pop noscroll max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-lg p-4 md:p-5">
         {error && (
           <div className="rounded border border-status-alert/40 bg-status-alert/10 p-4 text-sm">
             <span className="font-semibold text-[#f87171]">Model unavailable:</span> {error}
@@ -269,18 +269,18 @@ export default function ModelModal({
         {!model && !error && <div className="h-96 animate-pulse rounded-lg bg-white/5" />}
         {model && version && (
           <>
-            {model.tags && model.tags.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {model.tags.slice(0, 14).map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[10px] text-ink-muted"
-                  >
-                    {tag}
-                  </span>
-                ))}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="truncate font-display text-xl font-semibold tracking-tight" title={model.name}>
+                  {model.name}
+                </h2>
+                <div className="mt-1 font-mono text-[11px] text-ink-faint">
+                  {formatCount(model.stats?.downloadCount ?? 0)} DL ·{' '}
+                  {formatCount(model.stats?.ratingCount ?? 0)} ratings
+                </div>
               </div>
-            )}
+              <GhostButton onClick={onClose}>✕</GhostButton>
+            </div>
 
             <div className="mt-3 flex flex-wrap items-center gap-1.5">
               {model.modelVersions.map((v) => (
@@ -300,31 +300,45 @@ export default function ModelModal({
                   {v.name}
                 </button>
               ))}
-              <span className="ml-auto font-mono text-[11px] text-ink-faint">
-                {formatCount(model.stats?.downloadCount ?? 0)} DL ·{' '}
-                {formatCount(model.stats?.ratingCount ?? 0)} ratings
-              </span>
             </div>
 
             <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-5">
               <div className="lg:col-span-3">
-                <div ref={mainRef} className="overflow-hidden rounded-lg bg-black/40">
+                <div className="flex items-center gap-2">
+                  <TypeBadge type={model.type} />
+                </div>
+
+                {model.tags && model.tags.length > 0 && (
+                  <div className="mt-2 rounded-lg border border-primary/25 bg-primary/[0.05] p-3">
+                    <h3 className="font-display text-sm font-semibold">Tags</h3>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {model.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="rounded border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[10px] text-ink-muted"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div ref={mainRef} className="mt-3 flex h-[320px] items-center justify-center overflow-hidden rounded-lg bg-black/40 md:h-[440px]">
                   {images[imgIdx] ? (
                     <img
                       src={images[imgIdx].url}
                       alt=""
                       onClick={() => setLightbox(true)}
-                      className="max-h-[480px] w-full cursor-zoom-in object-contain"
+                      className="max-h-full max-w-full cursor-zoom-in object-contain"
                       title="Click to expand · scroll to browse images"
                     />
                   ) : (
-                    <div className="flex h-48 items-center justify-center font-mono text-xs text-ink-faint">
-                      no preview
-                    </div>
+                    <div className="font-mono text-xs text-ink-faint">no preview</div>
                   )}
                 </div>
                 {images.length > 1 && (
-                  <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1">
+                  <div className="noscroll mt-2 flex gap-1.5 overflow-x-auto pb-1">
                     {images.map((img, i) => (
                       <button
                         key={i}
@@ -344,7 +358,7 @@ export default function ModelModal({
                 </div>
 
                 {model.description && (
-                  <div className="glass-l1 mt-3 max-h-56 overflow-y-auto rounded-lg p-3 text-[13px] leading-relaxed text-ink-muted">
+                  <div className="glass-l1 noscroll mt-3 max-h-56 overflow-y-auto rounded-lg p-3 text-[13px] leading-relaxed text-ink-muted">
                     {htmlToText(model.description).slice(0, 2000)}
                   </div>
                 )}
@@ -372,7 +386,7 @@ export default function ModelModal({
                         <summary className="cursor-pointer font-mono text-[11px] text-secondary">
                           ComfyUI workflow JSON
                         </summary>
-                        <pre className="mt-1 max-h-48 overflow-auto rounded bg-black/40 p-2 font-mono text-[10px] text-ink-muted">
+                        <pre className="noscroll mt-1 max-h-48 overflow-auto rounded bg-black/40 p-2 font-mono text-[10px] text-ink-muted">
                           {embedded.workflow.slice(0, 4000)}
                         </pre>
                       </details>
@@ -474,10 +488,6 @@ export default function ModelModal({
                     <p className="mt-2 font-mono text-[11px] text-ink-faint">No file list published.</p>
                   )}
                 </div>
-
-                <div className="mt-3">
-                  <TypeBadge type={model.type} />
-                </div>
               </div>
             </div>
           </>
@@ -486,25 +496,31 @@ export default function ModelModal({
 
       {lightbox && images[imgIdx] && (
         <div
-          className="checker fixed inset-0 z-[70] flex items-center justify-center p-4"
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
           onClick={closeLightbox}
         >
-          <span className="absolute left-3 top-3 rounded border border-white/20 bg-black/60 px-2 py-1 font-mono text-[11px] text-white">
-            i
-          </span>
-          <button
-            type="button"
-            onClick={closeLightbox}
-            className="absolute right-3 top-3 rounded border border-white/20 bg-black/60 px-2.5 py-1 font-mono text-sm text-white hover:bg-black/80"
-          >
-            ✕
-          </button>
-          <img
-            src={images[imgIdx].url}
-            alt=""
+          <div
+            className="glass-l2 modal-pop checker max-h-[86vh] max-w-[92vw] overflow-auto rounded-lg p-3"
             onClick={(e) => e.stopPropagation()}
-            className="max-h-full max-w-full object-contain"
-          />
+          >
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <span className="font-mono text-[11px] text-ink-faint">
+                image {imgIdx + 1}/{images.length}
+              </span>
+              <button
+                type="button"
+                onClick={closeLightbox}
+                className="rounded border border-white/20 bg-black/60 px-2.5 py-1 font-mono text-xs text-white hover:bg-black/80"
+              >
+                ✕
+              </button>
+            </div>
+            <img
+              src={images[imgIdx].url}
+              alt=""
+              className="max-h-[70vh] max-w-full rounded object-contain"
+            />
+          </div>
         </div>
       )}
     </Overlay>

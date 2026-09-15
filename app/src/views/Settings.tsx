@@ -105,20 +105,6 @@ function Dirs() {
     }
   };
 
-  const link = async (type: string) => {
-    try {
-      const dir = await bindDirectory(type);
-      if (dir) {
-        setBound((b) => ({ ...b, [type]: true }));
-        setMsgs((m) => ({ ...m, [type]: 'linked' }));
-      } else {
-        setMsgs((m) => ({ ...m, [type]: 'permission denied' }));
-      }
-    } catch {
-      setMsgs((m) => ({ ...m, [type]: 'pick failed' }));
-    }
-  };
-
   const forget = async (type: string) => {
     await forgetHandle(`dir_${type}`);
     setBound((b) => ({ ...b, [type]: false }));
@@ -165,8 +151,9 @@ function Dirs() {
       </div>
       <p className="mt-1 font-mono text-[11px] text-ink-faint">
         Keys mirror the backend Setting table. In Docker these are container-internal
-        paths served by the volumes you define. Link a real folder once per type, then
-        scan here or per row.
+        paths served by the volumes you define (the backend scans those directly — no
+        picking needed). In this browser preview, first Scan asks for the folder once,
+        then remembers it.
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <PrimaryButton disabled={scanning || !supported} onClick={() => void scanAll()}>
@@ -201,10 +188,14 @@ function Dirs() {
                 <>
                   <GhostButton
                     disabled={scanning || !(dirs[key] ?? '').trim()}
-                    onClick={() => void (isBound ? scanOne(t) : link(t).then(() => scanOne(t)))}
-                    title={isBound ? 'Scan this folder' : 'Link folder, then scan'}
+                    onClick={() => void scanOne(t)}
+                    title={
+                      isBound
+                        ? 'Scan this folder'
+                        : 'First scan asks for the folder once, then remembers it'
+                    }
                   >
-                    {isBound ? 'Scan' : 'Link + scan'}
+                    Scan
                   </GhostButton>
                   {isBound && (
                     <GhostButton disabled={scanning} onClick={() => void forget(t)}>
