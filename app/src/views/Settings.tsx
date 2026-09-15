@@ -608,7 +608,6 @@ function Auth({
       </div>
     );
   }
-
   const persist = (next: Profile) => {
     saveProfile(next);
     onProfile(next);

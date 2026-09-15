@@ -46,6 +46,7 @@ export function BootstrapCard({
   existing,
   serverMode,
   serverBootstrap,
+  onServerChanged,
   onDone,
 }: {
   existing: Profile | null;
@@ -53,6 +54,8 @@ export function BootstrapCard({
   serverMode: boolean;
   /** Server user count (only meaningful in serverMode). */
   serverBootstrap: boolean;
+  /** Called when the server disagrees (e.g. users appeared) so App re-checks. */
+  onServerChanged?: () => void;
   onDone: (p: Profile) => void;
 }) {
   const [username, setUsername] = useState('');
@@ -117,8 +120,7 @@ export function BootstrapCard({
     }
     setBusy(true);
     try {
-      if (serverMode && !serverBootstrap) {
-        // Backend owns accounts and this origin has no profile — plain login.
+      if (serverMode && !serverBootstrap) {        // Backend owns accounts and this origin has no profile — plain login.
         const r = await apiPost<{ ok: boolean; user: ServerAuthState['user'] }>('/auth/login', {
           username,
           password,
@@ -130,15 +132,29 @@ export function BootstrapCard({
         return;
       }
       if (serverMode) {
-        const r = await apiPost<{ ok: boolean; user: ServerAuthState['user'] }>('/auth/bootstrap', {
-          username,
-          displayName: display,
-          password,
-        });
-        const adopted = adoptServerUser(r.user);
-        if (!adopted) throw new Error('Bootstrap failed');
-        startSession();
-        onDone(adopted);
+        try {
+          const r = await apiPost<{ ok: boolean; user: ServerAuthState['user'] }>('/auth/bootstrap', {
+            username,
+            displayName: display,
+            password,
+          });
+          const adopted = adoptServerUser(r.user);
+          if (!adopted) throw new Error('Bootstrap failed');
+          startSession();
+          onDone(adopted);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : 'Could not create account.';
+          if (/already exist/i.test(msg)) {
+            // Server state moved under us (second backend, double tab, race):
+            // re-check instead of dead-ending, so the gate flips to Sign in.
+            setError('Users exist now — switching to sign-in…');
+            onServerChanged?.();
+          } else {
+            setError(msg);
+          }
+        } finally {
+          setBusy(false);
+        }
         return;
       }
       const created = await bootstrapUser(username, display, password);

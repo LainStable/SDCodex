@@ -50,7 +50,21 @@ export default function App() {
   }, [theme]);
 
   // If the backend is up, its SQLite rows win over the local cache.
+  // Server settings pull only once authenticated (/api/settings is 401 anon).
   const [callbackMsg, setCallbackMsg] = useState<string | null>(null);
+  const refreshServerAuth = async () => {    const s = await fetchServerAuth();
+    if (s) {
+      setServerAuth(s);
+      if (s.user && s.authed) {
+        const adopted = adoptServerUser(s.user);
+        if (adopted) {
+          setProfile(adopted);
+          const full = await pullServerProfile();
+          if (full) setProfile(full);
+        }
+      }
+    }
+  };
   useEffect(() => {
     void (async () => {
       // SSO return path: provider redirects here with ?code&state.
@@ -72,7 +86,6 @@ export default function App() {
           setCallbackMsg(`Provider refused: ${params.get('error_description') || params.get('error')}`);
         }
       }
-      if (await backendAvailable()) await pullSettings();
       // Backend owns auth truth when reachable: adopt its user/session so a
       // fresh origin (new port, cleared storage) signs in instead of
       // re-bootstrapping while accounts exist server-side.
@@ -98,6 +111,13 @@ export default function App() {
       setAuthReady(true);
     })();
   }, []);
+
+  // Server settings pull once a session exists (/api/settings is 401 anon —
+  // pulling pre-auth only spams the console). Runs on login and on refresh
+  // with a live session.
+  useEffect(() => {
+    if (authed) void pullSettings();
+  }, [authed]);
 
   // Global "/" focuses the first search field, as placeholders promise.
   useEffect(() => {
@@ -146,6 +166,9 @@ export default function App() {
                 existing={serverAuth && !serverAuth.bootstrap ? profile : serverAuth ? null : profile}
                 serverMode={serverAuth !== null}
                 serverBootstrap={serverAuth?.bootstrap ?? true}
+                onServerChanged={() => {
+                  void refreshServerAuth();
+                }}
                 onDone={(p) => {
                   setProfile(p);
                   setAuthed(true);
