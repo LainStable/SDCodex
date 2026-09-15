@@ -8,6 +8,8 @@ export interface Profile {
   email: string;
   isAdmin: boolean;
   authProvider: string; // 'local' or 'oidc:<name>'
+  /** PBKDF2-SHA256 hash: `pbkdf2$<iter>$<salt-b64>$<hash-b64>`. Empty for OIDC-only rows. */
+  passwordHash: string;
   createdAt: number;
 }
 
@@ -29,6 +31,8 @@ export interface OidcProvider {
 
 const PROFILE_KEY = 'sdcodex.profile.v1';
 const OIDC_KEY = 'sdcodex.oidc.v1';
+const SESSION_KEY = 'sdcodex.session.v1';
+const PBKDF2_ITER = 210_000;
 
 function read(key: string): string | null {
   try {
@@ -64,7 +68,11 @@ export function clearProfile(): void {
 }
 
 /** Bootstrap: first-ever user is admin (mirrors OldCode bootstrap mode). */
-export function bootstrapUser(username: string, displayName: string): Profile {
+export async function bootstrapUser(
+  username: string,
+  displayName: string,
+  password: string,
+): Promise<Profile> {
   let first = true;
   try {
     first = localStorage.getItem('sdcodex.bootstrapped.v1') !== '1';
@@ -78,10 +86,86 @@ export function bootstrapUser(username: string, displayName: string): Profile {
     email: '',
     isAdmin: first,
     authProvider: 'local',
+    passwordHash: await hashPassword(password),
     createdAt: Date.now(),
   };
   saveProfile(p);
+  startSession();
   return p;
+}
+
+function b64(bytes: Uint8Array): string {
+  let s = '';
+  bytes.forEach((b) => (s += String.fromCharCode(b)));
+  return btoa(s);
+}
+
+function unb64(s: string): Uint8Array<ArrayBuffer> {
+  const bin = atob(s);
+  const out = new Uint8Array(new ArrayBuffer(bin.length));
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/** PBKDF2-SHA256 password hash (browser-side stand-in for OldCode scrypt). */
+export async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, [
+    'deriveBits',
+  ]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations: PBKDF2_ITER, hash: 'SHA-256' },
+    key,
+    256,
+  );
+  return `pbkdf2$${PBKDF2_ITER}$${b64(salt)}$${b64(new Uint8Array(bits as ArrayBuffer))}`;
+}
+
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  try {
+    const [, iterStr, saltB64, hashB64] = stored.split('$');
+    const salt = unb64(saltB64);
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, [
+      'deriveBits',
+    ]);
+    const bits = await crypto.subtle.deriveBits(
+      { name: 'PBKDF2', salt, iterations: Number(iterStr), hash: 'SHA-256' },
+      key,
+      256,
+    );
+    return b64(new Uint8Array(bits as ArrayBuffer)) === hashB64;
+  } catch {
+    return false;
+  }
+}
+
+/** Session flag. Frontend gate only — the backend httpOnly cookie enforces for real. */
+export function hasSession(): boolean {
+  return read(SESSION_KEY) !== null;
+}
+
+export function startSession(): void {
+  const token = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  try {
+    localStorage.setItem(SESSION_KEY, token);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** End the session. The account stays — next launch asks for its password. */
+export function endSession(): void {
+  try {
+    localStorage.removeItem(SESSION_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Full reset (account + session). Used only when explicitly wiping. */
+export function wipeAccount(): void {
+  clearProfile();
+  endSession();
 }
 
 export function initials(p: Profile | null): string {

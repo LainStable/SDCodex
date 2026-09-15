@@ -14,8 +14,8 @@ import {
 import {
   blankProvider,
   buildAuthUrl,
-  clearProfile,
   deleteProvider,
+  endSession,
   loadProviders,
   saveProfile,
   saveProvider,
@@ -310,13 +310,21 @@ function OidcManager() {
   );
 }
 
-function Auth({ profile, onProfile }: { profile: Profile | null; onProfile: (p: Profile | null) => void }) {
+function Auth({
+  profile,
+  onProfile,
+  onSignOut,
+}: {
+  profile: Profile | null;
+  onProfile: (p: Profile | null) => void;
+  onSignOut: () => void;
+}) {
   const [editDisplay, setEditDisplay] = useState(profile?.displayName ?? '');
 
   if (!profile) {
     return (
       <div className="glass-l1 rounded-lg p-4">
-        <BootstrapCard onDone={onProfile} />
+        <BootstrapCard existing={null} onDone={onProfile} />
       </div>
     );
   }
@@ -334,8 +342,8 @@ function Auth({ profile, onProfile }: { profile: Profile | null; onProfile: (p: 
         <GhostButton
           className="ml-auto"
           onClick={() => {
-            clearProfile();
-            onProfile(null);
+            endSession();
+            onSignOut();
           }}
         >
           Sign out
@@ -413,9 +421,11 @@ function System() {
 export default function Settings({
   profile,
   onProfile,
+  onSignOut,
 }: {
   profile: Profile | null;
   onProfile: (p: Profile | null) => void;
+  onSignOut: () => void;
 }) {
   const [tab, setTab] = useState<Tab>('dirs');
   return (
@@ -430,7 +440,7 @@ export default function Settings({
       <div className="mt-3">
         {tab === 'dirs' && <Dirs />}
         {tab === 'api' && <ApiKey />}
-        {tab === 'auth' && <Auth profile={profile} onProfile={onProfile} />}
+        {tab === 'auth' && <Auth profile={profile} onProfile={onProfile} onSignOut={onSignOut} />}
         {tab === 'system' && <System />}
       </div>
     </div>

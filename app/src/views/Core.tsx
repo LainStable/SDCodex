@@ -9,7 +9,7 @@ import {
   Stat,
 } from '../components/chrome';
 import { isPaused, setPaused, type QueueItem } from '../lib/queue';
-import { bootstrapUser, type Profile } from '../lib/auth';
+import { bootstrapUser, startSession, verifyPassword, type Profile } from '../lib/auth';
 
 const PLUGINS = [
   {
@@ -38,38 +38,120 @@ const PLUGINS = [
   },
 ];
 
-/** First-run admin creation (mirrors OldCode bootstrap mode). Shared by the
-    first-launch gate and the Settings guest state. */
-export function BootstrapCard({ onDone }: { onDone: (p: Profile) => void }) {
+/** Blocking auth gate (mirrors OldCode bootstrap + login). No session, no app:
+    first-ever user sets a password and becomes admin; returning users sign in. */
+export function BootstrapCard({
+  existing,
+  onDone,
+}: {
+  existing: Profile | null;
+  onDone: (p: Profile) => void;
+}) {
   const [username, setUsername] = useState('');
   const [display, setDisplay] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setError(null);
+    if (existing) {
+      if (!password) {
+        setError('Enter your password.');
+        return;
+      }
+      setBusy(true);
+      try {
+        const ok = await verifyPassword(password, existing.passwordHash);
+        if (!ok) {
+          setError('Wrong password.');
+          return;
+        }
+        startSession();
+        onDone(existing);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    if (!username.trim()) {
+      setError('Choose a username.');
+      return;
+    }
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+    if (password !== confirm) {
+      setError('Passwords do not match.');
+      return;
+    }
+    setBusy(true);
+    try {
+      onDone(await bootstrapUser(username, display, password));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') void submit();
+  };
+
   return (
-    <div>
-      <h2 className="font-display text-base font-semibold">Create primary account</h2>
+    <div onKeyDown={onKey}>
+      <h2 className="font-display text-base font-semibold">
+        {existing ? `Welcome back, ${existing.displayName}` : 'Create primary account'}
+      </h2>
       <p className="mt-1 text-xs text-ink-muted">
-        No users exist yet — this account becomes administrator. No password is stored
-        here; local accounts get a real hash once the backend lands.
+        {existing
+          ? 'Sign in to access SDCodex. Passwords are PBKDF2-hashed locally; the backend scrypt hash replaces this on migration.'
+          : 'No users exist yet — this account becomes administrator. Password is required; nothing works without an account.'}
       </p>
       <div className="mt-3 flex flex-col gap-2">
+        {!existing && (
+          <>
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Username"
+              autoComplete="username"
+              className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+            />
+            <input
+              value={display}
+              onChange={(e) => setDisplay(e.target.value)}
+              placeholder="Display name (optional)"
+              autoComplete="nickname"
+              className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+            />
+          </>
+        )}
         <input
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder="Username"
-          autoComplete="username"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder={existing ? 'Password' : 'Password (min 8 characters)'}
+          type="password"
+          autoComplete={existing ? 'current-password' : 'new-password'}
           className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
         />
-        <input
-          value={display}
-          onChange={(e) => setDisplay(e.target.value)}
-          placeholder="Display name (optional)"
-          autoComplete="nickname"
-          className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
-        />
+        {!existing && (
+          <input
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            placeholder="Confirm password"
+            type="password"
+            autoComplete="new-password"
+            className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+          />
+        )}
+        {error && <p className="font-mono text-[11px] text-status-alert">{error}</p>}
         <PrimaryButton
-          disabled={!username.trim()}
-          onClick={() => onDone(bootstrapUser(username, display))}
+          disabled={busy || (!existing && !username.trim())}
+          onClick={() => void submit()}
         >
-          Create administrator
+          {busy ? 'Working…' : existing ? 'Sign in' : 'Create administrator'}
         </PrimaryButton>
       </div>
     </div>

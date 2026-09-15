@@ -11,15 +11,14 @@ import {
   clearQueue,
   loadQueue,
 } from './lib/queue';
-import { clearProfile, initials, loadProfile, type Profile } from './lib/auth';
+import { endSession, hasSession, initials, loadProfile, type Profile } from './lib/auth';
 
 export default function App() {
   const [view, setView] = useState<ViewId>('models');
   const [queue, setQueue] = useState(loadQueue);
   const [profile, setProfile] = useState<Profile | null>(loadProfile);
-  // First-launch bootstrap gate (mirrors OldCode: no users → prompt for one).
-  // Dismissal lasts the session only; next launch prompts again.
-  const [gateDismissed, setGateDismissed] = useState(false);
+  // Blocking auth gate (mirrors OldCode: no session → no app).
+  const [authed, setAuthed] = useState(hasSession() && loadProfile() !== null);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [creatorSearch, setCreatorSearch] = useState<{ token: number; text: string }>({
     token: 0,
@@ -66,26 +65,21 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-obsidian-bg text-ink">
-      {profile === null && !gateDismissed && (
+      {!authed && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div className="glass-l2 edge-shimmer w-full max-w-md rounded-lg p-5">
             <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-secondary">
-              Welcome to SDCodex
+              SDCodex locked
             </div>
             <div className="mt-2">
               <BootstrapCard
+                existing={profile}
                 onDone={(p) => {
                   setProfile(p);
+                  setAuthed(true);
                 }}
               />
             </div>
-            <button
-              type="button"
-              onClick={() => setGateDismissed(true)}
-              className="mt-3 w-full text-center font-mono text-[11px] text-ink-faint hover:text-white"
-            >
-              Skip for now
-            </button>
           </div>
         </div>
       )}
@@ -99,10 +93,10 @@ export default function App() {
             theme={theme}
             setTheme={setTheme}
             profileLabel={initials(profile)}
-            signedIn={profile !== null}
+            signedIn={authed}
             onSignOut={() => {
-              clearProfile();
-              setProfile(null);
+              endSession();
+              setAuthed(false);
             }}
           />
 
@@ -139,7 +133,13 @@ export default function App() {
                 />
               )}
               {view === 'plugins' && <Plugins />}
-          {view === 'settings' && <Settings profile={profile} onProfile={setProfile} />}
+          {view === 'settings' && (
+            <Settings
+              profile={profile}
+              onProfile={setProfile}
+              onSignOut={() => setAuthed(false)}
+            />
+          )}
             </>
           )}
         </main>
