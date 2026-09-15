@@ -5,6 +5,10 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react()],
   server: {
+    // Allow reverse-proxy / LAN hostnames (OIDC testing). Vite blocks
+    // unknown Host headers by default. Lock down in production with e.g.
+    // allowedHosts: ['sdcodex.example.com'].
+    allowedHosts: true,
     proxy: {
       // Same-origin proxy for Civitai: the API's preflight rejects browser
       // Authorization headers (OPTIONS → 405), so key-authenticated calls
