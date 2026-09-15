@@ -1,6 +1,8 @@
 /* Client-side settings store. Keys mirror OldCode's Setting table
    (dir_<type>, api key per user) so the backend can adopt these values as-is. */
 
+import { apiGet, apiPost, backendAvailable } from './backend';
+
 export const MODEL_TYPES = [
   'Checkpoint',
   'Embedding',
@@ -112,4 +114,29 @@ export function targetDirFor(modelType: string, baseModel: string): string {
   if (configured) return configured;
   const slug = baseModel.toLowerCase().replace(/[^a-z0-9]+/g, '_');
   return `/models/${modelType.toLowerCase()}/${slug}/`;
+}
+
+/** Pull server settings into the local cache (backend wins when reachable). */
+export async function pullSettings(): Promise<boolean> {
+  try {
+    if (!(await backendAvailable())) return false;
+    const s = await apiGet<{ dirs: Record<string, string>; civitaiApiKey: string }>('/settings');
+    write('sdcodex.dirs.v1', JSON.stringify(s.dirs ?? {}));
+    if (s.civitaiApiKey) {
+      write('sdcodex.apiKey.v1', s.civitaiApiKey);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Push the local cache to the server (best-effort, keeps local on failure). */
+export async function pushSettings(): Promise<void> {
+  try {
+    if (!(await backendAvailable())) return;
+    await apiPost('/settings', { dirs: getDirectories(), civitaiApiKey: getApiKey() });
+  } catch {
+    /* standalone mode — local cache stands */
+  }
 }

@@ -20,3 +20,8 @@ Stitch project `projects/4032984165089508769` (SDCodex). Dark-first workstation 
 
 ## ECC
 - Global opencode profile already installed (`~/.config/opencode`). Prefer skills-first; see `/ecc-guide`.
+
+## Backend
+- `backend/` — Flask + SQLAlchemy (SQLite `backend/data/sdcodex.db`, gitignored). Revived from `OldCode/` as package `sdcodex`; serves JSON at `/api` (`api_v1.py`: health, auth, settings, downloads, library, scan, OIDC). Run: `python3 run.py` from `backend/` (port 5000).
+- Frontend talks same-origin `/api` (Vite proxy in dev, backend serves in prod) via `app/src/lib/backend.ts`. Backend-first with localStorage fallback: startup pulls settings, saves push through, auth bootstrap/login mirrors the User row + cookie, queue POSTs to the real `DownloadManager` worker.
+- Civitai calls go through the dev `/civitai` proxy (preflight rejects browser Bearer headers cross-origin).

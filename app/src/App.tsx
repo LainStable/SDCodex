@@ -13,6 +13,8 @@ import {
 } from './lib/queue';
 import { endSession, hasSession, initials, loadProfile, type Profile } from './lib/auth';
 import { deleteScanned } from './lib/library';
+import { apiPost, backendLogout, backendAvailable } from './lib/backend';
+import { pullSettings } from './lib/settings';
 
 export default function App() {
   const [view, setView] = useState<ViewId>('models');
@@ -43,6 +45,13 @@ export default function App() {
       /* ignore */
     }
   }, [theme]);
+
+  // If the backend is up, its SQLite rows win over the local cache.
+  useEffect(() => {
+    void (async () => {
+      if (await backendAvailable()) await pullSettings();
+    })();
+  }, []);
 
   // Global "/" focuses the first search field, as placeholders promise.
   useEffect(() => {
@@ -98,6 +107,7 @@ export default function App() {
             avatarUrl={profile?.avatar ?? ''}
             signedIn={authed}
             onSignOut={() => {
+              void backendLogout();
               endSession();
               setAuthed(false);
             }}
@@ -107,7 +117,24 @@ export default function App() {
           {view === 'models' && (
             <Explorer
               queuedIds={queuedIds}
-              onQueue={(item) => setQueue(addToQueue(item))}
+              onQueue={(item) => {
+                setQueue(addToQueue(item));
+                // Hand the real download to the backend worker when reachable.
+                if (item.modelId && item.versionId) {
+                  void (async () => {
+                    try {
+                      if (await backendAvailable()) {
+                        await apiPost('/downloads', {
+                          modelId: item.modelId,
+                          versionId: item.versionId,
+                        });
+                      }
+                    } catch {
+                      /* worker offline — local stub keeps the entry */
+                    }
+                  })();
+                }
+              }}
               onOpen={(id) => setModal({ kind: 'civitai', modelId: id })}
               searchToken={creatorSearch.token}
               searchText={creatorSearch.text}

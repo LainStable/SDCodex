@@ -12,6 +12,7 @@ import {
   getApiUser,
   getCustomDirs,
   getDirectories,
+  pushSettings,
   setApiKey,
   setApiUser,
   setCustomDir,
@@ -87,6 +88,7 @@ function Dirs() {
     setDirs(getDirectories());
     setSavedKey(key);
     setTimeout(() => setSavedKey((k) => (k === key ? null : k)), 1500);
+    void pushSettings();
   };
 
   const say = (line: string) => setLog((l) => [...l.slice(-8), line]);
@@ -142,6 +144,7 @@ function Dirs() {
     setCustom(getCustomDirs());
     setLabel('');
     setPath('');
+    void pushSettings();
   };
 
   return (
@@ -230,14 +233,15 @@ function Dirs() {
       {Object.entries(custom).map(([k, v]) => (
         <Row key={k} label={`dir_custom_${k}`}>
           <span className="min-w-0 flex-1 truncate font-mono text-xs">{v}</span>
-          <GhostButton
-            onClick={() => {
-              deleteCustomDir(k);
-              setCustom(getCustomDirs());
-            }}
-          >
-            Delete
-          </GhostButton>
+            <GhostButton
+              onClick={() => {
+                deleteCustomDir(k);
+                setCustom(getCustomDirs());
+                void pushSettings();
+              }}
+            >
+              Delete
+            </GhostButton>
         </Row>
       ))}
       <div className="mt-2 flex flex-wrap gap-2">
@@ -281,6 +285,7 @@ function ApiKey() {
       setApiUser(username);
       setUser(username);
       setStatus({ ok: true, text: `Logged in as @${username}` });
+      void pushSettings();
     } catch (e) {
       setStatus({ ok: false, text: e instanceof Error ? e.message : 'Validation failed' });
     } finally {

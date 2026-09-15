@@ -43,3 +43,10 @@ Thumbs.db
 # The folder ships empty; contents are cloned at install time.
 plugins/*
 !plugins/.gitkeep
+
+# Backend runtime — SQLite lives here, never push it
+backend/data/
+*.db
+*.db-journal
+__pycache__/
+*.pyc

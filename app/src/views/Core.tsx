@@ -10,6 +10,7 @@ import {
 } from '../components/chrome';
 import { isPaused, setPaused, type QueueItem } from '../lib/queue';
 import { bootstrapUser, startSession, verifyPassword, type Profile } from '../lib/auth';
+import { mirrorAuth } from '../lib/backend';
 
 const PLUGINS = [
   {
@@ -69,6 +70,12 @@ export function BootstrapCard({
           return;
         }
         startSession();
+        // Mirror into the backend when reachable (same User row + cookie).
+        try {
+          await mirrorAuth('login', { username: existing.username, password });
+        } catch {
+          /* standalone — local session stands */
+        }
         onDone(existing);
       } finally {
         setBusy(false);
@@ -89,7 +96,13 @@ export function BootstrapCard({
     }
     setBusy(true);
     try {
-      onDone(await bootstrapUser(username, display, password));
+      const created = await bootstrapUser(username, display, password);
+      try {
+        await mirrorAuth('bootstrap', { username, displayName: display, password });
+      } catch {
+        /* standalone — local account stands */
+      }
+      onDone(created);
     } finally {
       setBusy(false);
     }
