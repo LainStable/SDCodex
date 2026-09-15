@@ -10,7 +10,8 @@ import {
 } from '../components/chrome';
 import { isPaused, setPaused, type QueueItem } from '../lib/queue';
 import { bootstrapUser, startSession, verifyPassword, type Profile } from '../lib/auth';
-import { mirrorAuth } from '../lib/backend';
+import { adoptServerUser, type ServerAuthState } from '../lib/auth';
+import { apiPost, mirrorAuth } from '../lib/backend';
 
 const PLUGINS = [
   {
@@ -43,9 +44,15 @@ const PLUGINS = [
     first-ever user sets a password and becomes admin; returning users sign in. */
 export function BootstrapCard({
   existing,
+  serverMode,
+  serverBootstrap,
   onDone,
 }: {
   existing: Profile | null;
+  /** When true, the backend verifies (fresh origins with no local hash). */
+  serverMode: boolean;
+  /** Server user count (only meaningful in serverMode). */
+  serverBootstrap: boolean;
   onDone: (p: Profile) => void;
 }) {
   const [username, setUsername] = useState('');
@@ -64,6 +71,18 @@ export function BootstrapCard({
       }
       setBusy(true);
       try {
+        if (serverMode && !existing.passwordHash) {
+          // Fresh origin: no local hash — verify against the backend directly.
+          const r = await apiPost<{ ok: boolean; user: ServerAuthState['user'] }>('/auth/login', {
+            username: existing.username,
+            password,
+          });
+          const adopted = adoptServerUser(r.user);
+          if (!adopted) throw new Error('Login failed');
+          startSession();
+          onDone(adopted);
+          return;
+        }
         const ok = await verifyPassword(password, existing.passwordHash);
         if (!ok) {
           setError('Wrong password.');
@@ -77,6 +96,8 @@ export function BootstrapCard({
           /* standalone — local session stands */
         }
         onDone(existing);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Sign-in failed.');
       } finally {
         setBusy(false);
       }
@@ -96,6 +117,30 @@ export function BootstrapCard({
     }
     setBusy(true);
     try {
+      if (serverMode && !serverBootstrap) {
+        // Backend owns accounts and this origin has no profile — plain login.
+        const r = await apiPost<{ ok: boolean; user: ServerAuthState['user'] }>('/auth/login', {
+          username,
+          password,
+        });
+        const adopted = adoptServerUser(r.user);
+        if (!adopted) throw new Error('Login failed');
+        startSession();
+        onDone(adopted);
+        return;
+      }
+      if (serverMode) {
+        const r = await apiPost<{ ok: boolean; user: ServerAuthState['user'] }>('/auth/bootstrap', {
+          username,
+          displayName: display,
+          password,
+        });
+        const adopted = adoptServerUser(r.user);
+        if (!adopted) throw new Error('Bootstrap failed');
+        startSession();
+        onDone(adopted);
+        return;
+      }
       const created = await bootstrapUser(username, display, password);
       try {
         await mirrorAuth('bootstrap', { username, displayName: display, password });
@@ -103,6 +148,8 @@ export function BootstrapCard({
         /* standalone — local account stands */
       }
       onDone(created);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not create account.');
     } finally {
       setBusy(false);
     }
@@ -112,15 +159,23 @@ export function BootstrapCard({
     if (e.key === 'Enter') void submit();
   };
 
+  const isCreate = !existing && (!serverMode || serverBootstrap);
+
   return (
     <div onKeyDown={onKey}>
       <h2 className="font-display text-base font-semibold">
-        {existing ? `Welcome back, ${existing.displayName}` : 'Create primary account'}
+        {existing
+          ? `Welcome back, ${existing.displayName}`
+          : isCreate
+            ? 'Create primary account'
+            : 'Sign in'}
       </h2>
       <p className="mt-1 text-xs text-ink-muted">
         {existing
           ? 'Sign in to access SDCodex. Passwords are PBKDF2-hashed locally; the backend scrypt hash replaces this on migration.'
-          : 'No users exist yet — this account becomes administrator. Password is required; nothing works without an account.'}
+          : isCreate
+            ? 'No users exist yet — this account becomes administrator. Password is required; nothing works without an account.'
+            : 'This origin has no saved account — sign in with your existing credentials.'}
       </p>
       <div className="mt-3 flex flex-col gap-2">
         {!existing && (
@@ -132,24 +187,26 @@ export function BootstrapCard({
               autoComplete="username"
               className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
             />
-            <input
-              value={display}
-              onChange={(e) => setDisplay(e.target.value)}
-              placeholder="Display name (optional)"
-              autoComplete="nickname"
-              className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
-            />
+            {isCreate && (
+              <input
+                value={display}
+                onChange={(e) => setDisplay(e.target.value)}
+                placeholder="Display name (optional)"
+                autoComplete="nickname"
+                className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+              />
+            )}
           </>
         )}
         <input
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder={existing ? 'Password' : 'Password (min 8 characters)'}
+          placeholder={existing || !isCreate ? 'Password' : 'Password (min 8 characters)'}
           type="password"
-          autoComplete={existing ? 'current-password' : 'new-password'}
+          autoComplete={existing || !isCreate ? 'current-password' : 'new-password'}
           className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
         />
-        {!existing && (
+        {isCreate && (
           <input
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
@@ -164,7 +221,7 @@ export function BootstrapCard({
           disabled={busy || (!existing && !username.trim())}
           onClick={() => void submit()}
         >
-          {busy ? 'Working…' : existing ? 'Sign in' : 'Create administrator'}
+          {busy ? 'Working…' : existing || !isCreate ? 'Sign in' : 'Create administrator'}
         </PrimaryButton>
       </div>
     </div>

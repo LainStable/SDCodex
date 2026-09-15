@@ -11,7 +11,7 @@ import {
   clearQueue,
   loadQueue,
 } from './lib/queue';
-import { endSession, hasSession, initials, loadProfile, type Profile } from './lib/auth';
+import { adoptServerUser, endSession, fetchServerAuth, hasSession, initials, loadProfile, type Profile, type ServerAuthState } from './lib/auth';
 import { deleteScanned } from './lib/library';
 import { apiPost, backendLogout, backendAvailable } from './lib/backend';
 import { pullSettings } from './lib/settings';
@@ -22,6 +22,9 @@ export default function App() {
   const [profile, setProfile] = useState<Profile | null>(loadProfile);
   // Blocking auth gate (mirrors OldCode: no session → no app).
   const [authed, setAuthed] = useState(hasSession() && loadProfile() !== null);
+  // When the backend is reachable it owns auth truth (survives new origins).
+  const [serverAuth, setServerAuth] = useState<ServerAuthState | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [modal, setModal] = useState<ModalTarget | null>(null);
   const [libKey, setLibKey] = useState(0);
   const [creatorSearch, setCreatorSearch] = useState<{ token: number; text: string }>({
@@ -50,6 +53,22 @@ export default function App() {
   useEffect(() => {
     void (async () => {
       if (await backendAvailable()) await pullSettings();
+      // Backend owns auth truth when reachable: adopt its user/session so a
+      // fresh origin (new port, cleared storage) signs in instead of
+      // re-bootstrapping while accounts exist server-side.
+      const s = await fetchServerAuth();
+      if (s) {
+        setServerAuth(s);
+        if (s.user) {
+          const adopted = adoptServerUser(s.user);
+          if (adopted) setProfile(adopted);
+          if (s.authed) setAuthed(true);
+          else setAuthed(hasSession() && loadProfile() !== null);
+        } else {
+          setAuthed(false);
+        }
+      }
+      setAuthReady(true);
     })();
   }, []);
 
@@ -76,7 +95,12 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-obsidian-bg text-ink">
-      {!authed && (
+      {!authReady && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
+          <p className="font-mono text-xs text-ink-faint">Checking session…</p>
+        </div>
+      )}
+      {authReady && !authed && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div className="glass-l2 edge-shimmer w-full max-w-md rounded-lg p-5">
             <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-secondary">
@@ -84,7 +108,9 @@ export default function App() {
             </div>
             <div className="mt-2">
               <BootstrapCard
-                existing={profile}
+                existing={serverAuth && !serverAuth.bootstrap ? profile : serverAuth ? null : profile}
+                serverMode={serverAuth !== null}
+                serverBootstrap={serverAuth?.bootstrap ?? true}
                 onDone={(p) => {
                   setProfile(p);
                   setAuthed(true);

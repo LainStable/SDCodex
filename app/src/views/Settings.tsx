@@ -514,7 +514,7 @@ function Auth({
   if (!profile) {
     return (
       <div className="glass-l1 rounded-lg p-4">
-        <BootstrapCard existing={null} onDone={onProfile} />
+        <BootstrapCard existing={null} serverMode={false} serverBootstrap={true} onDone={onProfile} />
       </div>
     );
   }

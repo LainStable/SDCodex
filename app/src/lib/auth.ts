@@ -192,6 +192,53 @@ export function hasSession(): boolean {
   return read(SESSION_KEY) !== null;
 }
 
+export interface ServerAuthState {
+  authed: boolean;
+  bootstrap: boolean;
+  user: {
+    username: string;
+    displayName: string;
+    email: string;
+    isAdmin: boolean;
+    authProvider: string;
+  } | null;
+}
+
+/** Ask the backend who (if anyone) is signed in. Null when unreachable. */
+export async function fetchServerAuth(): Promise<ServerAuthState | null> {
+  try {
+    const { apiGet, backendAvailable } = await import('./backend');
+    if (!(await backendAvailable())) return null;
+    return await apiGet<ServerAuthState>('/auth/status');
+  } catch {
+    return null;
+  }
+}
+
+/** Adopt a backend user row as the local profile (no password hash — the
+    backend verifies; local login defers to it). */
+export function adoptServerUser(u: ServerAuthState['user']): Profile | null {
+  if (!u) return null;
+  const p: Profile = {
+    username: u.username,
+    displayName: u.displayName || u.username,
+    email: u.email || '',
+    isAdmin: u.isAdmin,
+    authProvider: u.authProvider || 'local',
+    passwordHash: '',
+    avatar: '',
+    createdAt: Date.now(),
+  };
+  const existing = loadProfile();
+  // Never clobber a local password hash with an empty one.
+  if (existing && existing.username === p.username && existing.passwordHash) {
+    p.passwordHash = existing.passwordHash;
+    p.avatar = existing.avatar;
+  }
+  saveProfile(p);
+  return p;
+}
+
 export function startSession(): void {
   const token = b64url(crypto.getRandomValues(new Uint8Array(32)));
   try {
