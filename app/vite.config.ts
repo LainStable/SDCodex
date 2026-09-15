@@ -14,6 +14,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/civitai/, ''),
       },
+      // Local backend (Flask). Same-origin so session cookies just work.
+      '/api': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+      },
     },
   },
 })

@@ -46,6 +46,7 @@ plugins/*
 
 # Backend runtime — SQLite lives here, never push it
 backend/data/
+backend/.venv/
 *.db
 *.db-journal
 __pycache__/
