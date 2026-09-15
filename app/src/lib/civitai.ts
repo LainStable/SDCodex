@@ -7,6 +7,8 @@ export interface CivitaiImage {
 
 export interface CivitaiVersion {
   id: number;
+  /** Present on by-hash lookups; absent on embedded modelVersions (use parent model id). */
+  modelId?: number;
   name: string;
   baseModel: string;
   downloadUrl: string;

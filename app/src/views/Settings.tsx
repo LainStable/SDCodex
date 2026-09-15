@@ -52,16 +52,18 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 function Dirs() {
   const [dirs, setDirs] = useState(getDirectories);
+  const [drafts, setDrafts] = useState<Record<string, string>>(getDirectories);
   const [custom, setCustom] = useState(getCustomDirs);
   const [label, setLabel] = useState('');
   const [path, setPath] = useState('');
-  const [saved, setSaved] = useState(false);
+  const [savedKey, setSavedKey] = useState<string | null>(null);
 
-  const save = (type: string, value: string) => {
-    setDirectory(type, value);
+  const save = (type: string) => {
+    const key = `dir_${type}`;
+    setDirectory(type, drafts[key] ?? '');
     setDirs(getDirectories());
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
+    setSavedKey(key);
+    setTimeout(() => setSavedKey((k) => (k === key ? null : k)), 1500);
   };
 
   const addCustom = () => {
@@ -76,31 +78,34 @@ function Dirs() {
     <div className="glass-l1 rounded-lg p-4">
       <div className="flex items-center gap-2">
         <h2 className="font-display text-base font-semibold">Model directories</h2>
-        {saved && (
-          <span className="rounded border border-status-active/40 bg-status-active/10 px-2 py-0.5 font-mono text-[10px] uppercase text-status-active">
-            saved
-          </span>
-        )}
       </div>
       <p className="mt-1 font-mono text-[11px] text-ink-faint">
-        Keys mirror the backend Setting table (dir_&lt;type&gt;). Empty = app default.
+        Keys mirror the backend Setting table (dir_&lt;type&gt;). In Docker these are
+        container-internal paths served by the volumes you define.
       </p>
       <div className="mt-2 divide-y divide-white/[0.06]">
-        {MODEL_TYPES.map((t) => (
-          <Row key={t} label={`dir_${t}`}>
-            <input
-              defaultValue={dirs[`dir_${t}`] ?? ''}
-              placeholder={`/models/${t.toLowerCase()}/`}
-              onBlur={(e) => {
-                if (e.target.value !== (dirs[`dir_${t}`] ?? '')) save(t, e.target.value);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-              }}
-              className="min-w-[220px] flex-1 rounded border border-white/10 bg-obsidian-lowest px-2 py-1 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary"
-            />
-          </Row>
-        ))}
+        {MODEL_TYPES.map((t) => {
+          const key = `dir_${t}`;
+          const dirty = (drafts[key] ?? '') !== (dirs[key] ?? '');
+          return (
+            <Row key={t} label={key}>
+              <input
+                value={drafts[key] ?? ''}
+                onChange={(e) => setDrafts((d) => ({ ...d, [key]: e.target.value }))}
+                placeholder={`/models/${t.toLowerCase()}/`}
+                className="min-w-[220px] flex-1 rounded border border-white/10 bg-obsidian-lowest px-2 py-1 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary"
+              />
+              <GhostButton disabled={!dirty} onClick={() => save(t)}>
+                Save
+              </GhostButton>
+              {savedKey === key && (
+                <span className="rounded border border-status-active/40 bg-status-active/10 px-2 py-0.5 font-mono text-[10px] uppercase text-status-active">
+                  saved
+                </span>
+              )}
+            </Row>
+          );
+        })}
       </div>
 
       <h2 className="mt-4 font-display text-base font-semibold">Custom directories</h2>
