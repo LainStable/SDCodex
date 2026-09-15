@@ -23,6 +23,8 @@ export interface OidcProvider {
   issuerUrl: string;
   clientId: string;
   clientSecret: string;
+  /** Must exactly match the URI registered at the provider. */
+  redirectUri: string;
   scopes: string;
   usernameClaim: string;
   emailClaim: string;
@@ -290,6 +292,8 @@ function persistProviders(list: OidcProvider[]): void {
 }
 
 export function blankProvider(): OidcProvider {
+  const fallback =
+    typeof window !== 'undefined' ? `${window.location.origin}/auth/oidc/callback` : '';
   return {
     id: `oidc-${Date.now()}`,
     name: '',
@@ -297,6 +301,7 @@ export function blankProvider(): OidcProvider {
     issuerUrl: '',
     clientId: '',
     clientSecret: '',
+    redirectUri: fallback,
     scopes: 'openid profile email',
     usernameClaim: 'preferred_username',
     emailClaim: 'email',
@@ -332,34 +337,85 @@ export async function testDiscovery(issuerUrl: string, signal?: AbortSignal): Pr
   return `OK · ${doc.issuer ?? base}`;
 }
 
+/** Server OIDC rows (admin). The exchange must run server-side (client secret
+    + PKCE verifier live there), so these hit /api directly. */
+export async function fetchServerProviders(): Promise<OidcProvider[]> {
+  const { apiGet } = await import('./backend');
+  const res = await apiGet<{ items: Array<Record<string, unknown>> }>('/oidc');
+  return res.items.map((c) => ({
+    id: String(c.id),
+    name: String(c.name ?? ''),
+    enabled: Boolean(c.enabled),
+    issuerUrl: String(c.issuerUrl ?? ''),
+    clientId: String(c.clientId ?? ''),
+    clientSecret: '',
+    redirectUri: String(c.redirectUri ?? ''),
+    scopes: String(c.scopes ?? 'openid profile email'),
+    usernameClaim: String(c.usernameClaim ?? 'preferred_username'),
+    emailClaim: String(c.emailClaim ?? 'email'),
+    displayNameClaim: String(c.displayNameClaim ?? 'name'),
+    adminClaim: String(c.adminClaim ?? ''),
+    adminValue: String(c.adminValue ?? ''),
+  }));
+}
+
+export async function createServerProvider(p: OidcProvider): Promise<void> {
+  const { apiPost } = await import('./backend');
+  await apiPost('/oidc', {
+    name: p.name,
+    enabled: p.enabled,
+    issuerUrl: p.issuerUrl,
+    clientId: p.clientId,
+    clientSecret: p.clientSecret || undefined,
+    redirectUri: p.redirectUri,
+    scopes: p.scopes,
+    usernameClaim: p.usernameClaim,
+    emailClaim: p.emailClaim,
+    displayNameClaim: p.displayNameClaim,
+    adminClaim: p.adminClaim || undefined,
+    adminValue: p.adminValue || undefined,
+  });
+}
+
+export async function deleteServerProvider(id: string): Promise<void> {
+  const { apiDelete } = await import('./backend');
+  await apiDelete(`/oidc/${id}`);
+}
+
+export async function testServerProvider(id: string): Promise<string> {
+  const { apiPost } = await import('./backend');
+  const r = await apiPost<{ ok: boolean; result?: { success: boolean; issuer?: string; error?: string }; error?: string }>(
+    `/oidc/${id}/test`,
+    {},
+  );
+  if (r.result?.success) return `OK · ${r.result.issuer ?? 'discovery passed'}`;
+  throw new Error(r.result?.error || r.error || 'test failed');
+}
+
+/** Start SSO: backend builds the provider URL (verifier stays server-side). */
+export async function serverLoginUrl(id: string): Promise<string> {
+  const { apiGet } = await import('./backend');
+  const r = await apiGet<{ ok: boolean; url?: string; error?: string }>(`/oidc/${id}/login-url`);
+  if (!r.url) throw new Error(r.error || 'no login URL');
+  return r.url;
+}
+
+/** Complete SSO after the provider redirects to /auth/oidc/callback. */
+export async function completeOidcCallback(code: string, state: string): Promise<Profile> {
+  const { apiPost } = await import('./backend');
+  const r = await apiPost<{ ok: boolean; user: ServerAuthState['user']; error?: string }>(
+    '/auth/oidc/callback',
+    { code, state },
+  );
+  const adopted = adoptServerUser(r.user);
+  if (!adopted) throw new Error(r.error || 'sign-in failed');
+  startSession();
+  return adopted;
+}
+
 function b64url(bytes: Uint8Array): string {
   let s = '';
   bytes.forEach((b) => (s += String.fromCharCode(b)));
   return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-/** Build a PKCE sign-in URL (mirrors OldCode oidc.build_authorization_url). */
-export async function buildAuthUrl(p: OidcProvider, redirectUri: string): Promise<string> {
-  const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
-  const verifier = b64url(verifierBytes);
-  const challengeBytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
-  const challenge = b64url(challengeBytes);
-  const stateBytes = crypto.getRandomValues(new Uint8Array(16));
-  try {
-    sessionStorage.setItem(`sdcodex.pkce.${b64url(stateBytes)}`, verifier);
-  } catch {
-    /* ignore */
-  }
-  const base = p.issuerUrl.trim().replace(/\/+$/, '');
-  const doc = await (await fetch(`${base}/.well-known/openid-configuration`)).json();
-  const params = new URLSearchParams({
-    response_type: 'code',
-    client_id: p.clientId,
-    redirect_uri: redirectUri,
-    scope: p.scopes || 'openid profile email',
-    state: b64url(stateBytes),
-    code_challenge: challenge,
-    code_challenge_method: 'S256',
-  });
-  return `${doc.authorization_endpoint}?${params}`;
-}

@@ -230,6 +230,7 @@ def _oidc_json(c: OidcConfig, include_secret: bool = False) -> dict:
         "enabled": bool(c.enabled),
         "issuerUrl": c.issuer_url,
         "clientId": c.client_id,
+        "redirectUri": c.redirect_uri or "",
         "scopes": c.scopes or "openid profile email",
         "usernameClaim": c.username_claim or "preferred_username",
         "emailClaim": c.email_claim or "email",
@@ -315,3 +316,35 @@ def oidc_test(config_id: int):
         return jsonify({"ok": True, "result": result})
     except Exception as e:  # keep the failure legible, never a 500
         return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@api_v1.get("/oidc/<int:config_id>/login-url")
+def oidc_login_url(config_id: int):
+    """Public: start SSO from the login gate. Returns the provider URL."""
+    from . import oidc as oidc_mod
+
+    row = db.session.get(OidcConfig, config_id)
+    if row is None or not row.enabled:
+        return jsonify({"error": "provider unavailable"}), 404
+    result = oidc_mod.build_authorization_url(row, redirect_url="/")
+    if result.get("error"):
+        return jsonify({"error": result["error"]}), 502
+    return jsonify({"ok": True, "url": result["url"]})
+
+
+@api_v1.post("/auth/oidc/callback")
+def oidc_callback():
+    """Public: complete SSO after the provider redirects back."""
+    from . import oidc as oidc_mod
+
+    data = request.get_json(force=True, silent=True) or {}
+    if not data.get("code") or not data.get("state"):
+        return jsonify({"error": "code and state required"}), 400
+    result = oidc_mod.handle_callback(data["code"], data["state"])
+    if not result.get("success"):
+        return jsonify({"error": result.get("error", "sign-in failed")}), 401
+    user = result["user"]
+    token = auth.create_session(user.id, f"oidc:{user.auth_provider}")
+    resp = make_response(jsonify({"ok": True, "user": _user_json(user)}))
+    auth.set_session_cookie(resp, token)
+    return resp

@@ -11,7 +11,7 @@ import {
   clearQueue,
   loadQueue,
 } from './lib/queue';
-import { adoptServerUser, endSession, fetchServerAuth, hasSession, initials, loadProfile, type Profile, type ServerAuthState } from './lib/auth';
+import { adoptServerUser, completeOidcCallback, endSession, fetchServerAuth, hasSession, initials, loadProfile, type Profile, type ServerAuthState } from './lib/auth';
 import { deleteScanned } from './lib/library';
 import { apiPost, backendLogout, backendAvailable } from './lib/backend';
 import { pullSettings } from './lib/settings';
@@ -50,8 +50,28 @@ export default function App() {
   }, [theme]);
 
   // If the backend is up, its SQLite rows win over the local cache.
+  const [callbackMsg, setCallbackMsg] = useState<string | null>(null);
   useEffect(() => {
     void (async () => {
+      // SSO return path: provider redirects here with ?code&state.
+      if (window.location.pathname === '/auth/oidc/callback') {
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get('code');
+        const state = params.get('state');
+        window.history.replaceState(null, '', '/');
+        if (code && state) {
+          try {
+            const adopted = await completeOidcCallback(code, state);
+            setProfile(adopted);
+            setAuthed(true);
+            setServerAuth({ authed: true, bootstrap: false, user: null });
+          } catch (e) {
+            setCallbackMsg(e instanceof Error ? e.message : 'SSO sign-in failed');
+          }
+        } else if (params.get('error')) {
+          setCallbackMsg(`Provider refused: ${params.get('error_description') || params.get('error')}`);
+        }
+      }
       if (await backendAvailable()) await pullSettings();
       // Backend owns auth truth when reachable: adopt its user/session so a
       // fresh origin (new port, cleared storage) signs in instead of
@@ -95,6 +115,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-obsidian-bg text-ink">
+      {callbackMsg && (
+        <div className="fixed left-1/2 top-4 z-[70] -translate-x-1/2 rounded-lg border border-status-alert/40 bg-status-alert/15 px-4 py-2 font-mono text-xs text-[#f87171]">
+          SSO: {callbackMsg}
+          <button type="button" onClick={() => setCallbackMsg(null)} className="ml-3 underline">
+            dismiss
+          </button>
+        </div>
+      )}
       {!authReady && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
           <p className="font-mono text-xs text-ink-faint">Checking session…</p>

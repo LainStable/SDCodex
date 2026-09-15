@@ -21,16 +21,20 @@ import {
 import { fetchMe } from '../lib/civitai';
 import {
   blankProvider,
-  buildAuthUrl,
+  createServerProvider,
   deleteProvider,
+  deleteServerProvider,
   endSession,
+  fetchServerProviders,
   hashPassword,
   initials,
   loadProviders,
   processAvatar,
   saveProfile,
   saveProvider,
+  serverLoginUrl,
   testDiscovery,
+  testServerProvider,
   verifyPassword,
   type OidcProvider,
   type Profile,
@@ -388,15 +392,38 @@ function ApiKey() {
 
 function OidcManager() {
   const [providers, setProviders] = useState(loadProviders);
+  const [serverMode, setServerMode] = useState(false);
   const [editing, setEditing] = useState<OidcProvider | null>(null);
   const [status, setStatus] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+
+  // Providers must live server-side for SSO to work (the exchange needs the
+  // client secret + PKCE verifier). With a backend, rows come from /api/oidc.
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const { backendAvailable } = await import('../lib/backend');
+      if (!(await backendAvailable())) return;
+      try {
+        const rows = await fetchServerProviders();
+        if (live) {
+          setProviders(rows);
+          setServerMode(true);
+        }
+      } catch {
+        /* stay local */
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const test = async (p: OidcProvider) => {
     setBusy(true);
     setStatus((s) => ({ ...s, [p.id]: 'checking…' }));
     try {
-      const ok = await testDiscovery(p.issuerUrl);
+      const ok = serverMode ? await testServerProvider(p.id) : await testDiscovery(p.issuerUrl);
       setStatus((s) => ({ ...s, [p.id]: ok }));
     } catch (e) {
       setStatus((s) => ({ ...s, [p.id]: `FAIL · ${e instanceof Error ? e.message : 'request failed'}` }));
@@ -408,11 +435,35 @@ function OidcManager() {
   const signIn = async (p: OidcProvider) => {
     setBusy(true);
     try {
-      const url = await buildAuthUrl(p, `${window.location.origin}/auth/oidc/callback`);
-      window.location.href = url;
+      if (!serverMode) {
+        setStatus((s) => ({ ...s, [p.id]: 'Start the backend first — SSO exchange runs server-side.' }));
+        setBusy(false);
+        return;
+      }
+      window.location.href = await serverLoginUrl(p.id);
     } catch (e) {
       setStatus((s) => ({ ...s, [p.id]: `FAIL · ${e instanceof Error ? e.message : 'request failed'}` }));
       setBusy(false);
+    }
+  };
+
+  const saveEditing = async () => {
+    if (!editing || !editing.name.trim() || !editing.issuerUrl.trim()) return;
+    if (serverMode) {
+      await createServerProvider(editing);
+      setProviders(await fetchServerProviders());
+    } else {
+      setProviders(saveProvider(editing));
+    }
+    setEditing(null);
+  };
+
+  const remove = async (id: string) => {
+    if (serverMode) {
+      await deleteServerProvider(id);
+      setProviders(await fetchServerProviders());
+    } else {
+      setProviders(deleteProvider(id));
     }
   };
 
@@ -420,8 +471,9 @@ function OidcManager() {
     <div className="mt-4 border-t border-white/[0.06] pt-3">
       <h3 className="font-display text-sm font-semibold">Single sign-on (OIDC)</h3>
       <p className="mt-1 font-mono text-[11px] text-ink-faint">
-        One row per provider — mirrors the backend OidcConfig table. Secrets stay in this
-        browser until the backend vault lands.
+        {serverMode
+          ? 'Rows live in the backend OidcConfig table — Test and Sign in run against the server.'
+          : 'No backend: rows stay in this browser. Start the backend to make SSO real.'}
       </p>
       {providers.map((p) => (
         <div key={p.id} className="mt-2 rounded border border-white/[0.06] p-2">
@@ -448,7 +500,7 @@ function OidcManager() {
             <GhostButton onClick={() => setEditing({ ...p })}>Edit</GhostButton>
             <GhostButton
               onClick={() => {
-                setProviders(deleteProvider(p.id));
+                void remove(p.id);
               }}
             >
               Delete
@@ -478,6 +530,7 @@ function OidcManager() {
                 ['issuerUrl', 'Issuer URL'],
                 ['clientId', 'Client ID'],
                 ['clientSecret', 'Client secret'],
+                ['redirectUri', 'Redirect URI (must match provider registration)'],
                 ['scopes', 'Scopes'],
                 ['usernameClaim', 'Username claim'],
                 ['emailClaim', 'Email claim'],
@@ -511,9 +564,10 @@ function OidcManager() {
           <div className="mt-2 flex gap-2">
             <PrimaryButton
               onClick={() => {
-                if (!editing.name.trim() || !editing.issuerUrl.trim()) return;
-                setProviders(saveProvider(editing));
-                setEditing(null);
+                void (async () => {
+                  if (!editing.name.trim() || !editing.issuerUrl.trim()) return;
+                  await saveEditing();
+                })();
               }}
             >
               Save provider
