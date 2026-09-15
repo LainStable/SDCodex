@@ -8,12 +8,14 @@ BACKEND="$ROOT/backend"
 APP="$ROOT/app"
 VENV="$BACKEND/.venv"
 BACKEND_PID=""
+VITE_PID=""
 
 cleanup() {
-  if [ -n "$BACKEND_PID" ] && kill -0 "$BACKEND_PID" 2>/dev/null; then
-    echo "Stopping backend ($BACKEND_PID)..."
-    kill "$BACKEND_PID" 2>/dev/null || true
-  fi
+  for pid in $VITE_PID $BACKEND_PID $SLEEP_PID; do
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
 }
 trap cleanup INT TERM EXIT
 
@@ -37,6 +39,8 @@ for arg in "$@"; do
 done
 
 # --- Backend ---------------------------------------------------------------
+# Reap strays from earlier runs (same project backend only).
+pkill -f "$BACKEND/.venv/bin/python run.py" 2>/dev/null || true
 if [ "$ONLY" != "frontend" ]; then
   if [ ! -x "$VENV/bin/python" ]; then
     echo "Creating backend venv..."
@@ -47,8 +51,9 @@ if [ "$ONLY" != "frontend" ]; then
     "$VENV/bin/pip" install -q -r "$BACKEND/requirements.txt"
   fi
   echo "Starting backend on :5000..."
-  # Dedicated var (not $HOST — shells often pre-set that to something else).
-  (cd "$BACKEND" && HOST="${SDCODEX_HOST:-0.0.0.0}" PORT=5000 "$VENV/bin/python" run.py >"$BACKEND/backend.log" 2>&1 &
+  # exec: the forked subshell becomes python itself, so $! is the real PID
+  # (without exec the pidfile would hold a dead intermediate shell).
+  (cd "$BACKEND" && exec env HOST="${SDCODEX_HOST:-0.0.0.0}" PORT=5000 "$VENV/bin/python" run.py >"$BACKEND/backend.log" 2>&1 &
    echo $! >"$BACKEND/backend.pid")
   BACKEND_PID="$(cat "$BACKEND/backend.pid")"
   for _ in $(seq 1 30); do
@@ -71,7 +76,16 @@ if [ "$ONLY" != "backend" ]; then
   echo "  UI:      http://127.0.0.1:5173"
   echo "  Backend: http://127.0.0.1:5000/api/health"
   echo "Press Ctrl+C to stop both."
-  (cd "$APP" && exec npm run dev -- --host 0.0.0.0 --port 5173)
+  # Run the vite binary directly (not `npm run dev`): npm swallows SIGINT
+  # and orphans vite on Ctrl+C. Backgrounded under this script's trap so
+  # both processes die together. exec keeps the pidfile accurate (see above).
+  (cd "$APP" && exec ./node_modules/.bin/vite --host 0.0.0.0 --port 5173 &
+   echo $! >"$APP/.vite.pid")
+  VITE_PID="$(cat "$APP/.vite.pid")"
 fi
 
-wait "$BACKEND_PID" 2>/dev/null || true
+# Park here until Ctrl+C; the trap takes down backend + vite together.
+# (Plain `wait` on reparented grandchildren returns instantly, so sleep instead.)
+sleep infinity &
+SLEEP_PID=$!
+wait "$SLEEP_PID" 2>/dev/null || true
