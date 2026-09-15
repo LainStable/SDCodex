@@ -1,0 +1,129 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-obsidian-bg text-ink font-body antialiased;
+}
+
+.glass-l1 {
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-l2 {
+  background: rgba(30, 41, 59, 0.9);
+  backdrop-filter: blur(16px);
+  box-shadow:
+    0 8px 32px -4px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(99, 102, 241, 0.15);
+}
+
+.edge-shimmer {
+  position: relative;
+}
+
+.edge-shimmer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(99, 102, 241, 0.4),
+    transparent
+  );
+}
+
+/* Light theme — toggled from the profile menu. Dark Obsidian stays default. */
+.light body {
+  background: #eef0f4;
+  color: #1c1f29;
+}
+
+.light .bg-obsidian-bg {
+  background-color: #eef0f4;
+}
+
+.light .glass-l1 {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(15, 19, 28, 0.1);
+}
+
+.light .glass-l2 {
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow:
+    0 8px 32px -4px rgba(15, 19, 28, 0.18),
+    0 0 0 1px rgba(99, 102, 241, 0.2);
+}
+
+.light .text-ink {
+  color: #1c1f29;
+}
+
+.light .text-ink-muted {
+  color: #4b5162;
+}
+
+.light .text-ink-faint {
+  color: #8a90a3;
+}
+
+.light .bg-obsidian-lowest,
+.light .bg-obsidian-low {
+  background-color: #e2e5ec;
+}
+
+.light input::placeholder {
+  color: #8a90a3;
+}
+
+/* Radial fan menu (ports OldCode userfan arc math: items spread along an
+   arc from the profile pic, staggered pop, counter-rotated upright). */
+.fan-layer {
+  position: absolute;
+  left: 18px;
+  top: 18px;
+  z-index: 50;
+}
+
+.fan-item {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 64px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0.5);
+  transition:
+    transform 0.35s cubic-bezier(0.2, 0.9, 0.25, 1.15),
+    opacity 0.22s ease;
+}
+
+.fan-layer.open .fan-item {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -50%) rotate(var(--fan-angle))
+    translateX(var(--fan-radius, 168px)) rotate(calc(var(--fan-angle) * -1));
+}
+
+.fan-avatar {
+  transition: transform 0.35s cubic-bezier(0.2, 0.9, 0.25, 1.15);
+  transform-origin: center;
+}
+
+.fan-avatar.open {
+  transform: scale(2);
+}

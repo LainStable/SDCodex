@@ -1,0 +1,44 @@
+# Old reference code — never push
+OldCode/
+
+# Working material — prototypes, prompt notes, session transcripts
+stitch/
+Prompt.md
+prompt.md
+session-*.md
+
+# Dependencies
+node_modules/
+app/node_modules/
+
+# Build output
+dist/
+app/dist/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+app/.env
+app/.env.*
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local caches
+.vite/
+*.local
+
+# Installed plugins — mirrors backend <root>/plugins (PLUGINS_DIR).
+# The folder ships empty; contents are cloned at install time.
+plugins/*
+!plugins/.gitkeep

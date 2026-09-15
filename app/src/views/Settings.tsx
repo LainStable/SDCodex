@@ -1,0 +1,465 @@
+import { useState } from 'react';
+import { FilterPills, GhostButton, PageHeader, PrimaryButton } from '../components/chrome';
+import {
+  MODEL_TYPES,
+  clearApiKey,
+  deleteCustomDir,
+  getApiKey,
+  getCustomDirs,
+  getDirectories,
+  setApiKey,
+  setCustomDir,
+  setDirectory,
+} from '../lib/settings';
+import {
+  blankProvider,
+  bootstrapUser,
+  buildAuthUrl,
+  clearProfile,
+  deleteProvider,
+  loadProviders,
+  saveProfile,
+  saveProvider,
+  testDiscovery,
+  type OidcProvider,
+  type Profile,
+} from '../lib/auth';
+
+type Tab = 'dirs' | 'api' | 'auth' | 'system';
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'dirs', label: 'Download dirs' },
+  { id: 'api', label: 'API key' },
+  { id: 'auth', label: 'Users & SSO' },
+  { id: 'system', label: 'System' },
+];
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 py-1.5">
+      <span className="w-40 shrink-0 font-mono text-[11px] text-ink-muted">{label}</span>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{children}</div>
+    </div>
+  );
+}
+
+function Dirs() {
+  const [dirs, setDirs] = useState(getDirectories);
+  const [custom, setCustom] = useState(getCustomDirs);
+  const [label, setLabel] = useState('');
+  const [path, setPath] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  const save = (type: string, value: string) => {
+    setDirectory(type, value);
+    setDirs(getDirectories());
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  };
+
+  const addCustom = () => {
+    if (!label.trim() || !path.trim()) return;
+    setCustomDir(label.trim(), path.trim());
+    setCustom(getCustomDirs());
+    setLabel('');
+    setPath('');
+  };
+
+  return (
+    <div className="glass-l1 rounded-lg p-4">
+      <div className="flex items-center gap-2">
+        <h2 className="font-display text-base font-semibold">Model directories</h2>
+        {saved && (
+          <span className="rounded border border-status-active/40 bg-status-active/10 px-2 py-0.5 font-mono text-[10px] uppercase text-status-active">
+            saved
+          </span>
+        )}
+      </div>
+      <p className="mt-1 font-mono text-[11px] text-ink-faint">
+        Keys mirror the backend Setting table (dir_&lt;type&gt;). Empty = app default.
+      </p>
+      <div className="mt-2 divide-y divide-white/[0.06]">
+        {MODEL_TYPES.map((t) => (
+          <Row key={t} label={`dir_${t}`}>
+            <input
+              defaultValue={dirs[`dir_${t}`] ?? ''}
+              placeholder={`/models/${t.toLowerCase()}/`}
+              onBlur={(e) => {
+                if (e.target.value !== (dirs[`dir_${t}`] ?? '')) save(t, e.target.value);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              }}
+              className="min-w-[220px] flex-1 rounded border border-white/10 bg-obsidian-lowest px-2 py-1 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary"
+            />
+          </Row>
+        ))}
+      </div>
+
+      <h2 className="mt-4 font-display text-base font-semibold">Custom directories</h2>
+      {Object.entries(custom).map(([k, v]) => (
+        <Row key={k} label={`dir_custom_${k}`}>
+          <span className="min-w-0 flex-1 truncate font-mono text-xs">{v}</span>
+          <GhostButton
+            onClick={() => {
+              deleteCustomDir(k);
+              setCustom(getCustomDirs());
+            }}
+          >
+            Delete
+          </GhostButton>
+        </Row>
+      ))}
+      <div className="mt-2 flex flex-wrap gap-2">
+        <input
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="Label"
+          className="w-32 rounded border border-white/10 bg-obsidian-lowest px-2 py-1 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary"
+        />
+        <input
+          value={path}
+          onChange={(e) => setPath(e.target.value)}
+          placeholder="/data/my_models/"
+          className="min-w-[220px] flex-1 rounded border border-white/10 bg-obsidian-lowest px-2 py-1 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary"
+        />
+        <GhostButton onClick={addCustom}>Add</GhostButton>
+      </div>
+    </div>
+  );
+}
+
+function ApiKey() {
+  const [key, setKey] = useState(getApiKey);
+  const [saved, setSaved] = useState(false);
+
+  const save = () => {
+    setApiKey(key);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  };
+
+  return (
+    <div className="glass-l1 rounded-lg p-4">
+      <h2 className="font-display text-base font-semibold">Civitai API key</h2>
+      <p className="mt-1 text-xs text-ink-muted">
+        Sent as a Bearer token on every Civitai request (same as OldCode headers). Stored only
+        in this browser until user accounts land.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <input
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          type="password"
+          placeholder="Paste key…"
+          className="min-w-[220px] flex-1 rounded border border-white/10 bg-obsidian-lowest px-3 py-2 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary"
+        />
+        <PrimaryButton onClick={save}>Save{saved ? 'd ✓' : ''}</PrimaryButton>
+        {key && (
+          <GhostButton
+            onClick={() => {
+              clearApiKey();
+              setKey('');
+            }}
+          >
+            Clear
+          </GhostButton>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OidcManager() {
+  const [providers, setProviders] = useState(loadProviders);
+  const [editing, setEditing] = useState<OidcProvider | null>(null);
+  const [status, setStatus] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+
+  const test = async (p: OidcProvider) => {
+    setBusy(true);
+    setStatus((s) => ({ ...s, [p.id]: 'checking…' }));
+    try {
+      const ok = await testDiscovery(p.issuerUrl);
+      setStatus((s) => ({ ...s, [p.id]: ok }));
+    } catch (e) {
+      setStatus((s) => ({ ...s, [p.id]: `FAIL · ${e instanceof Error ? e.message : 'request failed'}` }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const signIn = async (p: OidcProvider) => {
+    setBusy(true);
+    try {
+      const url = await buildAuthUrl(p, `${window.location.origin}/auth/oidc/callback`);
+      window.location.href = url;
+    } catch (e) {
+      setStatus((s) => ({ ...s, [p.id]: `FAIL · ${e instanceof Error ? e.message : 'request failed'}` }));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 border-t border-white/[0.06] pt-3">
+      <h3 className="font-display text-sm font-semibold">Single sign-on (OIDC)</h3>
+      <p className="mt-1 font-mono text-[11px] text-ink-faint">
+        One row per provider — mirrors the backend OidcConfig table. Secrets stay in this
+        browser until the backend vault lands.
+      </p>
+      {providers.map((p) => (
+        <div key={p.id} className="mt-2 rounded border border-white/[0.06] p-2">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="font-semibold">{p.name || '(unnamed)'}</span>
+            <span
+              className={`rounded border px-1.5 py-0.5 font-mono text-[9px] uppercase ${
+                p.enabled
+                  ? 'border-status-active/40 text-status-active'
+                  : 'border-white/15 text-ink-faint'
+              }`}
+            >
+              {p.enabled ? 'enabled' : 'disabled'}
+            </span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-faint">
+              {p.issuerUrl}
+            </span>
+            <GhostButton disabled={busy} onClick={() => test(p)}>
+              Test
+            </GhostButton>
+            <GhostButton disabled={busy || !p.enabled} onClick={() => signIn(p)}>
+              Sign in
+            </GhostButton>
+            <GhostButton onClick={() => setEditing({ ...p })}>Edit</GhostButton>
+            <GhostButton
+              onClick={() => {
+                setProviders(deleteProvider(p.id));
+              }}
+            >
+              Delete
+            </GhostButton>
+          </div>
+          {status[p.id] && (
+            <p
+              className={`mt-1 font-mono text-[11px] ${
+                status[p.id].startsWith('OK') ? 'text-status-active' : 'text-status-warning'
+              }`}
+            >
+              {status[p.id]}
+            </p>
+          )}
+        </div>
+      ))}
+      <GhostButton className="mt-2" onClick={() => setEditing(blankProvider())}>
+        + Add provider
+      </GhostButton>
+
+      {editing && (
+        <div className="mt-2 rounded border border-primary/40 p-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {(
+              [
+                ['name', 'Name (e.g. Keycloak)'],
+                ['issuerUrl', 'Issuer URL'],
+                ['clientId', 'Client ID'],
+                ['clientSecret', 'Client secret'],
+                ['scopes', 'Scopes'],
+                ['usernameClaim', 'Username claim'],
+                ['emailClaim', 'Email claim'],
+                ['displayNameClaim', 'Display-name claim'],
+                ['adminClaim', 'Admin claim (optional)'],
+                ['adminValue', 'Admin value(s), comma-separated'],
+              ] as const
+            ).map(([field, label]) => (
+              <label key={field} className="block">
+                <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+                  {label}
+                </span>
+                <input
+                  value={editing[field]}
+                  type={field === 'clientSecret' ? 'password' : 'text'}
+                  onChange={(e) => setEditing({ ...editing, [field]: e.target.value })}
+                  className="mt-1 w-full rounded border border-white/10 bg-obsidian-lowest px-2 py-1 font-mono text-xs outline-none focus:border-primary"
+                />
+              </label>
+            ))}
+          </div>
+          <label className="mt-2 flex cursor-pointer items-center gap-2 font-mono text-[11px] text-ink-muted">
+            <input
+              type="checkbox"
+              checked={editing.enabled}
+              onChange={(e) => setEditing({ ...editing, enabled: e.target.checked })}
+              className="accent-[#6366f1]"
+            />
+            Enabled
+          </label>
+          <div className="mt-2 flex gap-2">
+            <PrimaryButton
+              onClick={() => {
+                if (!editing.name.trim() || !editing.issuerUrl.trim()) return;
+                setProviders(saveProvider(editing));
+                setEditing(null);
+              }}
+            >
+              Save provider
+            </PrimaryButton>
+            <GhostButton onClick={() => setEditing(null)}>Cancel</GhostButton>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Auth({ profile, onProfile }: { profile: Profile | null; onProfile: (p: Profile | null) => void }) {
+  const [username, setUsername] = useState('');
+  const [display, setDisplay] = useState('');
+  const [editDisplay, setEditDisplay] = useState(profile?.displayName ?? '');
+
+  if (!profile) {
+    return (
+      <div className="glass-l1 rounded-lg p-4">
+        <h2 className="font-display text-base font-semibold">Create first user</h2>
+        <p className="mt-1 text-xs text-ink-muted">
+          Bootstrap mode: no users exist yet, so this account becomes administrator (mirrors
+          OldCode). No password is stored here — local accounts get a real scrypt hash once
+          the backend lands.
+        </p>
+        <div className="mt-3 flex max-w-md flex-col gap-2">
+          <input
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="Username"
+            className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+          />
+          <input
+            value={display}
+            onChange={(e) => setDisplay(e.target.value)}
+            placeholder="Display name (optional)"
+            className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+          />
+          <PrimaryButton
+            disabled={!username.trim()}
+            onClick={() => onProfile(bootstrapUser(username, display))}
+          >
+            Create administrator
+          </PrimaryButton>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="glass-l1 rounded-lg p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="font-display text-base font-semibold">Profile</h2>
+        {profile.isAdmin && (
+          <span className="rounded border border-primary/50 bg-primary/20 px-2 py-0.5 font-mono text-[10px] uppercase text-white">
+            admin
+          </span>
+        )}
+        <span className="font-mono text-[11px] text-ink-faint">via {profile.authProvider}</span>
+        <GhostButton
+          className="ml-auto"
+          onClick={() => {
+            clearProfile();
+            onProfile(null);
+          }}
+        >
+          Sign out
+        </GhostButton>
+      </div>
+      <div className="mt-3 flex max-w-md flex-col gap-2">
+        <label className="block">
+          <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+            Username
+          </span>
+          <input value={profile.username} disabled className="mt-1 w-full rounded border border-white/[0.06] bg-white/[0.02] px-3 py-2 font-mono text-sm text-ink-faint outline-none" />
+        </label>
+        <label className="block">
+          <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+            Display name
+          </span>
+          <div className="mt-1 flex gap-2">
+            <input
+              value={editDisplay}
+              onChange={(e) => setEditDisplay(e.target.value)}
+              className="min-w-0 flex-1 rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none focus:border-primary"
+            />
+            <GhostButton
+              onClick={() => {
+                const next = { ...profile, displayName: editDisplay.trim() || profile.username };
+                saveProfile(next);
+                onProfile(next);
+              }}
+            >
+              Save
+            </GhostButton>
+          </div>
+        </label>
+      </div>
+
+      {profile.isAdmin ? (
+        <OidcManager />
+      ) : (
+        <p className="mt-4 border-t border-white/[0.06] pt-3 font-mono text-[11px] text-ink-faint">
+          SSO provider settings are visible to administrators only.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function System() {
+  return (
+    <div className="glass-l1 rounded-lg p-4">
+      <h2 className="font-display text-base font-semibold">System</h2>
+      <dl className="mt-3 space-y-1 font-mono text-[11px] text-ink-muted">
+        <div className="flex justify-between gap-2">
+          <dt>app</dt>
+          <dd className="text-ink">SDCodex v2.4.0 (frontend slice)</dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt>health</dt>
+          <dd>
+            backend pending · <span className="font-mono">/healthz</span> unwired
+          </dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt>self-update</dt>
+          <dd>Docker sidecar (OldCode docker_api) — backend only</dd>
+        </div>
+      </dl>
+      <p className="mt-3 font-mono text-[11px] text-ink-faint">
+        Check-for-updates and container replace arrive with the backend. Core update checks
+        will reuse the Plugin Hub surface.
+      </p>
+    </div>
+  );
+}
+
+export default function Settings({
+  profile,
+  onProfile,
+}: {
+  profile: Profile | null;
+  onProfile: (p: Profile | null) => void;
+}) {
+  const [tab, setTab] = useState<Tab>('dirs');
+  return (
+    <div>
+      <PageHeader
+        title="Settings"
+        subtitle="Download locations, credentials, access, and system — same tabs as the backend."
+      />
+      <div className="glass-l1 edge-shimmer mt-4 rounded-lg p-3">
+        <FilterPills options={TABS} active={tab} onPick={setTab} />
+      </div>
+      <div className="mt-3">
+        {tab === 'dirs' && <Dirs />}
+        {tab === 'api' && <ApiKey />}
+        {tab === 'auth' && <Auth profile={profile} onProfile={onProfile} />}
+        {tab === 'system' && <System />}
+      </div>
+    </div>
+  );
+}
