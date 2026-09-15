@@ -21,6 +21,7 @@ export const MODEL_TYPES = [
 ] as const;
 
 const API_KEY = 'sdcodex.apiKey.v1';
+const API_USER = 'sdcodex.apiUser.v1';
 const DIRS_KEY = 'sdcodex.dirs.v1';
 const CUSTOM_DIRS_KEY = 'sdcodex.customDirs.v1';
 
@@ -51,9 +52,19 @@ export function setApiKey(key: string): void {
 export function clearApiKey(): void {
   try {
     localStorage.removeItem(API_KEY);
+    localStorage.removeItem(API_USER);
   } catch {
     /* ignore */
   }
+}
+
+/** Username confirmed by the last successful key validation. */
+export function getApiUser(): string {
+  return read(API_USER) ?? '';
+}
+
+export function setApiUser(username: string): void {
+  write(API_USER, username);
 }
 
 /** Mirrors OldCode Setting dir_<type> rows. */

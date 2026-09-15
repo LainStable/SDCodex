@@ -101,6 +101,7 @@ export function UserMenu({
   theme,
   setTheme,
   profileLabel,
+  avatarUrl,
   signedIn,
   onSignOut,
 }: {
@@ -109,6 +110,8 @@ export function UserMenu({
   setTheme: (t: Theme) => void;
   /** Avatar initials (or "?" for guests). */
   profileLabel: string;
+  /** Uploaded picture data-URL, if set. */
+  avatarUrl: string;
   signedIn: boolean;
   onSignOut: () => void;
 }) {
@@ -158,8 +161,12 @@ export function UserMenu({
         aria-label="Account menu"
         className={`fan-avatar block h-9 w-9 overflow-hidden rounded-lg bg-gradient-to-br from-primary via-secondary to-tertiary p-[2px] ${open ? 'open ring-2 ring-primary/60' : ''}`}
       >
-        <span className="flex h-full w-full items-center justify-center rounded-md bg-obsidian-low font-display text-xs font-bold text-white">
-          {profileLabel}
+        <span className="flex h-full w-full items-center justify-center overflow-hidden rounded-md bg-obsidian-low font-display text-xs font-bold text-white">
+          {avatarUrl ? (
+            <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
+          ) : (
+            profileLabel
+          )}
         </span>
       </button>
 
@@ -215,6 +222,7 @@ export function Topbar({
   theme,
   setTheme,
   profileLabel,
+  avatarUrl,
   signedIn,
   onSignOut,
 }: {
@@ -223,6 +231,7 @@ export function Topbar({
   theme: Theme;
   setTheme: (t: Theme) => void;
   profileLabel: string;
+  avatarUrl: string;
   signedIn: boolean;
   onSignOut: () => void;
 }) {
@@ -260,6 +269,7 @@ export function Topbar({
         theme={theme}
         setTheme={setTheme}
         profileLabel={profileLabel}
+        avatarUrl={avatarUrl}
         signedIn={signedIn}
         onSignOut={onSignOut}
       />

@@ -5,21 +5,28 @@ import {
   clearApiKey,
   deleteCustomDir,
   getApiKey,
+  getApiUser,
   getCustomDirs,
   getDirectories,
   setApiKey,
+  setApiUser,
   setCustomDir,
   setDirectory,
 } from '../lib/settings';
+import { fetchMe } from '../lib/civitai';
 import {
   blankProvider,
   buildAuthUrl,
   deleteProvider,
   endSession,
+  hashPassword,
+  initials,
   loadProviders,
+  processAvatar,
   saveProfile,
   saveProvider,
   testDiscovery,
+  verifyPassword,
   type OidcProvider,
   type Profile,
 } from '../lib/auth';
@@ -131,17 +138,43 @@ function Dirs() {
 
 function ApiKey() {
   const [key, setKey] = useState(getApiKey);
-  const [saved, setSaved] = useState(false);
+  const [user, setUser] = useState(getApiUser);
+  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const save = () => {
-    setApiKey(key);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
+  // Save validates first (mirrors OldCode save_api_key → get_user): the key is
+  // only stored when Civitai confirms it, and the panel shows who it belongs to.
+  const save = async () => {
+    if (!key.trim()) {
+      setStatus({ ok: false, text: 'Paste a key first.' });
+      return;
+    }
+    setBusy(true);
+    setStatus({ ok: true, text: 'Validating…' });
+    try {
+      const me = await fetchMe(key);
+      const username = me.username ?? '(unknown)';
+      setApiKey(key);
+      setApiUser(username);
+      setUser(username);
+      setStatus({ ok: true, text: `Logged in as @${username}` });
+    } catch (e) {
+      setStatus({ ok: false, text: e instanceof Error ? e.message : 'Validation failed' });
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <div className="glass-l1 rounded-lg p-4">
-      <h2 className="font-display text-base font-semibold">Civitai API key</h2>
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="font-display text-base font-semibold">Civitai API key</h2>
+        {user && (
+          <span className="rounded border border-status-active/40 bg-status-active/10 px-2 py-0.5 font-mono text-[10px] uppercase text-status-active">
+            @{user}
+          </span>
+        )}
+      </div>
       <p className="mt-1 text-xs text-ink-muted">
         Sent as a Bearer token on every Civitai request (same as OldCode headers). Stored only
         in this browser until user accounts land.
@@ -149,23 +182,43 @@ function ApiKey() {
       <div className="mt-3 flex flex-wrap gap-2">
         <input
           value={key}
-          onChange={(e) => setKey(e.target.value)}
+          onChange={(e) => {
+            setKey(e.target.value);
+            setStatus(null);
+          }}
           type="password"
           placeholder="Paste key…"
           className="min-w-[220px] flex-1 rounded border border-white/10 bg-obsidian-lowest px-3 py-2 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary"
         />
-        <PrimaryButton onClick={save}>Save{saved ? 'd ✓' : ''}</PrimaryButton>
+        <PrimaryButton disabled={busy} onClick={() => void save()}>
+          {busy ? 'Checking…' : 'Save'}
+        </PrimaryButton>
         {key && (
           <GhostButton
             onClick={() => {
               clearApiKey();
               setKey('');
+              setUser('');
+              setStatus(null);
             }}
           >
             Clear
           </GhostButton>
         )}
       </div>
+      {status && (
+        <p
+          className={`mt-2 font-mono text-[11px] ${
+            status.ok && !status.text.startsWith('Validating')
+              ? 'text-status-active'
+              : status.ok
+                ? 'text-ink-faint'
+                : 'text-[#f87171]'
+          }`}
+        >
+          {status.text}
+        </p>
+      )}
     </div>
   );
 }
@@ -320,6 +373,15 @@ function Auth({
   onSignOut: () => void;
 }) {
   const [editDisplay, setEditDisplay] = useState(profile?.displayName ?? '');
+  const [editEmail, setEditEmail] = useState(profile?.email ?? '');
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [curPw, setCurPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [newPw2, setNewPw2] = useState('');
+  const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [pwBusy, setPwBusy] = useState(false);
+  const [savedTick, setSavedTick] = useState(false);
 
   if (!profile) {
     return (
@@ -328,6 +390,56 @@ function Auth({
       </div>
     );
   }
+
+  const persist = (next: Profile) => {
+    saveProfile(next);
+    onProfile(next);
+    setSavedTick(true);
+    setTimeout(() => setSavedTick(false), 1500);
+  };
+
+  const onAvatarFile = async (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setAvatarError('That file is not an image.');
+      return;
+    }
+    setAvatarBusy(true);
+    setAvatarError(null);
+    try {
+      persist({ ...profile, avatar: await processAvatar(file) });
+    } catch (e) {
+      setAvatarError(e instanceof Error ? e.message : 'Upload failed');
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
+  const changePassword = async () => {
+    setPwMsg(null);
+    if (!(await verifyPassword(curPw, profile.passwordHash))) {
+      setPwMsg({ ok: false, text: 'Current password is wrong.' });
+      return;
+    }
+    if (newPw.length < 8) {
+      setPwMsg({ ok: false, text: 'New password must be at least 8 characters.' });
+      return;
+    }
+    if (newPw !== newPw2) {
+      setPwMsg({ ok: false, text: 'New passwords do not match.' });
+      return;
+    }
+    setPwBusy(true);
+    try {
+      persist({ ...profile, passwordHash: await hashPassword(newPw) });
+      setCurPw('');
+      setNewPw('');
+      setNewPw2('');
+      setPwMsg({ ok: true, text: 'Password changed.' });
+    } finally {
+      setPwBusy(false);
+    }
+  };
 
   return (
     <div className="glass-l1 rounded-lg p-4">
@@ -339,6 +451,11 @@ function Auth({
           </span>
         )}
         <span className="font-mono text-[11px] text-ink-faint">via {profile.authProvider}</span>
+        {savedTick && (
+          <span className="rounded border border-status-active/40 bg-status-active/10 px-2 py-0.5 font-mono text-[10px] uppercase text-status-active">
+            saved
+          </span>
+        )}
         <GhostButton
           className="ml-auto"
           onClick={() => {
@@ -349,10 +466,52 @@ function Auth({
           Sign out
         </GhostButton>
       </div>
-      <div className="mt-3 flex max-w-md flex-col gap-2">
+
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <span className="block h-16 w-16 overflow-hidden rounded-lg bg-gradient-to-br from-primary via-secondary to-tertiary p-[2px]">
+          {profile.avatar ? (
+            <img src={profile.avatar} alt="" className="h-full w-full rounded-md object-cover" />
+          ) : (
+            <span className="flex h-full w-full items-center justify-center rounded-md bg-obsidian-low font-display text-lg font-bold text-white">
+              {initials(profile)}
+            </span>
+          )}
+        </span>
+        <div className="flex flex-col gap-1.5">
+          <label className="cursor-pointer">
+            <span className="rounded border border-white/15 px-3 py-1.5 text-xs text-ink-muted hover:bg-white/5 hover:text-white">
+              {avatarBusy ? 'Processing…' : profile.avatar ? 'Change picture' : 'Upload picture'}
+            </span>
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              disabled={avatarBusy}
+              onChange={(e) => {
+                void onAvatarFile(e.target.files?.[0]);
+                e.target.value = '';
+              }}
+            />
+          </label>
+          {profile.avatar && (
+            <button
+              type="button"
+              onClick={() => persist({ ...profile, avatar: '' })}
+              className="font-mono text-[10px] text-ink-faint hover:text-white"
+            >
+              Remove
+            </button>
+          )}
+          {avatarError && (
+            <span className="font-mono text-[10px] text-[#f87171]">{avatarError}</span>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 grid max-w-xl grid-cols-1 gap-2 sm:grid-cols-2">
         <label className="block">
           <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
-            Username
+            Username (locked)
           </span>
           <input value={profile.username} disabled className="mt-1 w-full rounded border border-white/[0.06] bg-white/[0.02] px-3 py-2 font-mono text-sm text-ink-faint outline-none" />
         </label>
@@ -368,15 +527,74 @@ function Auth({
             />
             <GhostButton
               onClick={() => {
-                const next = { ...profile, displayName: editDisplay.trim() || profile.username };
-                saveProfile(next);
-                onProfile(next);
+                persist({ ...profile, displayName: editDisplay.trim() || profile.username });
               }}
             >
               Save
             </GhostButton>
           </div>
         </label>
+        <label className="block sm:col-span-2">
+          <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+            Email
+          </span>
+          <div className="mt-1 flex gap-2">
+            <input
+              value={editEmail}
+              onChange={(e) => setEditEmail(e.target.value)}
+              type="email"
+              placeholder="you@example.com"
+              className="min-w-0 flex-1 rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+            />
+            <GhostButton
+              onClick={() => {
+                persist({ ...profile, email: editEmail.trim() });
+              }}
+            >
+              Save
+            </GhostButton>
+          </div>
+        </label>
+      </div>
+
+      <div className="mt-4 border-t border-white/[0.06] pt-3">
+        <h3 className="font-display text-sm font-semibold">Change password</h3>
+        <div className="mt-2 grid max-w-xl grid-cols-1 gap-2 sm:grid-cols-3">
+          <input
+            value={curPw}
+            onChange={(e) => setCurPw(e.target.value)}
+            type="password"
+            autoComplete="current-password"
+            placeholder="Current"
+            className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+          />
+          <input
+            value={newPw}
+            onChange={(e) => setNewPw(e.target.value)}
+            type="password"
+            autoComplete="new-password"
+            placeholder="New (min 8)"
+            className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+          />
+          <input
+            value={newPw2}
+            onChange={(e) => setNewPw2(e.target.value)}
+            type="password"
+            autoComplete="new-password"
+            placeholder="Confirm new"
+            className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+          />
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <GhostButton disabled={pwBusy} onClick={() => void changePassword()}>
+            {pwBusy ? 'Working…' : 'Change password'}
+          </GhostButton>
+          {pwMsg && (
+            <span className={`font-mono text-[11px] ${pwMsg.ok ? 'text-status-active' : 'text-[#f87171]'}`}>
+              {pwMsg.text}
+            </span>
+          )}
+        </div>
       </div>
 
       {profile.isAdmin ? (

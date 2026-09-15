@@ -93,6 +93,7 @@ export default function App() {
             theme={theme}
             setTheme={setTheme}
             profileLabel={initials(profile)}
+            avatarUrl={profile?.avatar ?? ''}
             signedIn={authed}
             onSignOut={() => {
               endSession();

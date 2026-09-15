@@ -67,7 +67,11 @@ export interface ExplorerQuery {
   nsfw: boolean;
 }
 
-const API = 'https://civitai.com/api/v1/models';
+/** In dev, calls go through the Vite proxy (see vite.config.ts) because the
+    Civitai preflight rejects browser Authorization headers. Prod builds will
+    use the backend proxy at /api — same path shape. */
+const API = import.meta.env.DEV ? '/civitai/api/v1/models' : 'https://civitai.com/api/v1/models';
+const API_ROOT = import.meta.env.DEV ? '/civitai/api/v1' : 'https://civitai.com/api/v1';
 
 /** Mirrors OldCode api._get_headers: bearer token when the user saved one. */
 function authHeaders(signal?: AbortSignal): { headers: Record<string, string>; signal?: AbortSignal } {
@@ -107,6 +111,24 @@ export async function fetchModels(query: ExplorerQuery, signal?: AbortSignal): P
   };
 }
 
+/** Validate an API key — mirrors OldCode api.get_user. GET /me returns the
+    account (401 anonymous, 403 bad key). */
+export interface CivitaiMe {
+  username?: string;
+  id?: number;
+}
+
+export async function fetchMe(apiKey: string, signal?: AbortSignal): Promise<CivitaiMe> {
+  const res = await fetch(`${API_ROOT}/me`, {
+    headers: { Authorization: `Bearer ${apiKey.trim()}` },
+    signal,
+  });
+  if (res.status === 401 || res.status === 403) {
+    throw new Error('Key rejected (unauthorized)');
+  }
+  if (!res.ok) throw new Error(`Civitai API ${res.status}`);
+  return res.json();
+}
 /** Single model detail — mirrors OldCode api.get_model(model_id). */
 export async function fetchModel(modelId: number, signal?: AbortSignal): Promise<CivitaiModel> {
   const res = await fetch(`${API}/${modelId}`, authHeaders(signal));

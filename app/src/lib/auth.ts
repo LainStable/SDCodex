@@ -10,6 +10,8 @@ export interface Profile {
   authProvider: string; // 'local' or 'oidc:<name>'
   /** PBKDF2-SHA256 hash: `pbkdf2$<iter>$<salt-b64>$<hash-b64>`. Empty for OIDC-only rows. */
   passwordHash: string;
+  /** Avatar data-URL (128px JPEG). Mirrors OldCode User.avatar. */
+  avatar: string;
   createdAt: number;
 }
 
@@ -45,10 +47,55 @@ function read(key: string): string | null {
 export function loadProfile(): Profile | null {
   try {
     const raw = read(PROFILE_KEY);
-    return raw ? (JSON.parse(raw) as Profile) : null;
+    if (!raw) return null;
+    const p = JSON.parse(raw) as Profile;
+    // Migrate older rows.
+    if (typeof p.avatar !== 'string') p.avatar = '';
+    if (typeof p.email !== 'string') p.email = '';
+    return p;
   } catch {
     return null;
   }
+}
+
+/** Downscale an uploaded image to a 128px JPEG data-URL (keeps localStorage small). */
+export function processAvatar(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const size = 128;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Canvas unavailable');
+        const side = Math.min(img.width, img.height);
+        ctx.drawImage(
+          img,
+          (img.width - side) / 2,
+          (img.height - side) / 2,
+          side,
+          side,
+          0,
+          0,
+          size,
+          size,
+        );
+        URL.revokeObjectURL(url);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      } catch (e) {
+        URL.revokeObjectURL(url);
+        reject(e);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Could not read that image'));
+    };
+    img.src = url;
+  });
 }
 
 export function saveProfile(p: Profile): void {
@@ -87,6 +134,7 @@ export async function bootstrapUser(
     isAdmin: first,
     authProvider: 'local',
     passwordHash: await hashPassword(password),
+    avatar: '',
     createdAt: Date.now(),
   };
   saveProfile(p);
