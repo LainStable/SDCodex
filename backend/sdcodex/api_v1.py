@@ -20,6 +20,12 @@ def _user_json(u: User) -> dict:
     }
 
 
+def _profile_json(u: User) -> dict:
+    out = _user_json(u)
+    out["avatarData"] = u.avatar or ""
+    return out
+
+
 def _require_user():
     user = auth.current_user()
     if user is None:
@@ -97,6 +103,33 @@ def auth_logout():
     resp = make_response(jsonify({"ok": True}))
     auth.clear_session_cookie(resp)
     return resp
+
+
+@api_v1.get("/profile")
+def get_profile():
+    user, err = _require_user()
+    if err:
+        return err
+    return jsonify(_profile_json(user))
+
+
+@api_v1.put("/profile")
+def put_profile():
+    user, err = _require_user()
+    if err:
+        return err
+    data = request.get_json(force=True, silent=True) or {}
+    if "displayName" in data:
+        user.display_name = (data.get("displayName") or "").strip() or user.username
+    if "email" in data:
+        user.email = (data.get("email") or "").strip()
+    if "avatar" in data:
+        avatar = data.get("avatar") or ""
+        if len(avatar) > 300_000:
+            return jsonify({"error": "avatar too large"}), 400
+        user.avatar = avatar
+    db.session.commit()
+    return jsonify({"ok": True, "user": _profile_json(user)})
 
 
 # ------------------------------------------------------------- settings ---

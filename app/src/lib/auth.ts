@@ -217,28 +217,69 @@ export async function fetchServerAuth(): Promise<ServerAuthState | null> {
   }
 }
 
-/** Adopt a backend user row as the local profile (no password hash — the
-    backend verifies; local login defers to it). */
+/** Adopt a backend user row as the local profile. Never clobbers local-only
+    state (password hash, avatar) or filled-in fields with server empties. */
 export function adoptServerUser(u: ServerAuthState['user']): Profile | null {
   if (!u) return null;
+  const existing = loadProfile();
+  const sameUser = existing && existing.username === u.username;
   const p: Profile = {
     username: u.username,
-    displayName: u.displayName || u.username,
-    email: u.email || '',
+    displayName: u.displayName || existing?.displayName || u.username,
+    email: u.email || (sameUser ? (existing?.email ?? '') : ''),
     isAdmin: u.isAdmin,
     authProvider: u.authProvider || 'local',
-    passwordHash: '',
-    avatar: '',
-    createdAt: Date.now(),
+    passwordHash: sameUser ? (existing?.passwordHash ?? '') : '',
+    avatar: sameUser ? (existing?.avatar ?? '') : '',
+    createdAt: existing?.createdAt ?? Date.now(),
   };
-  const existing = loadProfile();
-  // Never clobber a local password hash with an empty one.
-  if (existing && existing.username === p.username && existing.passwordHash) {
-    p.passwordHash = existing.passwordHash;
-    p.avatar = existing.avatar;
-  }
   saveProfile(p);
   return p;
+}
+
+export interface ServerProfile extends NonNullable<ServerAuthState['user']> {
+  avatarData?: string;
+}
+
+/** Pull the full server profile (incl. avatar data) and merge over local. */
+export async function pullServerProfile(): Promise<Profile | null> {
+  try {
+    const { apiGet, backendAvailable } = await import('./backend');
+    if (!(await backendAvailable())) return null;
+    const u = await apiGet<ServerProfile>('/profile');
+    const existing = loadProfile();
+    const sameUser = existing && existing.username === u.username;
+    const p: Profile = {
+      username: u.username,
+      displayName: u.displayName || existing?.displayName || u.username,
+      email: u.email || '',
+      isAdmin: u.isAdmin,
+      authProvider: u.authProvider || 'local',
+      passwordHash: sameUser ? (existing?.passwordHash ?? '') : '',
+      // Server avatar wins when set (edits push there); else keep local.
+      avatar: u.avatarData || (sameUser ? (existing?.avatar ?? '') : ''),
+      createdAt: existing?.createdAt ?? Date.now(),
+    };
+    saveProfile(p);
+    return p;
+  } catch {
+    return null;
+  }
+}
+
+/** Push local profile edits to the server (best-effort). */
+export async function pushProfile(p: Profile): Promise<void> {
+  try {
+    const { apiPost, backendAvailable } = await import('./backend');
+    if (!(await backendAvailable())) return;
+    await apiPost('/profile', {
+      displayName: p.displayName,
+      email: p.email,
+      avatar: p.avatar,
+    });
+  } catch {
+    /* standalone — local stands */
+  }
 }
 
 export function startSession(): void {

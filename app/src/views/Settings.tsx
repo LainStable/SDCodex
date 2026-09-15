@@ -30,6 +30,7 @@ import {
   initials,
   loadProviders,
   processAvatar,
+  pushProfile,
   saveProfile,
   saveProvider,
   serverLoginUrl,
@@ -613,6 +614,7 @@ function Auth({
     onProfile(next);
     setSavedTick(true);
     setTimeout(() => setSavedTick(false), 1500);
+    void pushProfile(next);
   };
 
   const onAvatarFile = async (file: File | undefined) => {

@@ -11,7 +11,7 @@ import {
   clearQueue,
   loadQueue,
 } from './lib/queue';
-import { adoptServerUser, completeOidcCallback, endSession, fetchServerAuth, hasSession, initials, loadProfile, type Profile, type ServerAuthState } from './lib/auth';
+import { adoptServerUser, completeOidcCallback, endSession, fetchServerAuth, hasSession, initials, loadProfile, pullServerProfile, type Profile, type ServerAuthState } from './lib/auth';
 import { deleteScanned } from './lib/library';
 import { apiPost, backendLogout, backendAvailable } from './lib/backend';
 import { pullSettings } from './lib/settings';
@@ -82,8 +82,15 @@ export default function App() {
         if (s.user) {
           const adopted = adoptServerUser(s.user);
           if (adopted) setProfile(adopted);
-          if (s.authed) setAuthed(true);
-          else setAuthed(hasSession() && loadProfile() !== null);
+          if (s.authed) {
+            setAuthed(true);
+            // Full profile (avatar/email) lives behind /profile — pull it so a
+            // refresh never shows stale local rows.
+            const full = await pullServerProfile();
+            if (full) setProfile(full);
+          } else {
+            setAuthed(hasSession() && loadProfile() !== null);
+          }
         } else {
           setAuthed(false);
         }
