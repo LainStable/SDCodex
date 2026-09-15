@@ -13,7 +13,6 @@ import {
 } from '../lib/settings';
 import {
   blankProvider,
-  bootstrapUser,
   buildAuthUrl,
   clearProfile,
   deleteProvider,
@@ -24,6 +23,7 @@ import {
   type OidcProvider,
   type Profile,
 } from '../lib/auth';
+import { BootstrapCard } from './Core';
 
 type Tab = 'dirs' | 'api' | 'auth' | 'system';
 
@@ -311,39 +311,12 @@ function OidcManager() {
 }
 
 function Auth({ profile, onProfile }: { profile: Profile | null; onProfile: (p: Profile | null) => void }) {
-  const [username, setUsername] = useState('');
-  const [display, setDisplay] = useState('');
   const [editDisplay, setEditDisplay] = useState(profile?.displayName ?? '');
 
   if (!profile) {
     return (
       <div className="glass-l1 rounded-lg p-4">
-        <h2 className="font-display text-base font-semibold">Create first user</h2>
-        <p className="mt-1 text-xs text-ink-muted">
-          Bootstrap mode: no users exist yet, so this account becomes administrator (mirrors
-          OldCode). No password is stored here — local accounts get a real scrypt hash once
-          the backend lands.
-        </p>
-        <div className="mt-3 flex max-w-md flex-col gap-2">
-          <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Username"
-            className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
-          />
-          <input
-            value={display}
-            onChange={(e) => setDisplay(e.target.value)}
-            placeholder="Display name (optional)"
-            className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
-          />
-          <PrimaryButton
-            disabled={!username.trim()}
-            onClick={() => onProfile(bootstrapUser(username, display))}
-          >
-            Create administrator
-          </PrimaryButton>
-        </div>
+        <BootstrapCard onDone={onProfile} />
       </div>
     );
   }

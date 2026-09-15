@@ -9,6 +9,7 @@ import {
   Stat,
 } from '../components/chrome';
 import { isPaused, setPaused, type QueueItem } from '../lib/queue';
+import { bootstrapUser, type Profile } from '../lib/auth';
 
 const PLUGINS = [
   {
@@ -37,8 +38,45 @@ const PLUGINS = [
   },
 ];
 
-export function Home({ go }: { go: (v: 'models' | 'library' | 'queue' | 'plugins') => void }) {
-  const cards = [
+/** First-run admin creation (mirrors OldCode bootstrap mode). Shared by the
+    first-launch gate and the Settings guest state. */
+export function BootstrapCard({ onDone }: { onDone: (p: Profile) => void }) {
+  const [username, setUsername] = useState('');
+  const [display, setDisplay] = useState('');
+  return (
+    <div>
+      <h2 className="font-display text-base font-semibold">Create primary account</h2>
+      <p className="mt-1 text-xs text-ink-muted">
+        No users exist yet — this account becomes administrator. No password is stored
+        here; local accounts get a real hash once the backend lands.
+      </p>
+      <div className="mt-3 flex flex-col gap-2">
+        <input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="Username"
+          autoComplete="username"
+          className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+        />
+        <input
+          value={display}
+          onChange={(e) => setDisplay(e.target.value)}
+          placeholder="Display name (optional)"
+          autoComplete="nickname"
+          className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+        />
+        <PrimaryButton
+          disabled={!username.trim()}
+          onClick={() => onDone(bootstrapUser(username, display))}
+        >
+          Create administrator
+        </PrimaryButton>
+      </div>
+    </div>
+  );
+}
+
+export function Home({ go }: { go: (v: 'models' | 'library' | 'queue' | 'plugins') => void }) {  const cards = [
     { id: 'models' as const, title: 'Model Explorer', desc: 'Browse Civitai by type, base model, and tags.' },
     { id: 'library' as const, title: 'Local Library', desc: 'Downloaded weights with metadata and socket state.' },
     { id: 'queue' as const, title: 'Download Queue', desc: 'Background downloads staged from Models.' },
