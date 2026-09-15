@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import Detail from './views/Detail';
 import Explorer from './views/Explorer';
 import Library from './views/Library';
 import Settings from './views/Settings';
+import ModelModal, { type ModalTarget } from './components/ModelModal';
 import { Home, Plugins, Queue, BootstrapCard } from './views/Core';
 import { MobileNav, Sidebar, Topbar, type Theme, type ViewId } from './components/chrome';
 import {
@@ -12,6 +12,7 @@ import {
   loadQueue,
 } from './lib/queue';
 import { endSession, hasSession, initials, loadProfile, type Profile } from './lib/auth';
+import { deleteScanned } from './lib/library';
 
 export default function App() {
   const [view, setView] = useState<ViewId>('models');
@@ -19,7 +20,8 @@ export default function App() {
   const [profile, setProfile] = useState<Profile | null>(loadProfile);
   // Blocking auth gate (mirrors OldCode: no session → no app).
   const [authed, setAuthed] = useState(hasSession() && loadProfile() !== null);
-  const [detailId, setDetailId] = useState<number | null>(null);
+  const [modal, setModal] = useState<ModalTarget | null>(null);
+  const [libKey, setLibKey] = useState(0);
   const [creatorSearch, setCreatorSearch] = useState<{ token: number; text: string }>({
     token: 0,
     text: '',
@@ -59,7 +61,7 @@ export default function App() {
   }, []);
 
   const go = (v: ViewId) => {
-    setDetailId(null);
+    setModal(null);
     setView(v);
   };
 
@@ -101,39 +103,25 @@ export default function App() {
             }}
           />
 
-          {detailId !== null ? (
-            <Detail
-              modelId={detailId}
-              onBack={() => setDetailId(null)}
-              onSearchCreator={(username) => {
-                setDetailId(null);
-                setView('models');
-                setCreatorSearch((s) => ({ token: s.token + 1, text: username }));
-              }}
+          {view === 'home' && <Home go={go} />}
+          {view === 'models' && (
+            <Explorer
               queuedIds={queuedIds}
               onQueue={(item) => setQueue(addToQueue(item))}
+              onOpen={(id) => setModal({ kind: 'civitai', modelId: id })}
+              searchToken={creatorSearch.token}
+              searchText={creatorSearch.text}
             />
-          ) : (
-            <>
-              {view === 'home' && <Home go={go} />}
-              {view === 'models' && (
-                <Explorer
-                  queuedIds={queuedIds}
-                  onQueue={(item) => setQueue(addToQueue(item))}
-                  onOpen={setDetailId}
-                  searchToken={creatorSearch.token}
-                  searchText={creatorSearch.text}
-                />
-              )}
-              {view === 'library' && <Library />}
-              {view === 'queue' && (
-                <Queue
-                  items={queue}
-                  onClearCompleted={() => setQueue(clearCompleted())}
-                  onClearAll={() => setQueue(clearQueue())}
-                />
-              )}
-              {view === 'plugins' && <Plugins />}
+          )}
+          {view === 'library' && <Library key={libKey} onOpen={(t) => setModal(t)} />}
+          {view === 'queue' && (
+            <Queue
+              items={queue}
+              onClearCompleted={() => setQueue(clearCompleted())}
+              onClearAll={() => setQueue(clearQueue())}
+            />
+          )}
+          {view === 'plugins' && <Plugins />}
           {view === 'settings' && (
             <Settings
               profile={profile}
@@ -141,10 +129,26 @@ export default function App() {
               onSignOut={() => setAuthed(false)}
             />
           )}
-            </>
-          )}
         </main>
       </div>
+
+      {modal && (
+        <ModelModal
+          target={modal}
+          onClose={() => setModal(null)}
+          queuedIds={queuedIds}
+          onQueue={(item) => setQueue(addToQueue(item))}
+          onSearchCreator={(username) => {
+            setModal(null);
+            setView('models');
+            setCreatorSearch((s) => ({ token: s.token + 1, text: username }));
+          }}
+          onForgetLocal={(modelId, versionId) => {
+            deleteScanned(modelId, versionId);
+            setLibKey((k) => k + 1);
+          }}
+        />
+      )}
     </div>
   );
 }

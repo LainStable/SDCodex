@@ -1,8 +1,24 @@
+export interface CivitaiImageMeta {
+  prompt?: string;
+  negativePrompt?: string;
+  [key: string]: unknown;
+}
+
 export interface CivitaiImage {
   url: string;
   nsfw: boolean | string;
   width: number | null;
   height: number | null;
+  meta?: CivitaiImageMeta | null;
+}
+
+export interface CivitaiFile {
+  name: string;
+  sizeKB: number | null;
+  type: string;
+  primary: boolean;
+  downloadUrl: string;
+  hashes: { SHA256?: string; BLAKE3?: string; [k: string]: string | undefined };
 }
 
 export interface CivitaiVersion {
@@ -11,8 +27,10 @@ export interface CivitaiVersion {
   modelId?: number;
   name: string;
   baseModel: string;
+  publishedAt?: string;
   downloadUrl: string;
   filesizeKB: number | null;
+  files?: CivitaiFile[];
   images: CivitaiImage[];
   /** Present on by-hash lookups. */
   model?: { name: string; type: string };
@@ -23,6 +41,8 @@ export interface CivitaiModel {
   name: string;
   type: string;
   nsfw: boolean;
+  tags?: string[];
+  description?: string | null;
   creator: { username: string | null } | null;
   stats: {
     downloadCount: number;

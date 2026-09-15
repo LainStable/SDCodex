@@ -56,3 +56,10 @@ export function pruneScanned(keep: Set<string>): { list: ScannedModel[]; removed
   persist(next);
   return { list: next, removed: list.length - next.length };
 }
+
+/** Forget one record (modal Delete for local entries). */
+export function deleteScanned(modelId: number, versionId: number): ScannedModel[] {
+  const next = loadScanned().filter((e) => !(e.modelId === modelId && e.versionId === versionId));
+  persist(next);
+  return next;
+}

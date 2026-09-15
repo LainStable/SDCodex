@@ -1,5 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FilterPills, GhostButton, PageHeader, PrimaryButton } from '../components/chrome';
+import { TypeBadge } from '../components/ui';
+import { bindDirectory, scanDir } from '../lib/scan';
+import { forgetHandle, getHandle } from '../lib/idb';
+import { loadScanned, pruneScanned } from '../lib/library';
 import {
   MODEL_TYPES,
   clearApiKey,
@@ -35,7 +39,7 @@ import { BootstrapCard } from './Core';
 type Tab = 'dirs' | 'api' | 'auth' | 'system';
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'dirs', label: 'Download dirs' },
+  { id: 'dirs', label: 'Model dirs' },
   { id: 'api', label: 'API key' },
   { id: 'auth', label: 'Users & SSO' },
   { id: 'system', label: 'System' },
@@ -51,12 +55,31 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 function Dirs() {
+  const supported =
+    typeof (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker === 'function';
   const [dirs, setDirs] = useState(getDirectories);
   const [drafts, setDrafts] = useState<Record<string, string>>(getDirectories);
   const [custom, setCustom] = useState(getCustomDirs);
   const [label, setLabel] = useState('');
   const [path, setPath] = useState('');
   const [savedKey, setSavedKey] = useState<string | null>(null);
+  const [bound, setBound] = useState<Record<string, boolean>>({});
+  const [msgs, setMsgs] = useState<Record<string, string>>({});
+  const [scanning, setScanning] = useState(false);
+  const [log, setLog] = useState<string[]>([]);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const entries = await Promise.all(
+        MODEL_TYPES.map(async (t) => [t, (await getHandle(`dir_${t}`)) !== null] as const),
+      );
+      if (live) setBound(Object.fromEntries(entries));
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const save = (type: string) => {
     const key = `dir_${type}`;
@@ -64,6 +87,67 @@ function Dirs() {
     setDirs(getDirectories());
     setSavedKey(key);
     setTimeout(() => setSavedKey((k) => (k === key ? null : k)), 1500);
+  };
+
+  const say = (line: string) => setLog((l) => [...l.slice(-8), line]);
+
+  const resolve = async (type: string): Promise<FileSystemDirectoryHandle | null> => {
+    const existing = await getHandle(`dir_${type}`);
+    if (existing) return existing;
+    say(`${type}: pick the folder for this path`);
+    try {
+      const dir = await bindDirectory(type);
+      if (dir) setBound((b) => ({ ...b, [type]: true }));
+      return dir;
+    } catch {
+      setMsgs((m) => ({ ...m, [type]: 'pick failed' }));
+      return null;
+    }
+  };
+
+  const link = async (type: string) => {
+    try {
+      const dir = await bindDirectory(type);
+      if (dir) {
+        setBound((b) => ({ ...b, [type]: true }));
+        setMsgs((m) => ({ ...m, [type]: 'linked' }));
+      } else {
+        setMsgs((m) => ({ ...m, [type]: 'permission denied' }));
+      }
+    } catch {
+      setMsgs((m) => ({ ...m, [type]: 'pick failed' }));
+    }
+  };
+
+  const forget = async (type: string) => {
+    await forgetHandle(`dir_${type}`);
+    setBound((b) => ({ ...b, [type]: false }));
+    setMsgs((m) => ({ ...m, [type]: 'unlinked' }));
+  };
+
+  const scanOne = async (type: string) => {
+    setScanning(true);
+    const seen = new Set(loadScanned().map((e) => `${e.dirKey}/${e.filename}`));
+    await scanDir(type, resolve, seen, (msg) =>
+      setMsgs((m) => ({ ...m, [type]: msg })),
+    );
+    setScanning(false);
+  };
+
+  const scanAll = async () => {
+    setScanning(true);
+    setLog([]);
+    const seen = new Set<string>();
+    for (const t of MODEL_TYPES) {
+      if (!(dirs[`dir_${t}`] ?? '').trim()) continue;
+      await scanDir(t, resolve, seen, (msg) => {
+        say(msg);
+        setMsgs((m) => ({ ...m, [t]: msg }));
+      });
+    }
+    const { removed } = pruneScanned(seen);
+    say(removed > 0 ? `Removed ${removed} missing models.` : 'Scan complete.');
+    setScanning(false);
   };
 
   const addCustom = () => {
@@ -80,33 +164,76 @@ function Dirs() {
         <h2 className="font-display text-base font-semibold">Model directories</h2>
       </div>
       <p className="mt-1 font-mono text-[11px] text-ink-faint">
-        Keys mirror the backend Setting table (dir_&lt;type&gt;). In Docker these are
-        container-internal paths served by the volumes you define.
+        Keys mirror the backend Setting table. In Docker these are container-internal
+        paths served by the volumes you define. Link a real folder once per type, then
+        scan here or per row.
       </p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <PrimaryButton disabled={scanning || !supported} onClick={() => void scanAll()}>
+          {scanning ? 'Scanning…' : 'Scan all folders'}
+        </PrimaryButton>
+        {!supported && (
+          <span className="font-mono text-[11px] text-status-warning">
+            Folder linking needs Chromium
+          </span>
+        )}
+      </div>
       <div className="mt-2 divide-y divide-white/[0.06]">
         {MODEL_TYPES.map((t) => {
           const key = `dir_${t}`;
           const dirty = (drafts[key] ?? '') !== (dirs[key] ?? '');
+          const isBound = bound[t] ?? false;
           return (
-            <Row key={t} label={key}>
+            <div key={t} className="flex flex-wrap items-center gap-2 py-1.5">
+              <span className="w-28 shrink-0">
+                <TypeBadge type={t} />
+              </span>
               <input
                 value={drafts[key] ?? ''}
                 onChange={(e) => setDrafts((d) => ({ ...d, [key]: e.target.value }))}
                 placeholder={`/models/${t.toLowerCase()}/`}
-                className="min-w-[220px] flex-1 rounded border border-white/10 bg-obsidian-lowest px-2 py-1 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary"
+                className="min-w-[200px] flex-1 rounded border border-white/10 bg-obsidian-lowest px-2 py-1 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary"
               />
               <GhostButton disabled={!dirty} onClick={() => save(t)}>
                 Save
               </GhostButton>
+              {supported && (
+                <>
+                  <GhostButton
+                    disabled={scanning || !(dirs[key] ?? '').trim()}
+                    onClick={() => void (isBound ? scanOne(t) : link(t).then(() => scanOne(t)))}
+                    title={isBound ? 'Scan this folder' : 'Link folder, then scan'}
+                  >
+                    {isBound ? 'Scan' : 'Link + scan'}
+                  </GhostButton>
+                  {isBound && (
+                    <GhostButton disabled={scanning} onClick={() => void forget(t)}>
+                      Unlink
+                    </GhostButton>
+                  )}
+                </>
+              )}
               {savedKey === key && (
                 <span className="rounded border border-status-active/40 bg-status-active/10 px-2 py-0.5 font-mono text-[10px] uppercase text-status-active">
                   saved
                 </span>
               )}
-            </Row>
+              {(msgs[t] || (isBound ? 'linked' : '')) && (
+                <span className="w-full truncate font-mono text-[10px] text-ink-faint">
+                  {msgs[t] || 'linked'}
+                </span>
+              )}
+            </div>
           );
         })}
       </div>
+      {log.length > 0 && (
+        <div className="mt-2 rounded border border-white/[0.06] bg-black/30 p-2 font-mono text-[10px] leading-relaxed text-ink-muted">
+          {log.map((l, i) => (
+            <div key={i}>{l}</div>
+          ))}
+        </div>
+      )}
 
       <h2 className="mt-4 font-display text-base font-semibold">Custom directories</h2>
       {Object.entries(custom).map(([k, v]) => (
