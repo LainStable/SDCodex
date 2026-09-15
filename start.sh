@@ -47,7 +47,8 @@ if [ "$ONLY" != "frontend" ]; then
     "$VENV/bin/pip" install -q -r "$BACKEND/requirements.txt"
   fi
   echo "Starting backend on :5000..."
-  (cd "$BACKEND" && PORT=5000 "$VENV/bin/python" run.py >"$BACKEND/backend.log" 2>&1 &
+  # Dedicated var (not $HOST — shells often pre-set that to something else).
+  (cd "$BACKEND" && HOST="${SDCODEX_HOST:-0.0.0.0}" PORT=5000 "$VENV/bin/python" run.py >"$BACKEND/backend.log" 2>&1 &
    echo $! >"$BACKEND/backend.pid")
   BACKEND_PID="$(cat "$BACKEND/backend.pid")"
   for _ in $(seq 1 30); do
@@ -70,7 +71,7 @@ if [ "$ONLY" != "backend" ]; then
   echo "  UI:      http://127.0.0.1:5173"
   echo "  Backend: http://127.0.0.1:5000/api/health"
   echo "Press Ctrl+C to stop both."
-  (cd "$APP" && exec npm run dev -- --host 127.0.0.1 --port 5173)
+  (cd "$APP" && exec npm run dev -- --host 0.0.0.0 --port 5173)
 fi
 
 wait "$BACKEND_PID" 2>/dev/null || true
