@@ -27,6 +27,19 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [modal, setModal] = useState<ModalTarget | null>(null);
   const [libKey, setLibKey] = useState(0);
+
+  // Central post-auth handler: profile state, session flag, then the full
+  // server row (avatar/email) so login restores everything refresh would.
+  const handleAuthed = async (p: Profile) => {
+    setProfile(p);
+    setAuthed(true);
+    try {
+      const full = await pullServerProfile();
+      if (full) setProfile(full);
+    } catch {
+      /* standalone — local stands */
+    }
+  };
   const [creatorSearch, setCreatorSearch] = useState<{ token: number; text: string }>({
     token: 0,
     text: '',
@@ -73,13 +86,12 @@ export default function App() {
         const code = params.get('code');
         const state = params.get('state');
         window.history.replaceState(null, '', '/');
-        if (code && state) {
-          try {
-            const adopted = await completeOidcCallback(code, state);
-            setProfile(adopted);
-            setAuthed(true);
-            setServerAuth({ authed: true, bootstrap: false, user: null });
-          } catch (e) {
+          if (code && state) {
+            try {
+              const adopted = await completeOidcCallback(code, state);
+              await handleAuthed(adopted);
+              setServerAuth({ authed: true, bootstrap: false, user: null });
+            } catch (e) {
             setCallbackMsg(e instanceof Error ? e.message : 'SSO sign-in failed');
           }
         } else if (params.get('error')) {
@@ -158,9 +170,6 @@ export default function App() {
       {authReady && !authed && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div className="glass-l2 edge-shimmer w-full max-w-md rounded-lg p-5">
-            <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-secondary">
-              SDCodex locked
-            </div>
             <div className="mt-2">
               <BootstrapCard
                 existing={serverAuth && !serverAuth.bootstrap ? profile : serverAuth ? null : profile}
@@ -174,8 +183,7 @@ export default function App() {
                   setProfile(null);
                 }}
                 onDone={(p) => {
-                  setProfile(p);
-                  setAuthed(true);
+                  void handleAuthed(p);
                 }}
               />
             </div>

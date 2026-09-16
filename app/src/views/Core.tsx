@@ -84,17 +84,38 @@ export function BootstrapCard({
 
   const submit = async () => {
     setError(null);
-    if (existing) {
-      if (!password) {
-        setError('Enter your password.');
+    // The gate always shows the full form: username is entered explicitly
+    // every time (a saved profile only pre-fills it). Verification below is
+    // unchanged — local hash when it matches, backend otherwise.
+    const loginName = (existing ? existing.username : username).trim();
+    if (isCreate) {
+      if (!loginName) {
+        setError('Choose a username.');
         return;
       }
-      setBusy(true);
-      try {
-        if (serverMode && !existing.passwordHash) {
-          // Fresh origin: no local hash — verify against the backend directly.
+      if (password.length < 8) {
+        setError('Password must be at least 8 characters.');
+        return;
+      }
+      if (password !== confirm) {
+        setError('Passwords do not match.');
+        return;
+      }
+    } else if (!loginName) {
+      setError('Enter your username.');
+      return;
+    } else if (!password) {
+      setError('Enter your password.');
+      return;
+    }
+    setBusy(true);
+    try {
+      if (!isCreate) {
+        const saved = existing && existing.username === loginName ? existing : null;
+        if (serverMode && !saved?.passwordHash) {
+          // No usable local hash — verify against the backend directly.
           const r = await apiPost<{ ok: boolean; user: ServerAuthState['user'] }>('/auth/login', {
-            username: existing.username,
+            username: loginName,
             password,
           });
           const adopted = adoptServerUser(r.user);
@@ -103,7 +124,11 @@ export function BootstrapCard({
           onDone(adopted);
           return;
         }
-        const ok = await verifyPassword(password, existing.passwordHash);
+        if (!saved) {
+          setError('Unknown user on this device — check the name or create it first.');
+          return;
+        }
+        const ok = await verifyPassword(password, saved.passwordHash);
         if (!ok) {
           setError('Wrong password.');
           return;
@@ -111,35 +136,17 @@ export function BootstrapCard({
         startSession();
         // Mirror into the backend when reachable (same User row + cookie).
         try {
-          await mirrorAuth('login', { username: existing.username, password });
+          await mirrorAuth('login', { username: saved.username, password });
         } catch {
           /* standalone — local session stands */
         }
-        onDone(existing);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Sign-in failed.');
-      } finally {
-        setBusy(false);
+        onDone(saved);
+        return;
       }
-      return;
-    }
-    if (!username.trim()) {
-      setError('Choose a username.');
-      return;
-    }
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.');
-      return;
-    }
-    if (password !== confirm) {
-      setError('Passwords do not match.');
-      return;
-    }
-    setBusy(true);
-    try {
-      if (serverMode && !serverBootstrap) {        // Backend owns accounts and this origin has no profile — plain login.
+      if (serverMode && !serverBootstrap) {
+        // Backend owns accounts and this origin has no profile — plain login.
         const r = await apiPost<{ ok: boolean; user: ServerAuthState['user'] }>('/auth/login', {
-          username,
+          username: loginName,
           password,
         });
         const adopted = adoptServerUser(r.user);
@@ -151,7 +158,7 @@ export function BootstrapCard({
       if (serverMode) {
         try {
           const r = await apiPost<{ ok: boolean; user: ServerAuthState['user'] }>('/auth/bootstrap', {
-            username,
+            username: loginName,
             displayName: display,
             password,
           });
@@ -174,9 +181,9 @@ export function BootstrapCard({
         }
         return;
       }
-      const created = await bootstrapUser(username, display, password);
+      const created = await bootstrapUser(loginName, display, password);
       try {
-        await mirrorAuth('bootstrap', { username, displayName: display, password });
+        await mirrorAuth('bootstrap', { username: loginName, displayName: display, password });
       } catch {
         /* standalone — local account stands */
       }
@@ -194,34 +201,33 @@ export function BootstrapCard({
 
   const isCreate = !existing && (!serverMode || serverBootstrap);
 
+  // Pre-fill the username from a saved profile; it stays editable so a
+  // different user can always sign in.
+  useEffect(() => {
+    if (existing) setUsername((u) => u || existing.username);
+  }, [existing]);
+
   return (
     <div onKeyDown={onKey}>
       <div className="flex flex-col items-center">
         <img src="/sdcodex.svg" alt="SDCodex" className="h-14 w-14" />
-        {existing && (
-          <div className="mt-2 font-display text-base font-semibold">{existing.displayName}</div>
-        )}
       </div>
       <div className="mt-3 flex flex-col gap-2">
-        {!existing && (
-          <>
-            <input
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Username"
-              autoComplete="username"
-              className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
-            />
-            {isCreate && (
-              <input
-                value={display}
-                onChange={(e) => setDisplay(e.target.value)}
-                placeholder="Display name (optional)"
-                autoComplete="nickname"
-                className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
-              />
-            )}
-          </>
+        <input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="Username"
+          autoComplete="username"
+          className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+        />
+        {isCreate && (
+          <input
+            value={display}
+            onChange={(e) => setDisplay(e.target.value)}
+            placeholder="Display name (optional)"
+            autoComplete="nickname"
+            className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+          />
         )}
         <input
           value={password}
@@ -243,10 +249,10 @@ export function BootstrapCard({
         )}
         {error && <p className="font-mono text-[11px] text-status-alert">{error}</p>}
         <PrimaryButton
-          disabled={busy || (!existing && !username.trim())}
+          disabled={busy || !username.trim()}
           onClick={() => void submit()}
         >
-          {busy ? 'Working…' : existing || !isCreate ? 'Sign in' : 'Create administrator'}
+          {busy ? 'Working…' : !isCreate ? 'Sign in' : 'Create administrator'}
         </PrimaryButton>
         {existing && onSwitchUser && (
           <button
