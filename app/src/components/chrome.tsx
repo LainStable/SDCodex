@@ -404,3 +404,54 @@ export function FilterPills<T extends string>({
     </div>
   );
 }
+
+/** Multi-toggle base-model cloud (matches the reference filter cloud). */
+export function BaseCloud({
+  options,
+  active,
+  onToggle,
+  onClear,
+}: {
+  options: readonly string[];
+  active: string[];
+  onToggle: (b: string) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center gap-2">
+        <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+          Base{active.length > 0 ? ` (${active.length})` : ''}:
+        </span>
+        {active.length > 0 && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="font-mono text-[10px] text-secondary hover:underline"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      <div className="noscroll flex max-h-32 flex-wrap gap-1.5 overflow-y-auto">
+        {options.map((b) => {
+          const on = active.includes(b);
+          return (
+            <button
+              key={b}
+              type="button"
+              onClick={() => onToggle(b)}
+              className={`rounded border px-2 py-0.5 font-mono text-[10px] ${
+                on
+                  ? 'border-primary/60 bg-primary/25 text-white'
+                  : 'border-primary/25 bg-primary/[0.07] text-[#b9baff] hover:border-primary/50'
+              }`}
+            >
+              {b}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

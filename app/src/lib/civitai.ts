@@ -61,16 +61,51 @@ export interface CivitaiPage {
   nextCursor: number | null;
 }
 
-export const BASE_MODELS = ['Flux.1', 'SDXL', 'Pony', 'SD 1.5', 'Wan 2.1'] as const;
-
+/** Model types exactly as the reference type list. */
 export const MODEL_TYPES = [
   'Checkpoint',
-  'LORA',
-  'LoCon',
-  'TextualInversion',
   'Controlnet',
+  'DoRA',
+  'Hypernetwork',
+  'LoCon',
+  'LORA',
+  'TextualInversion',
+  'Upscaler',
   'VAE',
-  'Poses',
+  'Workflows',
+] as const;
+
+/** Full Civitai base-model list, exactly as the reference filter cloud. */
+export const BASE_MODELS = [
+  'ACE Audio', 'Anima', 'AuraFlow', 'Boogu',
+  'Chroma', 'CogVideoX', 'Ernie',
+  'Flux 3 Video', 'Flux.1 D', 'Flux.1 Kontext',
+  'Flux.1 Krea', 'Flux.1 S', 'Flux.2 D',
+  'Flux.2 Klein 4B', 'Flux.2 Klein 4B-base',
+  'Flux.2 Klein 9B', 'Flux.2 Klein 9B-base',
+  'Grok', 'HappyHorse', 'HiDream',
+  'HiDream-O1', 'Hunyuan 1',
+  'Hunyuan Video', 'Ideogram 4.0', 'Illustrious',
+  'Kolors', 'Krea 2', 'Lens', 'LTXV',
+  'LTXV 2.3', 'LTXV 2.5', 'LTXV2', 'Lumina',
+  'MageFlow', 'MAI', 'MiniMax H3',
+  'MiniMax Music 3', 'Mochi', 'Muse Image',
+  'NoobAI', 'Other', 'PixArt a', 'PixArt E',
+  'Pony', 'Pony V7', 'Qwen', 'Qwen 2',
+  'Qwen 3', 'Reve', 'SD 1.4', 'SD 1.5',
+  'SD 1.5 Hyper', 'SD 1.5 LCM', 'SD 2.0',
+  'SD 2.1', 'SDXL 1.0', 'SDXL Hyper',
+  'SDXL Lightning', 'Upscaler',
+  'Wan Image 2.7', 'Wan Video 1.3B t2v',
+  'Wan Video 14B i2v 480p',
+  'Wan Video 14B i2v 720p',
+  'Wan Video 14B t2v',
+  'Wan Video 2.2 I2V-A14B',
+  'Wan Video 2.2 T2V-A14B',
+  'Wan Video 2.2 TI2V-5B', 'Wan Video 2.5 I2V',
+  'Wan Video 2.5 T2V', 'Wan Video 2.7',
+  'Wan Video 3.0', 'ZImageBase',
+  'ZImageTurbo',
 ] as const;
 
 export const SORTS = [
@@ -83,7 +118,7 @@ export const SORTS = [
 export interface ExplorerQuery {
   q: string;
   type: string; // 'All' | MODEL_TYPES member
-  baseModel: string; // 'All' | BASE_MODELS member
+  baseModels: string[]; // empty = all
   sort: (typeof SORTS)[number];
   page: number;
   nsfw: boolean;
@@ -118,7 +153,7 @@ export async function fetchModels(query: ExplorerQuery, signal?: AbortSignal): P
   });
   if (query.q.trim()) params.set('query', query.q.trim());
   if (query.type !== 'All') params.set('types', query.type);
-  if (query.baseModel !== 'All') params.set('baseModels', query.baseModel);
+  for (const b of query.baseModels) params.append('baseModels', b);
 
   const res = await fetch(`${API}?${params}`, authHeaders(signal));
   if (!res.ok) throw new Error(`Civitai API ${res.status}`);

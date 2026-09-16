@@ -135,6 +135,7 @@ export async function scanDir(
         versionId,
         name: version.model?.name ?? f.name,
         type: version.model?.type ?? type,
+        baseModel: version.baseModel ?? '',
         dirKey: `dir_${type}`,
         dirPath: getDirectories()[`dir_${type}`] ?? '',
         filename: f.name,

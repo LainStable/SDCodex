@@ -11,7 +11,7 @@ import {
 import { targetDirFor } from '../lib/settings';
 import { Stars, TypeBadge } from '../components/ui';
 import {
-  FilterPills,
+  BaseCloud,
   GhostButton,
   PageHeader,
   PrimaryButton,
@@ -42,7 +42,7 @@ export default function Explorer({ onQueue, queuedIds, onOpen, searchToken, sear
   const [query, setQuery] = useState<ExplorerQuery>({
     q: '',
     type: 'All',
-    baseModel: 'All',
+    baseModels: [],
     sort: 'Highest Rated',
     page: 1,
     nsfw: false,
@@ -132,20 +132,6 @@ export default function Explorer({ onQueue, queuedIds, onOpen, searchToken, sear
         </form>
 
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
-              Base:
-            </span>
-            <FilterPills
-              options={[
-                { id: 'All', label: 'All' },
-                ...BASE_MODELS.map((b) => ({ id: b, label: b })),
-              ]}
-              active={query.baseModel}
-              onPick={(b) => patch({ baseModel: b })}
-            />
-          </div>
-
           <label className="flex items-center gap-1.5">
             <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
               Type:
@@ -185,6 +171,21 @@ export default function Explorer({ onQueue, queuedIds, onOpen, searchToken, sear
             />
             NSFW blur
           </label>
+        </div>
+
+        <div className="mt-3 border-t border-white/[0.06] pt-3">
+          <BaseCloud
+            options={BASE_MODELS}
+            active={query.baseModels}
+            onToggle={(b) =>
+              patch({
+                baseModels: query.baseModels.includes(b)
+                  ? query.baseModels.filter((x) => x !== b)
+                  : [...query.baseModels, b],
+              })
+            }
+            onClear={() => patch({ baseModels: [] })}
+          />
         </div>
       </div>
 
@@ -249,7 +250,7 @@ export default function Explorer({ onQueue, queuedIds, onOpen, searchToken, sear
                   <span className="truncate text-ink-faint">@{m.creator?.username ?? '—'}</span>
                 </div>
                 <div className="mt-1 truncate font-mono text-[10px] text-ink-faint">
-                  {targetDirFor(m.type, v?.baseModel ?? query.baseModel)}
+                  {targetDirFor(m.type, v?.baseModel ?? query.baseModels[0] ?? 'All')}
                 </div>
                 <button
                   type="button"

@@ -6,6 +6,7 @@ export interface ScannedModel {
   versionId: number;
   name: string;
   type: string;
+  baseModel: string;
   dirKey: string;
   dirPath: string;
   filename: string;

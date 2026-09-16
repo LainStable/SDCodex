@@ -1,22 +1,10 @@
 import { useMemo, useState } from 'react';
-import { MODELS, type ModelKind } from '../data/models';
+import { MODELS } from '../data/models';
+import { MODEL_TYPES, BASE_MODELS } from '../lib/civitai';
 import { loadScanned, type ScannedModel } from '../lib/library';
 import type { ModalTarget } from '../components/ModelModal';
 import { SocketPill, TypeBadge } from '../components/ui';
-import { FilterPills, PageHeader, SearchInput } from '../components/chrome';
-
-type Filter = 'all' | ModelKind;
-
-const FILTERS: { id: Filter; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'checkpoint', label: 'Checkpoint' },
-  { id: 'sdxl', label: 'SDXL' },
-  { id: 'lora', label: 'LoRA' },
-  { id: 'flux', label: 'Flux' },
-];
-
-const badgeType = (kind: ModelKind): string =>
-  kind === 'checkpoint' ? 'Checkpoint' : kind === 'lora' ? 'LORA' : kind === 'sdxl' ? 'SDXL' : 'Flux';
+import { BaseCloud, FilterPills, PageHeader, SearchInput } from '../components/chrome';
 
 function formatBytes(n: number): string {
   if (n >= 1_073_741_824) return `${(n / 1_073_741_824).toFixed(2)} GB`;
@@ -26,22 +14,28 @@ function formatBytes(n: number): string {
 
 export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }) {
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<Filter>('all');
+  const [type, setType] = useState('All');
+  const [bases, setBases] = useState<string[]>([]);
   const [scanned] = useState<ScannedModel[]>(loadScanned);
 
   const q = query.trim().toLowerCase();
   const matches = (hay: string) => !q || hay.toLowerCase().includes(q);
+  const typeOk = (t: string) => type === 'All' || t === type;
+  const baseOk = (b: string) => bases.length === 0 || bases.includes(b);
 
   const results = useMemo(() => {
     return MODELS.filter((m) => {
-      if (filter !== 'all' && m.kind !== filter) return false;
+      if (!typeOk(m.type) || !baseOk(m.baseModel)) return false;
       return matches(m.title) || matches(m.hash) || matches(m.path);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, filter]);
+  }, [query, type, bases]);
 
   const scannedShown = scanned.filter(
-    (s) => matches(s.name) || matches(s.hash) || matches(s.filename),
+    (s) =>
+      typeOk(s.type) &&
+      baseOk(s.baseModel ?? '') &&
+      (matches(s.name) || matches(s.hash) || matches(s.filename)),
   );
 
   return (
@@ -52,13 +46,29 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
         meta={`${scannedShown.length + results.length} assets · ${scannedShown.length} scanned from disk`}
       />
 
-      <div className="glass-l1 edge-shimmer mt-4 flex flex-wrap items-center gap-2 rounded-lg p-3">
-        <SearchInput
-          value={query}
-          onChange={setQuery}
-          placeholder="Search local models, hashes, paths…  ( / )"
-        />
-        <FilterPills options={FILTERS} active={filter} onPick={setFilter} />
+      <div className="glass-l1 edge-shimmer mt-4 rounded-lg p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <SearchInput
+            value={query}
+            onChange={setQuery}
+            placeholder="Search local models, hashes, paths…  ( / )"
+          />
+          <FilterPills
+            options={[{ id: 'All', label: 'All' }, ...MODEL_TYPES.map((t) => ({ id: t, label: t }))]}
+            active={type}
+            onPick={setType}
+          />
+        </div>
+        <div className="mt-3 border-t border-white/[0.06] pt-3">
+          <BaseCloud
+            options={BASE_MODELS}
+            active={bases}
+            onToggle={(b) =>
+              setBases((cur) => (cur.includes(b) ? cur.filter((x) => x !== b) : [...cur, b]))
+            }
+            onClear={() => setBases([])}
+          />
+        </div>
       </div>
 
       <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -119,7 +129,7 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                 onOpen({
                   kind: 'local',
                   title: m.title,
-                  type: badgeType(m.kind),
+                  type: m.type,
                   hash: m.hash,
                   size: m.size,
                   path: m.path,
@@ -130,7 +140,7 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
               title="Open details"
             >
               <div className="flex items-start justify-between gap-2">
-                <TypeBadge type={badgeType(m.kind)} />
+                <TypeBadge type={m.type} />
                 <SocketPill socket={m.socket} />
               </div>
               <h2 className="mt-2 font-display text-base font-semibold">{m.title}</h2>
