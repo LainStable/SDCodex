@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   DangerButton,
   FilterPills,
@@ -10,7 +10,7 @@ import {
 } from '../components/chrome';
 import { isPaused, setPaused, type QueueItem } from '../lib/queue';
 import { bootstrapUser, startSession, verifyPassword, type Profile } from '../lib/auth';
-import { adoptServerUser, type ServerAuthState } from '../lib/auth';
+import { adoptServerUser, fetchPublicProviders, type ServerAuthState } from '../lib/auth';
 import { apiPost, mirrorAuth } from '../lib/backend';
 
 const PLUGINS = [
@@ -64,6 +64,19 @@ export function BootstrapCard({
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sso, setSso] = useState<Array<{ id: number; name: string }>>([]);
+
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      if (!serverMode) return;
+      const list = await fetchPublicProviders();
+      if (live) setSso(list);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [serverMode]);
 
   const submit = async () => {
     setError(null);
@@ -239,6 +252,27 @@ export function BootstrapCard({
         >
           {busy ? 'Working…' : existing || !isCreate ? 'Sign in' : 'Create administrator'}
         </PrimaryButton>
+        {sso.map((p) => (
+          <GhostButton
+            key={p.id}
+            disabled={busy}
+            onClick={() =>
+              void (async () => {
+                setError(null);
+                setBusy(true);
+                try {
+                  const { serverLoginUrl } = await import('../lib/auth');
+                  window.location.href = await serverLoginUrl(String(p.id));
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : 'SSO failed.');
+                  setBusy(false);
+                }
+              })()
+            }
+          >
+            Sign in with {p.name}
+          </GhostButton>
+        ))}
       </div>
     </div>
   );

@@ -378,6 +378,18 @@ export async function testDiscovery(issuerUrl: string, signal?: AbortSignal): Pr
   return `OK · ${doc.issuer ?? base}`;
 }
 
+/** Public provider list for the login gate (names only, no secrets). */
+export async function fetchPublicProviders(): Promise<Array<{ id: number; name: string }>> {
+  try {
+    const { apiGet, backendAvailable } = await import('./backend');
+    if (!(await backendAvailable())) return [];
+    const r = await apiGet<{ items: Array<{ id: number; name: string }> }>('/oidc/public');
+    return r.items ?? [];
+  } catch {
+    return [];
+  }
+}
+
 /** Server OIDC rows (admin). The exchange must run server-side (client secret
     + PKCE verifier live there), so these hit /api directly. */
 export async function fetchServerProviders(): Promise<OidcProvider[]> {
