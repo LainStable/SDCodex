@@ -49,6 +49,7 @@ backend/data/
 backend/.venv/
 backend/*.log
 backend/*.pid
+app/.vite.pid
 *.db
 *.db-journal
 __pycache__/
