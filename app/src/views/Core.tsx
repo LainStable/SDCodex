@@ -68,7 +68,16 @@ export function BootstrapCard({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sso, setSso] = useState<Array<{ id: number; name: string; host: string }>>([]);
-  const [faviconOk, setFaviconOk] = useState<Record<number, boolean>>({});
+  const [faviconSrc, setFaviconSrc] = useState<Record<number, number>>({});
+
+  /** Favicon cascade: provider root first, icon service second, hidden last. */
+  const faviconFor = (p: { id: number; host: string }): string | null => {
+    if (!p.host) return null;
+    const step = faviconSrc[p.id] ?? 0;
+    if (step === 0) return `https://${p.host}/favicon.ico`;
+    if (step === 1) return `https://icons.duckduckgo.com/ip3/${p.host}.ico`;
+    return null;
+  };
 
   useEffect(() => {
     let live = true;
@@ -210,7 +219,7 @@ export function BootstrapCard({
   return (
     <div onKeyDown={onKey}>
       <div className="flex flex-col items-center">
-        <img src="/sdcodex.svg" alt="SDCodex" className="h-14 w-14" />
+        <img src="/sdcodex.svg" alt="SDCodex" className="h-[168px] w-[168px]" />
       </div>
       <div className="mt-3 flex flex-col gap-2">
         <input
@@ -282,12 +291,12 @@ export function BootstrapCard({
             }
           >
             <span className="inline-flex items-center gap-2">
-              {p.host && faviconOk[p.id] !== false && (
+              {faviconFor(p) && (
                 <img
-                  src={`https://${p.host}/favicon.ico`}
+                  src={faviconFor(p)!}
                   alt=""
                   className="h-4 w-4 rounded-sm"
-                  onError={() => setFaviconOk((f) => ({ ...f, [p.id]: false }))}
+                  onError={() => setFaviconSrc((f) => ({ ...f, [p.id]: (f[p.id] ?? 0) + 1 }))}
                 />
               )}
               Sign in with {p.name}
