@@ -3,7 +3,7 @@ import Explorer from './views/Explorer';
 import Library from './views/Library';
 import Settings from './views/Settings';
 import ModelModal, { type ModalTarget } from './components/ModelModal';
-import { Home, Plugins, Queue, BootstrapCard } from './views/Core';
+import { Home, Queue, BootstrapCard } from './views/Core';
 import { MobileNav, Sidebar, Topbar, type Theme, type ViewId } from './components/chrome';
 import {
   addToQueue,
@@ -11,7 +11,7 @@ import {
   clearQueue,
   loadQueue,
 } from './lib/queue';
-import { adoptServerUser, completeOidcCallback, endSession, fetchServerAuth, hasSession, initials, loadProfile, pullServerProfile, type Profile, type ServerAuthState } from './lib/auth';
+import { adoptServerUser, clearProfile, completeOidcCallback, endSession, fetchServerAuth, hasSession, initials, loadProfile, pullServerProfile, type Profile, type ServerAuthState } from './lib/auth';
 import { deleteScanned } from './lib/library';
 import { apiPost, backendLogout, backendAvailable } from './lib/backend';
 import { pullSettings } from './lib/settings';
@@ -169,6 +169,10 @@ export default function App() {
                 onServerChanged={() => {
                   void refreshServerAuth();
                 }}
+                onSwitchUser={() => {
+                  clearProfile();
+                  setProfile(null);
+                }}
                 onDone={(p) => {
                   setProfile(p);
                   setAuthed(true);
@@ -232,7 +236,6 @@ export default function App() {
               onClearAll={() => setQueue(clearQueue())}
             />
           )}
-          {view === 'plugins' && <Plugins />}
           {view === 'settings' && (
             <Settings
               profile={profile}

@@ -40,15 +40,16 @@ import {
   type OidcProvider,
   type Profile,
 } from '../lib/auth';
-import { BootstrapCard } from './Core';
+import { BootstrapCard, Plugins } from './Core';
 
-type Tab = 'dirs' | 'api' | 'auth' | 'system';
+type Tab = 'dirs' | 'api' | 'auth' | 'system' | 'plugins';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dirs', label: 'Model dirs' },
   { id: 'api', label: 'API key' },
   { id: 'auth', label: 'Users & SSO' },
   { id: 'system', label: 'System' },
+  { id: 'plugins', label: 'Plugins' },
 ];
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -878,6 +879,7 @@ export default function Settings({
         {tab === 'api' && <ApiKey />}
         {tab === 'auth' && <Auth profile={profile} onProfile={onProfile} onSignOut={onSignOut} />}
         {tab === 'system' && <System />}
+        {tab === 'plugins' && <Plugins />}
       </div>
     </div>
   );

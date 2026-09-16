@@ -47,6 +47,7 @@ export function BootstrapCard({
   serverMode,
   serverBootstrap,
   onServerChanged,
+  onSwitchUser,
   onDone,
 }: {
   existing: Profile | null;
@@ -56,6 +57,8 @@ export function BootstrapCard({
   serverBootstrap: boolean;
   /** Called when the server disagrees (e.g. users appeared) so App re-checks. */
   onServerChanged?: () => void;
+  /** Clear the saved profile so a different user can sign in. */
+  onSwitchUser?: () => void;
   onDone: (p: Profile) => void;
 }) {
   const [username, setUsername] = useState('');
@@ -64,7 +67,8 @@ export function BootstrapCard({
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [sso, setSso] = useState<Array<{ id: number; name: string }>>([]);
+  const [sso, setSso] = useState<Array<{ id: number; name: string; host: string }>>([]);
+  const [faviconOk, setFaviconOk] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
     let live = true;
@@ -192,20 +196,12 @@ export function BootstrapCard({
 
   return (
     <div onKeyDown={onKey}>
-      <h2 className="font-display text-base font-semibold">
-        {existing
-          ? `Welcome back, ${existing.displayName}`
-          : isCreate
-            ? 'Create primary account'
-            : 'Sign in'}
-      </h2>
-      <p className="mt-1 text-xs text-ink-muted">
-        {existing
-          ? 'Sign in to access SDCodex. Passwords are PBKDF2-hashed locally; the backend scrypt hash replaces this on migration.'
-          : isCreate
-            ? 'No users exist yet — this account becomes administrator. Password is required; nothing works without an account.'
-            : 'This origin has no saved account — sign in with your existing credentials.'}
-      </p>
+      <div className="flex flex-col items-center">
+        <img src="/sdcodex.svg" alt="SDCodex" className="h-14 w-14" />
+        {existing && (
+          <div className="mt-2 font-display text-base font-semibold">{existing.displayName}</div>
+        )}
+      </div>
       <div className="mt-3 flex flex-col gap-2">
         {!existing && (
           <>
@@ -252,6 +248,15 @@ export function BootstrapCard({
         >
           {busy ? 'Working…' : existing || !isCreate ? 'Sign in' : 'Create administrator'}
         </PrimaryButton>
+        {existing && onSwitchUser && (
+          <button
+            type="button"
+            onClick={onSwitchUser}
+            className="text-center font-mono text-[11px] text-ink-faint hover:text-white"
+          >
+            Sign in as someone else
+          </button>
+        )}
         {sso.map((p) => (
           <GhostButton
             key={p.id}
@@ -270,7 +275,17 @@ export function BootstrapCard({
               })()
             }
           >
-            Sign in with {p.name}
+            <span className="inline-flex items-center gap-2">
+              {p.host && faviconOk[p.id] !== false && (
+                <img
+                  src={`https://${p.host}/favicon.ico`}
+                  alt=""
+                  className="h-4 w-4 rounded-sm"
+                  onError={() => setFaviconOk((f) => ({ ...f, [p.id]: false }))}
+                />
+              )}
+              Sign in with {p.name}
+            </span>
           </GhostButton>
         ))}
       </div>
@@ -278,11 +293,11 @@ export function BootstrapCard({
   );
 }
 
-export function Home({ go }: { go: (v: 'models' | 'library' | 'queue' | 'plugins') => void }) {  const cards = [
+export function Home({ go }: { go: (v: 'models' | 'library' | 'queue' | 'settings') => void }) {  const cards = [
     { id: 'models' as const, title: 'Model Explorer', desc: 'Browse Civitai by type, base model, and tags.' },
     { id: 'library' as const, title: 'Local Library', desc: 'Downloaded weights with metadata and socket state.' },
     { id: 'queue' as const, title: 'Download Queue', desc: 'Background downloads staged from Models.' },
-    { id: 'plugins' as const, title: 'Plugin Hub', desc: 'Installable Gallery, GalleryDL, RemBG, ComfyCaption.' },
+    { id: 'settings' as const, title: 'Plugins & Settings', desc: 'Installable plugins, model dirs, keys, access.' },
   ];
   return (
     <div>

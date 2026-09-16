@@ -379,11 +379,17 @@ export async function testDiscovery(issuerUrl: string, signal?: AbortSignal): Pr
 }
 
 /** Public provider list for the login gate (names only, no secrets). */
-export async function fetchPublicProviders(): Promise<Array<{ id: number; name: string }>> {
+export interface PublicProvider {
+  id: number;
+  name: string;
+  host: string;
+}
+
+export async function fetchPublicProviders(): Promise<PublicProvider[]> {
   try {
     const { apiGet, backendAvailable } = await import('./backend');
     if (!(await backendAvailable())) return [];
-    const r = await apiGet<{ items: Array<{ id: number; name: string }> }>('/oidc/public');
+    const r = await apiGet<{ items: PublicProvider[] }>('/oidc/public');
     return r.items ?? [];
   } catch {
     return [];

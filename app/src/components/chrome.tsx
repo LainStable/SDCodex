@@ -3,14 +3,13 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 /* Shared chrome matching all four Stitch prototypes:
    sidebar order, topbar, page headers, buttons, stats. */
 
-export type ViewId = 'home' | 'models' | 'library' | 'queue' | 'plugins' | 'settings';
+export type ViewId = 'home' | 'models' | 'library' | 'queue' | 'settings';
 
 export const NAV: { id: ViewId; label: string; soon?: boolean }[] = [
   { id: 'home', label: 'Home' },
   { id: 'models', label: 'Model Explorer' },
   { id: 'library', label: 'Local Library' },
   { id: 'queue', label: 'Download Queue' },
-  { id: 'plugins', label: 'Plugin Hub', soon: true },
 ];
 
 export function Sidebar({

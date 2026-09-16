@@ -354,11 +354,18 @@ def oidc_test(config_id: int):
 @api_v1.get("/oidc/public")
 def oidc_public():
     """Public: enabled providers (names only) so the login gate can offer SSO."""
+    from urllib.parse import urlparse
+
     from . import oidc as oidc_mod
 
-    return jsonify(
-        {"items": [{"id": c.id, "name": c.name} for c in oidc_mod.enabled_configs()]}
-    )
+    items = []
+    for c in oidc_mod.enabled_configs():
+        try:
+            host = urlparse(c.issuer_url).hostname or ""
+        except Exception:
+            host = ""
+        items.append({"id": c.id, "name": c.name, "host": host})
+    return jsonify({"items": items})
 
 
 @api_v1.get("/oidc/<int:config_id>/login-url")
