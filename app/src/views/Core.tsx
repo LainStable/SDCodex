@@ -70,12 +70,13 @@ export function BootstrapCard({
   const [sso, setSso] = useState<Array<{ id: number; name: string; host: string }>>([]);
   const [faviconSrc, setFaviconSrc] = useState<Record<number, number>>({});
 
-  /** Favicon cascade: provider root first, icon service second, hidden last. */
+  /** Favicon cascade: provider root, Authentik convention, icon service, hidden. */
   const faviconFor = (p: { id: number; host: string }): string | null => {
     if (!p.host) return null;
     const step = faviconSrc[p.id] ?? 0;
     if (step === 0) return `https://${p.host}/favicon.ico`;
-    if (step === 1) return `https://icons.duckduckgo.com/ip3/${p.host}.ico`;
+    if (step === 1) return `https://${p.host}/api/application-images/favicon`;
+    if (step === 2) return `https://icons.duckduckgo.com/ip3/${p.host}.ico`;
     return null;
   };
 
@@ -219,7 +220,7 @@ export function BootstrapCard({
   return (
     <div onKeyDown={onKey}>
       <div className="flex flex-col items-center">
-        <img src="/sdcodex.svg" alt="SDCodex" className="h-[168px] w-[168px]" />
+        <img src="/sdcodex.svg" alt="SDCodex" className="h-24 w-24" />
       </div>
       <div className="mt-3 flex flex-col gap-2">
         <input
@@ -258,6 +259,7 @@ export function BootstrapCard({
         )}
         {error && <p className="font-mono text-[11px] text-status-alert">{error}</p>}
         <PrimaryButton
+          className="mx-6"
           disabled={busy || !username.trim()}
           onClick={() => void submit()}
         >
@@ -275,6 +277,7 @@ export function BootstrapCard({
         {sso.map((p) => (
           <GhostButton
             key={p.id}
+            className="mx-6"
             disabled={busy}
             onClick={() =>
               void (async () => {
