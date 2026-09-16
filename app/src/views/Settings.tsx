@@ -127,14 +127,25 @@ function Dirs() {
       setMsgs((m) => ({ ...m, [type]: 'scan started on server…' }));
       await pollServer();
       return;
-    } catch {
+    } catch (e) {
+      if (!supported) {
+        setMsgs((m) => ({
+          ...m,
+          [type]: `server scan failed (${e instanceof Error ? e.message : 'unreachable'}) — folder linking needs Chromium`,
+        }));
+        setScanning(false);
+        return;
+      }
       /* standalone — fall through to the browser flow below */
     }
-    const seen = new Set(loadScanned().map((e) => `${e.dirKey}/${e.filename}`));
-    await scanDir(type, resolve, seen, (msg) =>
-      setMsgs((m) => ({ ...m, [type]: msg })),
-    );
-    setScanning(false);
+    try {
+      const seen = new Set(loadScanned().map((e) => `${e.dirKey}/${e.filename}`));
+      await scanDir(type, resolve, seen, (msg) =>
+        setMsgs((m) => ({ ...m, [type]: msg })),
+      );
+    } finally {
+      setScanning(false);
+    }
   };
 
   /** Poll the backend worker until idle (max ~30s), surfacing its message. */
@@ -164,20 +175,28 @@ function Dirs() {
       say('Scan started on server…');
       await pollServer();
       return;
-    } catch {
+    } catch (e) {
+      if (!supported) {
+        say(`Server scan failed (${e instanceof Error ? e.message : 'unreachable'}) — folder linking needs Chromium.`);
+        setScanning(false);
+        return;
+      }
       /* standalone — fall through */
     }
-    const seen = new Set<string>();
-    for (const t of MODEL_TYPES) {
-      if (!(dirs[`dir_${t}`] ?? '').trim()) continue;
-      await scanDir(t, resolve, seen, (msg) => {
-        say(msg);
-        setMsgs((m) => ({ ...m, [t]: msg }));
-      });
+    try {
+      const seen = new Set<string>();
+      for (const t of MODEL_TYPES) {
+        if (!(dirs[`dir_${t}`] ?? '').trim()) continue;
+        await scanDir(t, resolve, seen, (msg) => {
+          say(msg);
+          setMsgs((m) => ({ ...m, [t]: msg }));
+        });
+      }
+      const { removed } = pruneScanned(seen);
+      say(removed > 0 ? `Removed ${removed} missing models.` : 'Scan complete.');
+    } finally {
+      setScanning(false);
     }
-    const { removed } = pruneScanned(seen);
-    say(removed > 0 ? `Removed ${removed} missing models.` : 'Scan complete.');
-    setScanning(false);
   };
 
   const addCustom = () => {
@@ -200,7 +219,7 @@ function Dirs() {
         (no backend), the first scan asks for the folder once, then remembers it.
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <PrimaryButton disabled={scanning || !supported} onClick={() => void scanAll()}>
+        <PrimaryButton disabled={scanning} onClick={() => void scanAll()}>
           {scanning ? 'Scanning…' : 'Scan all folders'}
         </PrimaryButton>
         {!supported && (
@@ -228,25 +247,17 @@ function Dirs() {
               <GhostButton disabled={!dirty} onClick={() => save(t)}>
                 Save
               </GhostButton>
-              {supported && (
-                <>
-                  <GhostButton
-                    disabled={scanning || !(dirs[key] ?? '').trim()}
-                    onClick={() => void scanOne(t)}
-                    title={
-                      isBound
-                        ? 'Scan this folder'
-                        : 'First scan asks for the folder once, then remembers it'
-                    }
-                  >
-                    Scan
-                  </GhostButton>
-                  {isBound && (
-                    <GhostButton disabled={scanning} onClick={() => void forget(t)}>
-                      Unlink
-                    </GhostButton>
-                  )}
-                </>
+              <GhostButton
+                disabled={scanning || !(dirs[key] ?? '').trim()}
+                onClick={() => void scanOne(t)}
+                title="Server scans its own path; standalone asks for the folder once"
+              >
+                Scan
+              </GhostButton>
+              {supported && isBound && (
+                <GhostButton disabled={scanning} onClick={() => void forget(t)}>
+                  Unlink
+                </GhostButton>
               )}
               {savedKey === key && (
                 <span className="rounded border border-status-active/40 bg-status-active/10 px-2 py-0.5 font-mono text-[10px] uppercase text-status-active">
