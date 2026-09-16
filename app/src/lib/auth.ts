@@ -252,7 +252,7 @@ export async function pullServerProfile(): Promise<Profile | null> {
     const p: Profile = {
       username: u.username,
       displayName: u.displayName || existing?.displayName || u.username,
-      email: u.email || '',
+      email: u.email || (sameUser ? (existing?.email ?? '') : ''),
       isAdmin: u.isAdmin,
       authProvider: u.authProvider || 'local',
       passwordHash: sameUser ? (existing?.passwordHash ?? '') : '',
