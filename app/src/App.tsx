@@ -5,7 +5,7 @@ import Settings from './views/Settings';
 import ModelModal, { type ModalTarget } from './components/ModelModal';
 import { Queue, BootstrapCard, DownloadFloat } from './views/Core';
 import Home from './views/Home';
-import { MobileNav, Sidebar, Topbar, type Theme, type ViewId } from './components/chrome';
+import { MobileNav, Sidebar, Topbar, type Theme, type UpdateState, type ViewId } from './components/chrome';
 import {
   addToQueue,
   clearCompleted,
@@ -29,6 +29,10 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [modal, setModal] = useState<ModalTarget | null>(null);
   const [libKey, setLibKey] = useState(0);
+  const [settingsTab, setSettingsTab] = useState('dirs');
+  const [appVersion, setAppVersion] = useState('…');
+  const [updates, setUpdates] = useState<UpdateState>({ core: false, plugins: false, checking: false });
+  const [updating, setUpdating] = useState(false);
   // Models already on disk (backend library + local scan records).
   const [ownedIds, setOwnedIds] = useState<Set<string>>(new Set());
 
@@ -65,6 +69,7 @@ export default function App() {
 
   // Central post-auth handler: profile state, session flag, then the full
   // server row (avatar/email) so login restores everything refresh would.
+  // Also kicks off the automatic update check.
   const handleAuthed = async (p: Profile) => {
     setProfile(p);
     setAuthed(true);
@@ -73,6 +78,65 @@ export default function App() {
       if (full) setProfile(full);
     } catch {
       /* standalone — local stands */
+    }
+    void checkUpdates();
+  };
+
+  /** Fetch backend version + update state (core, plugin updates, new plugins). */
+  const checkUpdates = async () => {
+    try {
+      const { apiGet, backendAvailable } = await import('./lib/backend');
+      if (!(await backendAvailable())) return;
+      try {
+        const h = await apiGet<{ version?: string }>('/health');
+        if (h.version) setAppVersion(h.version);
+      } catch {
+        /* keep placeholder */
+      }
+      setUpdates((u) => ({ ...u, checking: true }));
+      let core = false;
+      try {
+        const c = await apiGet<{ total?: number; core?: { has_update?: boolean } }>('/updates/check');
+        core = Boolean(c.core?.has_update);
+      } catch {
+        /* admin-only or offline — plugins still checkable below */
+      }
+      let plugins = false;
+      try {
+        const [hub, inst] = await Promise.all([
+          (await import('./lib/plugins')).fetchCatalog().then((r) => r.catalog).catch(() => null),
+          apiGet<{ installed?: Array<{ id: string; version?: string; has_update?: boolean }> }>('/plugins').catch(
+            () => null,
+          ),
+        ]);
+        if (hub) {
+          const installed = new Map((inst?.installed ?? []).map((p) => [p.id, p]));
+          plugins = hub.plugins.some((p) => {
+            const cur = installed.get(p.id);
+            if (!cur) return true; // brand-new plugin in the hub
+            if (cur.has_update) return true;
+            return (cur.version ?? '') !== p.version;
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+      setUpdates({ core, plugins, checking: false });
+    } catch {
+      setUpdates((u) => ({ ...u, checking: false }));
+    }
+  };
+
+  const updateCore = async () => {
+    setUpdating(true);
+    try {
+      const { apiPost } = await import('./lib/backend');
+      await apiPost('/updates/core', {});
+      await checkUpdates();
+    } catch {
+      /* message surfaces on next check */
+    } finally {
+      setUpdating(false);
     }
   };
   const [creatorSearch, setCreatorSearch] = useState<{ token: number; text: string }>({
@@ -148,6 +212,7 @@ export default function App() {
             // refresh never shows stale local rows.
             const full = await pullServerProfile();
             if (full) setProfile(full);
+            void checkUpdates();
           } else {
             setAuthed(hasSession() && loadProfile() !== null);
           }
@@ -185,6 +250,12 @@ export default function App() {
   const go = (v: ViewId) => {
     setModal(null);
     setView(v);
+  };
+
+  const goSettings = (tab: string) => {
+    setSettingsTab(tab);
+    setModal(null);
+    setView('settings');
   };
 
   // Single queue entry point: local staged record + backend worker POST.
@@ -255,7 +326,16 @@ export default function App() {
         </div>
       )}
       <div className="mx-auto flex max-w-[1400px]">
-        <Sidebar view={view} go={go} queueCount={queue.length} />
+        <Sidebar
+          view={view}
+          go={go}
+          queueCount={queue.length}
+          version={appVersion}
+          updates={updates}
+          updating={updating}
+          onUpdateCore={() => void updateCore()}
+          onGoPlugins={() => goSettings('plugins')}
+        />
 
         <main className="min-w-0 flex-1 p-4 md:p-5">
           <MobileNav view={view} go={go} />
@@ -303,6 +383,8 @@ export default function App() {
           )}
           {view === 'settings' && (
             <Settings
+              key={settingsTab}
+              initialTab={settingsTab}
               profile={profile}
               onProfile={setProfile}
               onSignOut={() => setAuthed(false)}

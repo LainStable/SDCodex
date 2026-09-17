@@ -13,20 +13,62 @@ export const NAV: { id: ViewId; label: string; soon?: boolean }[] = [
   { id: 'queue', label: 'Download Queue' },
 ];
 
+export interface UpdateState {
+  core: boolean;
+  plugins: boolean;
+  checking: boolean;
+}
+
 export function Sidebar({
   view,
   go,
   queueCount,
+  version,
+  updates,
+  updating,
+  onUpdateCore,
+  onGoPlugins,
 }: {
   view: ViewId;
   go: (v: ViewId) => void;
   queueCount: number;
+  version: string;
+  updates: UpdateState;
+  updating: boolean;
+  onUpdateCore: () => void;
+  onGoPlugins: () => void;
 }) {
+  const hasUpdate = updates.core || updates.plugins;
   return (
     <aside className="hidden w-60 shrink-0 border-r border-white/[0.06] p-4 md:block">
       <div className="font-display text-lg font-bold tracking-tight">SDCodex</div>
       <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
-        v2.4.0 Workstation
+        {hasUpdate ? (
+          <span className="inline-flex items-center gap-1.5">
+            <button
+              type="button"
+              disabled={updating}
+              onClick={() => {
+                if (updates.core) onUpdateCore();
+                else onGoPlugins();
+              }}
+              title={
+                updates.core
+                  ? 'Core update available — click to update'
+                  : 'Plugin updates available — open Plugin Hub'
+              }
+              className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
+                updates.core
+                  ? 'border-status-warning/50 bg-status-warning/15 text-[#fcd34d] hover:bg-status-warning/25'
+                  : 'border-secondary/50 bg-secondary/15 text-[#22d3ee] hover:bg-secondary/25'
+              }`}
+            >
+              {updates.core ? (updating ? '⟳…' : '⟳') : '⬢'} v{version}
+            </button>
+          </span>
+        ) : (
+          <span>v{version}</span>
+        )}
       </div>
       <nav className="mt-6 space-y-1 text-sm">
         {NAV.map((item) => (

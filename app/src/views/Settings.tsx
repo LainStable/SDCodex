@@ -1240,12 +1240,14 @@ export default function Settings({
   profile,
   onProfile,
   onSignOut,
+  initialTab,
 }: {
   profile: Profile | null;
   onProfile: (p: Profile | null) => void;
   onSignOut: () => void;
+  initialTab?: string;
 }) {
-  const [tab, setTab] = useState<Tab>('dirs');
+  const [tab, setTab] = useState<Tab>((TABS.some((t) => t.id === initialTab) ? initialTab : 'dirs') as Tab);
   return (
     <div>
       <PageHeader

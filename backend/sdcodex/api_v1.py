@@ -37,7 +37,9 @@ def _require_user():
 
 @api_v1.get("/health")
 def health():
-    return jsonify({"ok": True, "app": "sdcodex", "backend": True})
+    from . import updater as updater_mod
+
+    return jsonify({"ok": True, "app": "sdcodex", "backend": True, "version": updater_mod.local_core_version()})
 
 
 # ----------------------------------------------------------------- auth ---
