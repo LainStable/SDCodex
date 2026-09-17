@@ -88,12 +88,22 @@ class DownloadManager:
                         total_updated = 0
                         directories = []
                         only = task.get("model_types") or None
+                        # All dir settings, so one type can map several folders:
+                        # dir_<Type>, dir_<Type>__1, dir_<Type>__2, ...
+                        dir_rows = {
+                            s.key: (s.value or "").strip()
+                            for s in Setting.query.all()
+                            if s.key.startswith("dir_") and (s.value or "").strip()
+                        }
                         for m_type in MODEL_TYPES:
                             if only and m_type not in only:
                                 continue
-                            setting = Setting.query.get(f"dir_{m_type}")
-                            if setting and setting.value:
-                                directories.append((setting.value, m_type))
+                            paths = [dir_rows[f"dir_{m_type}"]] if f"dir_{m_type}" in dir_rows else []
+                            extra = sorted(
+                                v for k, v in dir_rows.items() if k.startswith(f"dir_{m_type}__")
+                            )
+                            for path in paths + extra:
+                                directories.append((path, m_type))
                         
                         # Fallback default dirs
                         # Actually, if not set, we might not want to scan random places.

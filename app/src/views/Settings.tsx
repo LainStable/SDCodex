@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { FilterPills, GhostButton, PageHeader, PrimaryButton } from '../components/chrome';
 import { TypeBadge } from '../components/ui';
 import { bindDirectory, scanDir, serverScan, serverScanStatus } from '../lib/scan';
-import { forgetHandle, getHandle } from '../lib/idb';
+import { getHandle } from '../lib/idb';
 import { loadScanned, pruneScanned } from '../lib/library';
 import {
   MODEL_TYPES,
+  addDirPath,
   clearApiKey,
   deleteCustomDir,
   getApiKey,
@@ -13,10 +14,10 @@ import {
   getCustomDirs,
   getDirectories,
   pushSettings,
+  removeDirPath,
   setApiKey,
   setApiUser,
   setCustomDir,
-  setDirectory,
 } from '../lib/settings';
 import { fetchMe } from '../lib/civitai';
 import {
@@ -88,13 +89,23 @@ function Dirs() {
     };
   }, []);
 
-  const save = (type: string) => {
-    const key = `dir_${type}`;
-    setDirectory(type, drafts[key] ?? '');
+  const save = (key: string) => {
+    const dirsNow = getDirectories();
+    const next = { ...dirsNow, [key]: drafts[key] ?? '' };
+    try {
+      localStorage.setItem('sdcodex.dirs.v1', JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
     setDirs(getDirectories());
     setSavedKey(key);
     setTimeout(() => setSavedKey((k) => (k === key ? null : k)), 1500);
     void pushSettings();
+  };
+
+  const refreshDirs = () => {
+    setDirs(getDirectories());
+    setDrafts(getDirectories());
   };
 
   const say = (line: string) => pushScanLog(line);
@@ -111,12 +122,6 @@ function Dirs() {
       setMsgs((m) => ({ ...m, [type]: 'pick failed' }));
       return null;
     }
-  };
-
-  const forget = async (type: string) => {
-    await forgetHandle(`dir_${type}`);
-    setBound((b) => ({ ...b, [type]: false }));
-    setMsgs((m) => ({ ...m, [type]: 'unlinked' }));
   };
 
   const scanOne = async (type: string) => {
@@ -219,45 +224,69 @@ function Dirs() {
       </div>
       <div className="mt-2 divide-y divide-white/[0.06]">
         {MODEL_TYPES.map((t) => {
-          const key = `dir_${t}`;
-          const dirty = (drafts[key] ?? '') !== (dirs[key] ?? '');
-          const isBound = bound[t] ?? false;
+          const keys = [`dir_${t}`, ...Object.keys(dirs).filter((k) => k.startsWith(`dir_${t}__`)).sort()];
           return (
-            <div key={t} className="flex flex-wrap items-center gap-2 py-1.5">
-              <span className="w-28 shrink-0">
-                <TypeBadge type={t} />
-              </span>
-              <input
-                value={drafts[key] ?? ''}
-                onChange={(e) => setDrafts((d) => ({ ...d, [key]: e.target.value }))}
-                placeholder={`/models/${t.toLowerCase()}/`}
-                className="min-w-[200px] flex-1 rounded border border-white/10 bg-obsidian-lowest px-2 py-1 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary"
-              />
-              <GhostButton disabled={!dirty} onClick={() => save(t)}>
-                Save
-              </GhostButton>
-              <GhostButton
-                disabled={scanning || !(dirs[key] ?? '').trim()}
-                onClick={() => void scanOne(t)}
-                title="Server scans its own path; standalone asks for the folder once"
-              >
-                Scan
-              </GhostButton>
-              {supported && isBound && (
-                <GhostButton disabled={scanning} onClick={() => void forget(t)}>
-                  Unlink
+            <div key={t} className="py-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="w-28 shrink-0">
+                  <TypeBadge type={t} />
+                </span>
+                <GhostButton
+                  onClick={() => {
+                    const key = addDirPath(t, '');
+                    refreshDirs();
+                    setMsgs((m) => ({ ...m, [t]: '' }));
+                    void key;
+                  }}
+                >
+                  + Path
                 </GhostButton>
-              )}
-              {savedKey === key && (
-                <span className="rounded border border-status-active/40 bg-status-active/10 px-2 py-0.5 font-mono text-[10px] uppercase text-status-active">
-                  saved
-                </span>
-              )}
-              {(msgs[t] || (isBound ? 'linked' : '')) && (
-                <span className="w-full truncate font-mono text-[10px] text-ink-faint">
-                  {msgs[t] || 'linked'}
-                </span>
-              )}
+                {(msgs[t] || (bound[t] ? 'linked' : '')) && (
+                  <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-ink-faint">
+                    {msgs[t] || 'linked'}
+                  </span>
+                )}
+              </div>
+              {keys.map((key) => {
+                const dirty = (drafts[key] ?? '') !== (dirs[key] ?? '');
+                const extra = key !== `dir_${t}`;
+                return (
+                  <div key={key} className="mt-1 flex flex-wrap items-center gap-2 pl-0 sm:pl-32">
+                    <input
+                      value={drafts[key] ?? ''}
+                      onChange={(e) => setDrafts((d) => ({ ...d, [key]: e.target.value }))}
+                      placeholder={extra ? 'Another folder…' : `/models/${t.toLowerCase()}/`}
+                      className="min-w-[200px] flex-1 rounded border border-white/10 bg-obsidian-lowest px-2 py-1 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary"
+                    />
+                    <GhostButton disabled={!dirty} onClick={() => save(key)}>
+                      Save
+                    </GhostButton>
+                    <GhostButton
+                      disabled={scanning || !(dirs[key] ?? '').trim()}
+                      onClick={() => void scanOne(t)}
+                      title="Server scans its own path; standalone asks for the folder once"
+                    >
+                      Scan
+                    </GhostButton>
+                    {extra && (
+                      <GhostButton
+                        onClick={() => {
+                          removeDirPath(key);
+                          refreshDirs();
+                          void pushSettings();
+                        }}
+                      >
+                        Remove
+                      </GhostButton>
+                    )}
+                    {savedKey === key && (
+                      <span className="rounded border border-status-active/40 bg-status-active/10 px-2 py-0.5 font-mono text-[10px] uppercase text-status-active">
+                        saved
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           );
         })}

@@ -23,30 +23,35 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
     if not os.path.exists(directory):
         return 0, "Directory does not exist", []
 
-    files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
-    model_files = [f for f in files if os.path.splitext(f)[1].lower() in MODEL_EXTENSIONS]
-    
+    # Recursive: users sort models into subfolders.
+    model_files = []
+    for root, _dirs, files in os.walk(directory):
+        for f in files:
+            if os.path.splitext(f)[1].lower() in MODEL_EXTENSIONS:
+                model_files.append(os.path.join(root, f))
+
     total_files = len(model_files)
     processed = 0
     updated_count = 0
     found_ids = []
-    
-    for filename in model_files:
-        filepath = os.path.join(directory, filename)
+
+    for filepath in model_files:
+        filename = os.path.basename(filepath)
         base_name = os.path.splitext(filename)[0]
-        
+        file_dir = os.path.dirname(filepath)
+
         # Report progress
         processed += 1
         if progress_callback:
             progress_callback(int(processed / total_files * 100), f"Scanning {filename}...")
 
-        # Check for metadata
-        metadata_path = os.path.join(directory, f"{base_name}.metadata.json")
-        image_path = os.path.join(directory, f"{base_name}.webp") # Default check
+        # Check for metadata (sidecars live next to the model file)
+        metadata_path = os.path.join(file_dir, f"{base_name}.metadata.json")
+        image_path = os.path.join(file_dir, f"{base_name}.webp") # Default check
         # Also check other image exts if webp missing
         if not os.path.exists(image_path):
             for ext in ['.png', '.jpg', '.jpeg', '.preview.png']:
-                alt_path = os.path.join(directory, f"{base_name}{ext}")
+                alt_path = os.path.join(file_dir, f"{base_name}{ext}")
                 if os.path.exists(alt_path):
                     image_path = alt_path
                     break
@@ -123,7 +128,7 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
                     elif '.jpg' in image_url or '.jpeg' in image_url: ext = '.jpg'
                     else: ext = '.webp'
                     
-                    new_image_path = os.path.join(directory, f"{base_name}{ext}")
+                    new_image_path = os.path.join(file_dir, f"{base_name}{ext}")
                     try:
                         download_file(image_url, new_image_path, api_key)
                         downloaded_files['image'] = new_image_path

@@ -79,33 +79,41 @@ export async function scanDir(
     return 0;
   }
 
-  const values = (dir as unknown as { values: ValuesFn }).values();
-  const files: { name: string; handle: FileSystemFileHandle }[] = [];
-  for await (const [name, handle] of values) {
-    if (handle.kind !== 'file') continue;
-    if (!MODEL_EXTS.some((e) => name.toLowerCase().endsWith(e))) continue;
-    files.push({ name, handle: handle as FileSystemFileHandle });
-  }
+  // Recursive: users sort models into subfolders. Sidecars stay next to
+  // their model file; seen keys use paths relative to the linked folder.
+  const files: { rel: string; handle: FileSystemFileHandle; dir: FileSystemDirectoryHandle }[] = [];
+  const walk = async (d: FileSystemDirectoryHandle, prefix: string) => {
+    const it = (d as unknown as { values: ValuesFn }).values();
+    for await (const [name, handle] of it) {
+      if (handle.kind === 'directory') {
+        await walk(handle as unknown as FileSystemDirectoryHandle, `${prefix}${name}/`);
+      } else if (handle.kind === 'file' && MODEL_EXTS.some((e) => name.toLowerCase().endsWith(e))) {
+        files.push({ rel: `${prefix}${name}`, handle: handle as FileSystemFileHandle, dir: d });
+      }
+    }
+  };
+  await walk(dir, '');
 
   let updated = 0;
   let done = 0;
   for (const f of files) {
+    const name = f.rel.split('/').pop() ?? f.rel;
     done += 1;
-    onMsg(`${type}: Scanning ${f.name}... (${done}/${files.length})`);
-    seen.add(`dir_${type}/${f.name}`);
+    onMsg(`${type}: Scanning ${f.rel}... (${done}/${files.length})`);
+    seen.add(`dir_${type}/${f.rel}`);
     try {
       const file = await f.handle.getFile();
       const hash = await sha256Hex(file);
       const version = await fetchVersionByHash(hash);
       const versionId = version.id;
       const modelId = version.modelId ?? 0;
-      const base = f.name.replace(/\.[^.]+$/, '');
+      const base = name.replace(/\.[^.]+$/, '');
 
       const metaName = `${base}.metadata.json`;
-      if (!(await fileExists(dir, metaName))) {
+      if (!(await fileExists(f.dir, metaName))) {
         try {
           const full = modelId ? await fetchModel(modelId) : null;
-          const fh = await dir.getFileHandle(metaName, { create: true });
+          const fh = await f.dir.getFileHandle(metaName, { create: true });
           const w = await fh.createWritable();
           await w.write(JSON.stringify(full ?? version, null, 4));
           await w.close();
@@ -119,10 +127,10 @@ export async function scanDir(
       if (imgUrl) {
         const ext = imgUrl.includes('.png') ? '.png' : imgUrl.includes('.jpg') || imgUrl.includes('.jpeg') ? '.jpg' : '.webp';
         imageName = `${base}${ext}`;
-        if (!(await fileExists(dir, imageName))) {
+        if (!(await fileExists(f.dir, imageName))) {
           try {
             const res = await fetch(imgUrl);
-            if (res.ok) await writeBytesFile(dir, imageName, await res.arrayBuffer());
+            if (res.ok) await writeBytesFile(f.dir, imageName, await res.arrayBuffer());
             else imageName = null;
           } catch {
             imageName = null;
@@ -133,12 +141,12 @@ export async function scanDir(
       upsertScanned({
         modelId,
         versionId,
-        name: version.model?.name ?? f.name,
+        name: version.model?.name ?? name,
         type: version.model?.type ?? type,
         baseModel: version.baseModel ?? '',
         dirKey: `dir_${type}`,
         dirPath: getDirectories()[`dir_${type}`] ?? '',
-        filename: f.name,
+        filename: f.rel,
         hash: hash.slice(0, 12),
         size: file.size,
         imageName,
@@ -146,7 +154,7 @@ export async function scanDir(
       });
       updated += 1;
     } catch {
-      onMsg(`${type}: could not identify ${f.name}`);
+      onMsg(`${type}: could not identify ${f.rel}`);
     }
   }
   onMsg(`${type}: scanned ${files.length} files, updated ${updated} models.`);

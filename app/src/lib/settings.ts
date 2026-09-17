@@ -108,6 +108,45 @@ export function deleteCustomDir(label: string): void {
   write(CUSTOM_DIRS_KEY, JSON.stringify(dirs));
 }
 
+/** All paths for a type: dir_<Type>, dir_<Type>__1, dir_<Type>__2 … */
+export function getDirPaths(modelType: string): string[] {
+  const dirs = getDirectories();
+  const out: string[] = [];
+  const base = dirs[`dir_${modelType}`] ?? '';
+  if (base.trim()) out.push(base);
+  const extras = Object.keys(dirs)
+    .filter((k) => k.startsWith(`dir_${modelType}__`))
+    .sort()
+    .map((k) => dirs[k])
+    .filter((v) => v && v.trim());
+  return [...out, ...extras];
+}
+
+/** Append another path slot for a type. Returns the new key. */
+export function addDirPath(modelType: string, path: string): string {
+  const dirs = getDirectories();
+  let i = 1;
+  while (`dir_${modelType}__${i}` in dirs) i += 1;
+  const key = `dir_${modelType}__${i}`;
+  const next = { ...dirs, [key]: path.trim() };
+  try {
+    localStorage.setItem('sdcodex.dirs.v1', JSON.stringify(next));
+  } catch {
+    /* ignore */
+  }
+  return key;
+}
+
+export function removeDirPath(key: string): void {
+  const dirs = getDirectories();
+  delete dirs[key];
+  try {
+    localStorage.setItem('sdcodex.dirs.v1', JSON.stringify(dirs));
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Default target dir for a type, preferring configured dir — mirrors downloader.py. */
 export function targetDirFor(modelType: string, baseModel: string): string {
   const configured = getDirectories()[`dir_${modelType}`];
