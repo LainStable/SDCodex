@@ -17,6 +17,7 @@ interface ServerRow {
   versionId: number;
   name: string;
   type: string;
+  files?: { image?: string; model?: string; metadata?: string };
 }
 
 async function fetchServerRows(): Promise<ServerRow[]> {
@@ -30,6 +31,8 @@ async function fetchServerRows(): Promise<ServerRow[]> {
   }
 }
 
+const fileUrl = (absPath: string) => `/api/files?path=${encodeURIComponent(absPath)}`;
+
 export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }) {
   const [query, setQuery] = useState('');
   const [bases, setBases] = useState<string[]>([]);
@@ -37,6 +40,8 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
   const [serverRows, setServerRows] = useState<ServerRow[]>([]);
   const [colors] = useState<Record<string, string>>(getDirColors);
   const [activeTab, setActiveTab] = useState<string | null>(null);
+  // Object URLs for browser-scanned previews (resolved via bound handles).
+  const [localPreviews, setLocalPreviews] = useState<Record<string, string>>({});
 
   // Sections follow Settings: only configured categories appear.
   const sections: string[] = useMemo(() => {
@@ -56,6 +61,29 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
     void (async () => {
       const rows = await fetchServerRows();
       if (live) setServerRows(rows);
+    })();
+    // Resolve browser-scanned preview images through their bound folders.
+    void (async () => {
+      if (typeof (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker !== 'function') {
+        return;
+      }
+      const { getHandle } = await import('../lib/idb');
+      const found: Record<string, string> = {};
+      for (const s of loadScanned()) {
+        if (!s.imageName) continue;
+        const key = `${s.dirKey}/${s.filename}`;
+        try {
+          const dir = await getHandle(s.dirKey);
+          if (!dir) continue;
+          const fh = await dir.getFileHandle(s.imageName);
+          const file = await fh.getFile();
+          if (!file.type.startsWith('image/')) continue;
+          found[key] = URL.createObjectURL(file);
+        } catch {
+          /* unlinked or missing — card keeps its placeholder */
+        }
+      }
+      if (live && Object.keys(found).length > 0) setLocalPreviews(found);
     })();
     return () => {
       live = false;
@@ -145,7 +173,7 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                 {remote.map((r) => (
                   <article
                     key={`srv-${r.modelId}-${r.versionId}`}
-                    className="glass-l1 rounded-lg p-3 transition-colors hover:border-primary/40"
+                    className="glass-l1 overflow-hidden rounded-lg transition-colors hover:border-primary/40"
                   >
                     <button
                       type="button"
@@ -155,21 +183,39 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                       className="block w-full text-left"
                       title="Open details"
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <TypeBadge type={r.type} />
-                        <SocketPill socket="rw" />
+                      <div className="relative aspect-[4/3] bg-obsidian-lowest">
+                        {r.files?.image ? (
+                          <img
+                            src={fileUrl(r.files.image)}
+                            alt=""
+                            loading="lazy"
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center font-mono text-[11px] text-ink-faint">
+                            no preview
+                          </div>
+                        )}
+                        <div className="absolute left-2 top-2">
+                          <TypeBadge type={r.type} color={colors[r.type]} />
+                        </div>
                       </div>
-                      <h2 className="mt-2 font-display text-base font-semibold">{r.name}</h2>
+                      <div className="p-3">
+                        <h2 className="truncate font-display text-base font-semibold" title={r.name}>
+                          {r.name}
+                        </h2>
+                        <div className="mt-1 flex items-center justify-between">
+                          <SocketPill socket="rw" />
+                          <span className="font-mono text-[10px] text-status-active">✓ on server</span>
+                        </div>
+                      </div>
                     </button>
-                    <dl className="mt-2 space-y-1 font-mono text-[11px] text-ink-muted">
-                      <div className="truncate text-status-active">✓ on server</div>
-                    </dl>
                   </article>
                 ))}
                 {local.map((s) => (
                   <article
                     key={`${s.modelId}-${s.versionId}`}
-                    className="glass-l1 rounded-lg p-3 ring-1 ring-inset ring-status-active/20 transition-colors hover:border-primary/40"
+                    className="glass-l1 overflow-hidden rounded-lg ring-1 ring-inset ring-status-active/20 transition-colors hover:border-primary/40"
                   >
                     <button
                       type="button"
@@ -188,28 +234,39 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                       className="block w-full text-left"
                       title="Open details"
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <TypeBadge type={s.type} />
-                        <SocketPill socket="rw" />
+                      <div className="relative aspect-[4/3] bg-obsidian-lowest">
+                        {localPreviews[`${s.dirKey}/${s.filename}`] ? (
+                          <img
+                            src={localPreviews[`${s.dirKey}/${s.filename}`]}
+                            alt=""
+                            loading="lazy"
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center font-mono text-[11px] text-ink-faint">
+                            no preview
+                          </div>
+                        )}
+                        <div className="absolute left-2 top-2">
+                          <TypeBadge type={s.type} color={colors[s.type]} />
+                        </div>
                       </div>
-                      <h2 className="mt-2 font-display text-base font-semibold">{s.name}</h2>
+                      <div className="p-3">
+                        <h2 className="truncate font-display text-base font-semibold" title={s.name}>
+                          {s.name}
+                        </h2>
+                        <div className="mt-1 flex items-center justify-between font-mono text-[11px] text-ink-muted">
+                          <SocketPill socket="rw" />
+                          <span>{formatBytes(s.size)}</span>
+                        </div>
+                        <div className="mt-1 truncate font-mono text-[10px] text-ink-faint">
+                          {s.dirPath}/{s.filename}
+                        </div>
+                        <div className="truncate font-mono text-[10px] text-status-active">
+                          ✓ metadata{s.imageName ? ' + preview' : ''} on disk
+                        </div>
+                      </div>
                     </button>
-                    <dl className="mt-2 space-y-1 font-mono text-[11px] text-ink-muted">
-                      <div className="flex justify-between gap-2">
-                        <dt>hash</dt>
-                        <dd>{s.hash}…</dd>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <dt>size</dt>
-                        <dd>{formatBytes(s.size)}</dd>
-                      </div>
-                      <div className="truncate pt-1 text-ink-faint">
-                        {s.dirPath}/{s.filename}
-                      </div>
-                      <div className="truncate text-status-active">
-                        ✓ metadata{s.imageName ? ' + preview' : ''} on disk
-                      </div>
-                    </dl>
                   </article>
                 ))}
                 </div>

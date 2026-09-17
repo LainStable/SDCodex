@@ -245,6 +245,36 @@ def library():
     )
 
 
+@api_v1.get("/files")
+def serve_file():
+    """Serve a model/preview file from disk (mirrors OldCode /files/<path>).
+
+    Authed only, and confined to configured model directories.
+    Usage: /api/files?path=/models/lora/foo.preview.png
+    """
+    from flask import send_file
+
+    user, err = _require_user()
+    if err:
+        return err
+    import os
+
+    raw = request.args.get("path", "")
+    if not raw:
+        return jsonify({"error": "path required"}), 400
+    real = os.path.realpath(raw if os.path.isabs(raw) else os.path.join("/", raw))
+    allowed = [
+        os.path.realpath(v)
+        for v in (s.value or "" for s in Setting.query.all() if s.key.startswith("dir_"))
+        if v
+    ]
+    if not any(real == root or real.startswith(root + os.sep) for root in allowed):
+        return jsonify({"error": "outside model directories"}), 403
+    if not os.path.isfile(real):
+        return jsonify({"error": "not found"}), 404
+    return send_file(real)
+
+
 @api_v1.post("/scan")
 def scan():
     user, err = _require_user()

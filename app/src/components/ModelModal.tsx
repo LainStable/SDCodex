@@ -308,22 +308,6 @@ export default function ModelModal({
                   <TypeBadge type={model.type} />
                 </div>
 
-                {model.tags && model.tags.length > 0 && (
-                  <div className="mt-2 rounded-lg border border-primary/25 bg-primary/[0.05] p-3">
-                    <h3 className="font-display text-sm font-semibold">Tags</h3>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {model.tags.map((tag) => (
-                        <span
-                          key={tag}
-                          className="rounded border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[10px] text-ink-muted"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 <div ref={mainRef} className="mt-3 flex h-[320px] items-center justify-center overflow-hidden rounded-lg bg-black/40 md:h-[440px]">
                   {images[imgIdx] ? (
                     <img
@@ -434,6 +418,22 @@ export default function ModelModal({
                   </dl>
                 </div>
 
+                {model.tags && model.tags.length > 0 && (
+                  <div className="mt-3 rounded-lg border border-primary/25 bg-primary/[0.05] p-3">
+                    <h3 className="font-display text-sm font-semibold">Tags</h3>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {model.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="rounded border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[10px] text-ink-muted"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="glass-l1 mt-3 rounded-lg p-3">
                   <h3 className="font-display text-sm font-semibold">Files</h3>
                   {(version.files ?? []).map((f) => {
@@ -453,23 +453,25 @@ export default function ModelModal({
                           {f.hashes.BLAKE3 && <div>BLAKE3: {shortHash(f.hashes.BLAKE3)}</div>}
                         </div>
                         <div className="mt-2 flex gap-1.5">
-                          <PrimaryButton
-                            className="!px-3 !py-1 !text-[11px]"
-                            disabled={queued}
-                            onClick={() =>
-                              onQueue({
-                                id: qid,
-                                name: `${model.name} · ${version.name}`,
-                                detail: `${f.name} · ${formatSize(f.sizeKB)}`,
-                                downloadUrl: f.downloadUrl || version.downloadUrl,
-                                modelId: model.id,
-                                versionId: version.id,
-                                baseModel: version.baseModel,
-                              })
-                            }
-                          >
-                            {queued ? '✓ Queued' : '⬇ Download'}
-                          </PrimaryButton>
+                          {target.kind !== 'local' && (
+                            <PrimaryButton
+                              className="!px-3 !py-1 !text-[11px]"
+                              disabled={queued}
+                              onClick={() =>
+                                onQueue({
+                                  id: qid,
+                                  name: `${model.name} · ${version.name}`,
+                                  detail: `${f.name} · ${formatSize(f.sizeKB)}`,
+                                  downloadUrl: f.downloadUrl || version.downloadUrl,
+                                  modelId: model.id,
+                                  versionId: version.id,
+                                  baseModel: version.baseModel,
+                                })
+                              }
+                            >
+                              {queued ? '✓ Queued' : '⬇ Download'}
+                            </PrimaryButton>
+                          )}
                           {target.kind === 'local' && onForgetLocal && (
                             <DangerButton
                               onClick={() => {
