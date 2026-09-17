@@ -154,7 +154,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-obsidian-bg text-ink">
-      <DownloadFloat />
+      <DownloadFloat go={() => go('queue')} />
       {callbackMsg && (
         <div className="fixed left-1/2 top-4 z-[70] -translate-x-1/2 rounded-lg border border-status-alert/40 bg-status-alert/15 px-4 py-2 font-mono text-xs text-[#f87171]">
           SSO: {callbackMsg}

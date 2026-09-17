@@ -540,12 +540,14 @@ export function Queue({
   );
 }
 
-/** Floating background-download indicator (top center, all pages). */
-export function DownloadFloat() {
+/** Floating Downloads & Queue panel (top right, all pages). Matches the
+    reference: active rows with progress, queued summary, full-queue link. */
+export function DownloadFloat({ go }: { go: (v: 'queue') => void }) {
   const [state, setState] = useState<{
     active: Array<{ model_id?: number; version_id?: number; message?: string; progress?: number }>;
     queued: number;
   } | null>(null);
+  const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -565,6 +567,7 @@ export function DownloadFloat() {
         const active = (st.active_tasks ?? []).filter((t) => t.model_id);
         if (active.length === 0 && (st.queue_length ?? 0) === 0) {
           setState(null);
+          setDismissed(false);
         } else {
           setState({ active, queued: st.queue_length ?? 0 });
         }
@@ -580,35 +583,65 @@ export function DownloadFloat() {
     };
   }, []);
 
-  if (!state) return null;
-  const first = state.active[0];
-  const pct = first?.progress ?? 0;
+  if (!state || dismissed) return null;
 
   return (
-    <div className="glass-l2 fixed left-1/2 top-3 z-[55] w-[min(420px,90vw)] -translate-x-1/2 rounded-lg p-3">
-      <div className="flex items-center gap-2 font-mono text-[11px]">
-        <span className="text-secondary">⬇</span>
-        <span className="min-w-0 flex-1 truncate text-ink">
-          {first
-            ? `model ${first.model_id} · ${first.message || 'downloading'}`
-            : 'download worker'}
+    <div className="glass-l2 fixed right-3 top-3 z-[55] w-[min(360px,92vw)] rounded-lg p-3">
+      <div className="flex items-center gap-2">
+        <h2 className="font-display text-sm font-semibold">Downloads & Queue</h2>
+        <span className="rounded border border-status-active/40 bg-status-active/10 px-1.5 py-0.5 font-mono text-[9px] uppercase text-status-active">
+          {state.active.length} active
         </span>
-        <span className="text-ink">{pct}%</span>
+        {state.queued > 0 && (
+          <span className="rounded border border-white/15 bg-white/5 px-1.5 py-0.5 font-mono text-[9px] uppercase text-ink-muted">
+            {state.queued} queued
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => setDismissed(true)}
+          className="ml-auto rounded px-1.5 font-mono text-xs text-ink-faint hover:text-white"
+          title="Dismiss (reappears on change)"
+        >
+          ✕
+        </button>
       </div>
-      <div className="mt-1.5 h-1.5 overflow-hidden rounded-sm bg-white/10">
-        <div
-          className="h-full rounded-sm bg-gradient-to-r from-primary to-secondary transition-all"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      {state.active.length > 1 && (
-        <div className="mt-1 font-mono text-[10px] text-ink-faint">
-          +{state.active.length - 1} parallel
-        </div>
-      )}
+
+      <ul className="mt-2 space-y-2">
+        {state.active.map((t, i) => (
+          <li key={`${t.model_id}-${t.version_id}-${i}`} className="rounded border border-white/[0.06] p-2">
+            <div className="flex items-center justify-between gap-2 font-mono text-[11px]">
+              <span className="min-w-0 flex-1 truncate text-ink">
+                model {t.model_id} · v{t.version_id}
+              </span>
+              <span className="text-ink">{t.progress ?? 0}%</span>
+            </div>
+            <div className="mt-1.5 h-1.5 overflow-hidden rounded-sm bg-white/10">
+              <div
+                className="h-full rounded-sm bg-gradient-to-r from-primary to-secondary transition-all"
+                style={{ width: `${t.progress ?? 0}%` }}
+              />
+            </div>
+            <div className="mt-1 truncate font-mono text-[10px] text-ink-faint">
+              {t.message || 'downloading…'}
+            </div>
+          </li>
+        ))}
+      </ul>
+
       {state.queued > 0 && (
-        <div className="font-mono text-[10px] text-ink-faint">+{state.queued} queued</div>
+        <p className="mt-2 font-mono text-[10px] text-ink-faint">
+          +{state.queued} waiting behind the parallel limit
+        </p>
       )}
+
+      <button
+        type="button"
+        onClick={() => go('queue')}
+        className="mt-2 w-full rounded border border-primary/50 bg-primary/20 py-1.5 text-xs font-semibold text-white hover:bg-primary/30"
+      >
+        View Full Queue →
+      </button>
     </div>
   );
 }
