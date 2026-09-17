@@ -82,15 +82,18 @@ function isValidCssColor(v: string): boolean {
   return opt.color !== '';
 }
 
-/** Floating accent picker (swatches + custom dialog), as per reference. */
+/** Floating accent picker (swatches + custom dialog), as per reference.
+    The category badge itself is the trigger. */
 function ColorMenu({
   type,
   current,
   onPick,
+  children,
 }: {
   type: string;
   current: string;
   onPick: (color: string) => void;
+  children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
@@ -140,18 +143,25 @@ function ColorMenu({
           setOpen((o) => !o);
         }}
         title={`Accent color for ${type}`}
-        className="flex h-6 w-6 items-center justify-center rounded border border-white/15 text-xs hover:border-white/30"
-        style={
-          current
-            ? { backgroundColor: current, borderColor: current }
-            : undefined
-        }
+        className="block"
       >
-        {!current && <span className="text-ink-faint">🎨</span>}
+        {children}
       </button>
 
       {open && !customOpen && (
         <div className="glass-l2 modal-pop absolute left-0 top-8 z-50 flex gap-1.5 rounded-lg p-2">
+          <button
+            type="button"
+            title="Default grey"
+            onClick={() => {
+              onPick('');
+              setOpen(false);
+            }}
+            className={`h-6 w-6 rounded-full border-2 ${
+              !current ? 'border-white' : 'border-white/25 hover:border-white/60'
+            }`}
+            style={{ width: 24, height: 24, backgroundColor: '#3a3f4d' }}
+          />
           {SWATCHES.map((c) => (
             <button
               key={c}
@@ -166,7 +176,7 @@ function ColorMenu({
                   ? 'border-white'
                   : 'border-transparent hover:border-white/50'
               }`}
-              style={{ backgroundColor: c }}
+              style={{ width: 24, height: 24, backgroundColor: c }}
             />
           ))}
           <button
@@ -178,6 +188,7 @@ function ColorMenu({
               setCustomOpen(true);
             }}
             className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-dashed border-white/40 text-[10px] text-white hover:border-white"
+            style={{ width: 24, height: 24 }}
           >
             +
           </button>
@@ -394,10 +405,16 @@ function Dirs() {
           return (
             <div key={t} className="py-1.5">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="w-28 shrink-0">
-                  <TypeBadge type={t} color={colors[t]} />
-                </span>
-                {hasSaved && <ColorMenu type={t} current={colors[t] ?? ''} onPick={pickColor} />}
+                <ColorMenu type={t} current={colors[t] ?? ''} onPick={pickColor}>
+                  <span className="block cursor-pointer" title={`${t} — click to set accent color`}>
+                    <TypeBadge type={t} color={colors[t]} />
+                  </span>
+                </ColorMenu>
+                {hasSaved && (
+                  <span className="font-mono text-[10px] text-ink-faint">
+                    click badge for color
+                  </span>
+                )}
                 <GhostButton
                   onClick={() => {
                     const key = addDirPath(t, '');
@@ -418,25 +435,27 @@ function Dirs() {
                 const dirty = (drafts[key] ?? '') !== (dirs[key] ?? '');
                 const extra = key !== `dir_${t}`;
                 return (
-                  <div key={key} className="mt-1 flex flex-wrap items-center gap-2 pl-0 sm:pl-32">
+                  <div key={key} className="mt-1 flex items-center gap-2 sm:pl-32">
                     <input
                       value={drafts[key] ?? ''}
                       onChange={(e) => setDrafts((d) => ({ ...d, [key]: e.target.value }))}
                       placeholder={extra ? 'Another folder…' : `/models/${t.toLowerCase()}/`}
-                      className="min-w-[200px] flex-1 rounded border border-white/10 bg-obsidian-lowest px-2 py-1 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary"
+                      className="min-w-0 flex-1 rounded border border-white/10 bg-obsidian-lowest px-2 py-1 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary"
                     />
-                    <GhostButton disabled={!dirty} onClick={() => save(key)}>
+                    <GhostButton disabled={!dirty} onClick={() => save(key)} className="shrink-0">
                       Save
                     </GhostButton>
                     <GhostButton
                       disabled={scanning || !(dirs[key] ?? '').trim()}
                       onClick={() => void scanOne(t)}
                       title="Server scans its own path; standalone asks for the folder once"
+                      className="shrink-0"
                     >
                       Scan
                     </GhostButton>
                     {extra && (
                       <GhostButton
+                        className="shrink-0"
                         onClick={() => {
                           removeDirPath(key);
                           refreshDirs();
