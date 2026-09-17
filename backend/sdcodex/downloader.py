@@ -13,18 +13,19 @@ def sanitize_filename(filename):
     """
     return re.sub(r'[\\/*?:"<>|]', "", filename)
 
-def download_file(url, path, api_key=None, progress_callback=None):
+def download_file(url, path, api_key=None, progress_callback=None, is_cancelled=None):
     """
     Download a file from a URL to a local path with progress reporting.
+    `is_cancelled` is polled per chunk; a truthy return aborts the download.
     """
     headers = {}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-        
+
     with requests.get(url, stream=True, headers=headers) as r:
         r.raise_for_status()
         total_length = r.headers.get('content-length')
-        
+
         with open(path, 'wb') as f:
             if total_length is None: # no content length header
                 f.write(r.content)
@@ -32,12 +33,24 @@ def download_file(url, path, api_key=None, progress_callback=None):
                 dl = 0
                 total_length = int(total_length)
                 for chunk in r.iter_content(chunk_size=8192):
+                    if is_cancelled and is_cancelled():
+                        raise CancelledError()
                     dl += len(chunk)
                     f.write(chunk)
                     if progress_callback:
                         progress_callback(int(dl / total_length * 100))
+    if is_cancelled and is_cancelled():
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        raise CancelledError()
 
-def download_model(model_id, version_id, api_key=None, progress_callback=None):
+
+class CancelledError(Exception):
+    pass
+
+def download_model(model_id, version_id, api_key=None, progress_callback=None, is_cancelled=None):
     """
     Download a model version, its preview image, and metadata.
     """
@@ -53,13 +66,21 @@ def download_model(model_id, version_id, api_key=None, progress_callback=None):
         model_type = model['type']
         version_name = version['name']
         
-        # 2. Determine target directory
+        # 2. Determine target directory (primary path for the type).
+        # With organize_by_base on, downloads land in <dir>/<BaseModel>/,
+        # e.g. checkpoints/Anima/ for an Anima checkpoint.
         setting = Setting.query.get(f"dir_{model_type}")
         if setting and setting.value:
             base_dir = setting.value
         else:
             base_dir = os.path.join(current_app.root_path, 'static', 'downloads', model_type)
-        
+
+        org_row = Setting.query.get("organize_by_base")
+        if org_row and (org_row.value or "") == "1":
+            slug = re.sub(r'[^a-z0-9]+', '_', (version.get('baseModel') or '').lower()).strip('_')
+            if slug:
+                base_dir = os.path.join(base_dir, slug)
+
         if not os.path.exists(base_dir):
             os.makedirs(base_dir)
 
@@ -97,7 +118,7 @@ def download_model(model_id, version_id, api_key=None, progress_callback=None):
         # 4. Download files
         # Model File
         print(f"Downloading model to {model_path}...")
-        download_file(primary_file['downloadUrl'], model_path, api_key, progress_callback)
+        download_file(primary_file['downloadUrl'], model_path, api_key, progress_callback, is_cancelled)
         downloaded_files['model'] = model_path
 
         # Preview Image

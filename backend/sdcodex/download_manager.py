@@ -19,6 +19,7 @@ class DownloadManager:
         if cls._instance is None:
             cls._instance = super(DownloadManager, cls).__new__(cls)
             cls._instance.queue = queue.Queue()
+            cls._instance.scan_queue = queue.Queue()
             cls._instance.current_task = None
             cls._instance.active_tasks = []
             cls._instance.history = []
@@ -26,6 +27,7 @@ class DownloadManager:
             cls._instance.running = False
             cls._instance.lock = threading.Lock()
             cls._instance.workers = 0
+            cls._instance.scan_worker_on = False
         return cls._instance
 
     def init_app(self, app):
@@ -47,14 +49,195 @@ class DownloadManager:
         if not self.running:
             self.running = True
             self.ensure_workers()
+            self.ensure_scan_worker()
 
     def ensure_workers(self):
-        """Top up worker threads to the configured parallelism."""
+        """Top up download worker threads to the configured parallelism."""
         with self.lock:
             while self.workers < self.max_workers():
                 self.workers += 1
                 thread = threading.Thread(target=self._worker, daemon=True)
                 thread.start()
+
+    def ensure_scan_worker(self):
+        """One dedicated lane for scans so they never block downloads."""
+        with self.lock:
+            if self.scan_worker_on:
+                return
+            self.scan_worker_on = True
+            thread = threading.Thread(target=self._scan_worker, daemon=True)
+            thread.start()
+
+    class _Cancelled(Exception):
+        pass
+
+    def _scan_worker(self):
+        from sdcodex.models import Download, Setting
+        from sdcodex.scanner import scan_directory
+
+        print("DownloadManager scan worker started")
+        while True:
+            try:
+                task = self.scan_queue.get(timeout=5)
+            except queue.Empty:
+                continue
+            print("Scan worker picked up task")
+            self.current_task = task
+            with self.lock:
+                self.active_tasks.append(task)
+            task['status'] = 'running'
+            task['message'] = 'Starting scan...'
+
+            def progress_callback(percentage, msg=None):
+                if task.get('cancel'):
+                    raise DownloadManager._Cancelled()
+                task['progress'] = percentage
+                task['message'] = msg or f"Processing... {percentage}%"
+
+            try:
+                with self.app.app_context():
+                    only = task.get("model_types") or None
+                    dir_rows = {
+                        s.key: (s.value or "").strip()
+                        for s in Setting.query.all()
+                        if s.key.startswith("dir_") and (s.value or "").strip()
+                    }
+                    directories = []
+                    for m_type in MODEL_TYPES:
+                        if only and m_type not in only:
+                            continue
+                        paths = [dir_rows[f"dir_{m_type}"]] if f"dir_{m_type}" in dir_rows else []
+                        extra = sorted(
+                            v for k, v in dir_rows.items() if k.startswith(f"dir_{m_type}__")
+                        )
+                        for path in paths + extra:
+                            directories.append((path, m_type))
+                    total_updated = 0
+                    all_found_ids = set()
+                    for directory, m_type in directories:
+                        task['message'] = f"Scanning {m_type} directory..."
+                        updated, msg, found_ids = scan_directory(
+                            directory, m_type, task['api_key'], progress_callback
+                        )
+                        total_updated += updated
+                        all_found_ids.update(found_ids)
+                    removed_count = 0
+                    for download in Download.query.all():
+                        if (download.model_id, download.version_id) not in all_found_ids:
+                            db.session.delete(download)
+                            removed_count += 1
+                    if removed_count > 0:
+                        db.session.commit()
+                    task['status'] = 'completed'
+                    task['message'] = (
+                        f"Scan complete. Updated {total_updated} models. "
+                        f"Removed {removed_count} missing models."
+                    )
+                    task['progress'] = 100
+            except DownloadManager._Cancelled:
+                print("Scan task cancelled")
+                task['status'] = 'cancelled'
+                task['message'] = 'Cancelled by user'
+                task['progress'] = 0
+            except Exception as e:
+                print(f"Scan worker error: {e}")
+                task['status'] = 'failed'
+                task['message'] = str(e)
+            self.history.append(task)
+            with self.lock:
+                if task in self.active_tasks:
+                    self.active_tasks.remove(task)
+            if self.current_task is task:
+                self.current_task = None
+            self.scan_queue.task_done()
+
+    def _scan_worker(self):
+        from sdcodex.models import Download, Setting
+        from sdcodex.scanner import scan_directory
+
+        print("DownloadManager scan worker started")
+        while True:
+            try:
+                task = self.scan_queue.get(timeout=5)
+            except queue.Empty:
+                continue
+            print("Scan worker picked up task")
+            self.current_task = task
+            with self.lock:
+                self.active_tasks.append(task)
+            task['status'] = 'running'
+            task['message'] = 'Starting scan...'
+
+            def progress_callback(percentage, msg=None):
+                if task.get('cancel'):
+                    raise DownloadManager._Cancelled()
+                task['progress'] = percentage
+                task['message'] = msg or f"Processing... {percentage}%"
+
+            try:
+                with self.app.app_context():
+                    only = task.get("model_types") or None
+                    dir_rows = {
+                        s.key: (s.value or "").strip()
+                        for s in Setting.query.all()
+                        if s.key.startswith("dir_") and (s.value or "").strip()
+                    }
+                    directories = []
+                    for m_type in MODEL_TYPES:
+                        if only and m_type not in only:
+                            continue
+                        paths = [dir_rows[f"dir_{m_type}"]] if f"dir_{m_type}" in dir_rows else []
+                        extra = sorted(
+                            v for k, v in dir_rows.items() if k.startswith(f"dir_{m_type}__")
+                        )
+                        for path in paths + extra:
+                            directories.append((path, m_type))
+                    total_updated = 0
+                    all_found_ids = set()
+                    for directory, m_type in directories:
+                        task['message'] = f"Scanning {m_type} directory..."
+                        updated, msg, found_ids = scan_directory(
+                            directory, m_type, task['api_key'], progress_callback
+                        )
+                        total_updated += updated
+                        all_found_ids.update(found_ids)
+                    removed_count = 0
+                    for download in Download.query.all():
+                        if (download.model_id, download.version_id) not in all_found_ids:
+                            db.session.delete(download)
+                            removed_count += 1
+                    if removed_count > 0:
+                        db.session.commit()
+                    success = True
+                    message = (
+                        f"Scan complete. Updated {total_updated} models. "
+                        f"Removed {removed_count} missing models."
+                    )
+                print(f"Scan finished: {message}")
+                if task.get('cancel'):
+                    task['status'] = 'cancelled'
+                    task['message'] = 'Cancelled by user'
+                    task['progress'] = 0
+                else:
+                    task['status'] = 'completed'
+                    task['message'] = message
+                    task['progress'] = 100
+            except DownloadManager._Cancelled:
+                print("Scan task cancelled")
+                task['status'] = 'cancelled'
+                task['message'] = 'Cancelled by user'
+                task['progress'] = 0
+            except Exception as e:
+                print(f"Scan worker error: {e}")
+                task['status'] = 'failed'
+                task['message'] = str(e)
+            self.history.append(task)
+            with self.lock:
+                if task in self.active_tasks:
+                    self.active_tasks.remove(task)
+            if self.current_task is task:
+                self.current_task = None
+            self.scan_queue.task_done()
 
     def add_task(self, model_id=None, version_id=None, api_key=None, task_type='download', **kwargs):
         task = {
@@ -67,12 +250,44 @@ class DownloadManager:
             'message': 'Queued',
             **kwargs
         }
-        self.queue.put(task)
+        self.queue.put(task) if task_type != 'scan' else self.scan_queue.put(task)
         try:
-            self.ensure_workers()
+            self.ensure_scan_worker()
+            if task_type != 'scan':
+                self.ensure_workers()
         except Exception:
             pass
         return task
+
+    def cancel_task(self, model_id=None, version_id=None) -> tuple[bool, str]:
+        """Remove a queued download, or flag a running one to abort."""
+        with self.lock:
+            for t in list(self.active_tasks):
+                if t.get('model_id') == model_id and t.get('version_id') == version_id:
+                    t['cancel'] = True
+                    return True, "Cancelling…"
+        kept = []
+        removed = False
+        try:
+            while True:
+                t = self.queue.get_nowait()
+                if (
+                    not removed
+                    and t.get('model_id') == model_id
+                    and t.get('version_id') == version_id
+                ):
+                    removed = True
+                    t['status'] = 'cancelled'
+                    self.history.append(t)
+                else:
+                    kept.append(t)
+        except queue.Empty:
+            pass
+        for t in kept:
+            self.queue.put(t)
+        if removed:
+            return True, "Removed from queue."
+        return False, "Task not found (it may have finished)."
 
     def get_status(self):
         with self.lock:
@@ -92,9 +307,13 @@ class DownloadManager:
             ],
             'max_parallel': self.max_workers(),
             'queue_length': self.queue.qsize(),
+            'scan_queued': self.scan_queue.qsize(),
             'recent_history': self.history[-5:] if self.history else []
         }
         return status
+
+    class _Cancelled(Exception):
+        pass
 
     def _worker(self):
         print("DownloadManager worker started")
@@ -118,6 +337,8 @@ class DownloadManager:
                 task['message'] = 'Starting...'
                 
                 def progress_callback(percentage, msg=None):
+                    if task.get('cancel'):
+                        raise DownloadManager._Cancelled()
                     task['progress'] = percentage
                     if msg:
                         task['message'] = msg
@@ -192,17 +413,23 @@ class DownloadManager:
                     else:
                         # Normal download
                         success, message = download_model(
-                            task['model_id'], 
-                            task['version_id'], 
-                            task['api_key'], 
-                            progress_callback
+                            task['model_id'],
+                            task['version_id'],
+                            task['api_key'],
+                            progress_callback,
+                            is_cancelled=lambda: bool(task.get('cancel')),
                         )
                     
                     print(f"Task finished: {success} - {message}")
-                
-                task['status'] = 'completed' if success else 'failed'
-                task['message'] = message
-                task['progress'] = 100 if success else 0
+
+                if task.get('cancel'):
+                    task['status'] = 'cancelled'
+                    task['message'] = 'Cancelled by user'
+                    task['progress'] = 0
+                else:
+                    task['status'] = 'completed' if success else 'failed'
+                    task['message'] = message
+                    task['progress'] = 100 if success else 0
 
                 self.history.append(task)
                 with self.lock:
@@ -212,7 +439,42 @@ class DownloadManager:
                     self.current_task = None
                 self.queue.task_done()
 
+            except DownloadManager._Cancelled:
+                print(f"Task cancelled: {task.get('model_id')}")
+                task['status'] = 'cancelled'
+                task['message'] = 'Cancelled by user'
+                task['progress'] = 0
+                self.history.append(task)
+                with self.lock:
+                    if task in self.active_tasks:
+                        self.active_tasks.remove(task)
+                if self.current_task is task:
+                    self.current_task = None
+                try:
+                    self.queue.task_done()
+                except ValueError:
+                    pass
             except Exception as e:
+                # A downloader-level abort counts as a user cancel, not a crash.
+                from sdcodex.downloader import CancelledError as _DlCancelled
+
+                if isinstance(e, _DlCancelled) or task.get('cancel'):
+                    print(f"Task cancelled: {task.get('model_id')}")
+                    task['status'] = 'cancelled'
+                    task['message'] = 'Cancelled by user'
+                    task['progress'] = 0
+                    self.history.append(task)
+                    with self.lock:
+                        if task in self.active_tasks:
+                            self.active_tasks.remove(task)
+                    if self.current_task is task:
+                        self.current_task = None
+                    try:
+                        self.queue.task_done()
+                    except ValueError:
+                        pass
+                    continue
+                print(f"Worker error: {e}")
                 print(f"Worker error: {e}")
                 import traceback
                 traceback.print_exc()

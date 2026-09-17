@@ -82,6 +82,17 @@ export function setApiMirror(host: string): void {
   write(API_MIRROR, host === 'civitai.red' ? 'civitai.red' : 'civitai.com');
 }
 
+const ORGANIZE_KEY = 'sdcodex.organize.v1';
+
+/** Organize downloads into <dir>/<BaseModel>/ subfolders. Default off. */
+export function getOrganizeByBase(): boolean {
+  return read(ORGANIZE_KEY) === '1';
+}
+
+export function setOrganizeByBase(on: boolean): void {
+  write(ORGANIZE_KEY, on ? '1' : '0');
+}
+
 /** Mirrors OldCode Setting dir_<type> rows. */
 export function getDirectories(): Record<string, string> {
   try {
@@ -195,6 +206,7 @@ export async function pullSettings(): Promise<boolean> {
       colors?: Record<string, string>;
       civitaiApiKey: string;
       apiMirror?: string;
+      organizeByBase?: boolean;
     }>('/settings');
     write('sdcodex.dirs.v1', JSON.stringify(s.dirs ?? {}));
     write(COLORS_KEY, JSON.stringify(s.colors ?? {}));
@@ -203,6 +215,9 @@ export async function pullSettings(): Promise<boolean> {
     }
     if (s.apiMirror === 'civitai.red' || s.apiMirror === 'civitai.com') {
       write(API_MIRROR, s.apiMirror);
+    }
+    if (typeof s.organizeByBase === 'boolean') {
+      write(ORGANIZE_KEY, s.organizeByBase ? '1' : '0');
     }
     return true;
   } catch {
@@ -219,6 +234,7 @@ export async function pushSettings(): Promise<void> {
       colors: getDirColors(),
       civitaiApiKey: getApiKey(),
       apiMirror: getApiMirror(),
+      organizeByBase: getOrganizeByBase(),
     });
   } catch {
     /* standalone mode — local cache stands */

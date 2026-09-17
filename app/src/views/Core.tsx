@@ -322,10 +322,12 @@ const STATUS_STYLE: Record<QueueItem['status'], string> = {
 
 export function Queue({
   items,
+  onRemove,
   onClearCompleted,
   onClearAll,
 }: {
   items: QueueItem[];
+  onRemove: (id: string) => void;
   onClearCompleted: () => void;
   onClearAll: () => void;
 }) {
@@ -333,7 +335,7 @@ export function Queue({
   const [speedLimit, setSpeedLimit] = useState('Unlimited');
   const [maxParallel, setMaxParallel] = useState(1);
   const [server, setServer] = useState<{
-    active: Array<{ model_id?: number; version_id?: number; status?: string; progress?: number; message?: string }>;
+    active: Array<{ type?: string; model_id?: number; version_id?: number; status?: string; progress?: number; message?: string }>;
     queued: number;
     max: number;
     reachable: boolean;
@@ -364,7 +366,7 @@ export function Queue({
       const poll = async () => {
         try {
           const st = await apiGet<{
-            active_tasks?: Array<{ model_id?: number; version_id?: number; status?: string; progress?: number; message?: string }>;
+            active_tasks?: Array<{ type?: string; model_id?: number; version_id?: number; status?: string; progress?: number; message?: string }>;
             queue_length?: number;
             max_parallel?: number;
           }>('/downloads/status');
@@ -474,13 +476,35 @@ export function Queue({
                 <div className="flex items-center gap-3 text-sm">
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-semibold">
-                      model {t.model_id ?? '?'} · version {t.version_id ?? '?'}
+                      {t.type === 'scan' ? 'Library scan' : `model ${t.model_id ?? '?'} · version ${t.version_id ?? '?'}`}
                     </div>
                     <div className="truncate font-mono text-[11px] text-ink-muted">
                       {t.message || t.status || 'running'}
                     </div>
                   </div>
                   <span className="font-mono text-[11px] text-ink">{t.progress ?? 0}%</span>
+                  {t.type !== 'scan' && (
+                    <button
+                      type="button"
+                      title="Cancel download"
+                      onClick={() =>
+                        void (async () => {
+                          try {
+                            const { apiPost } = await import('../lib/backend');
+                            await apiPost('/downloads/cancel', {
+                              modelId: t.model_id,
+                              versionId: t.version_id,
+                            });
+                          } catch {
+                            /* poll refreshes */
+                          }
+                        })()
+                      }
+                      className="rounded border border-white/15 px-2 py-0.5 font-mono text-xs text-ink-faint hover:border-status-alert/50 hover:text-[#f87171]"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
                 <div className="mt-2 h-1.5 overflow-hidden rounded-sm bg-white/10">
                   <div
@@ -490,11 +514,6 @@ export function Queue({
                 </div>
               </li>
             ))}
-            {server.queued > 0 && (
-              <li className="rounded-lg border border-white/[0.06] p-3 font-mono text-[11px] text-ink-faint">
-                +{server.queued} waiting behind the parallel limit
-              </li>
-            )}
           </ul>
         </div>
       )}
@@ -522,6 +541,14 @@ export function Queue({
                 <span className="font-mono text-[11px] text-ink">
                   {i.progress != null ? `${i.progress}%` : 'staged'}
                 </span>
+                <button
+                  type="button"
+                  title="Remove from queue"
+                  onClick={() => onRemove(i.id)}
+                  className="rounded border border-white/15 px-2 py-0.5 font-mono text-xs text-ink-faint hover:border-status-alert/50 hover:text-[#f87171]"
+                >
+                  ✕
+                </button>
               </div>
               <div className="mt-2 h-1.5 overflow-hidden rounded-sm bg-white/10">
                 <div

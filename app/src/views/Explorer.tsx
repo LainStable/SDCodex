@@ -30,6 +30,7 @@ interface Props {
     baseModel: string;
   }) => void;
   queuedIds: Set<string>;
+  ownedIds: Set<string>;
   onOpen: (modelId: number) => void;
   searchToken: number;
   searchText: string;
@@ -39,7 +40,7 @@ function isNsfwImage(img: { nsfw: boolean | string }): boolean {
   return img.nsfw === true || (typeof img.nsfw === 'string' && img.nsfw !== 'None');
 }
 
-export default function Explorer({ onQueue, queuedIds, onOpen, searchToken, searchText }: Props) {
+export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchToken, searchText }: Props) {
   const [query, setQuery] = useState<ExplorerQuery>({
     q: '',
     type: 'All',
@@ -234,6 +235,7 @@ export default function Explorer({ onQueue, queuedIds, onOpen, searchToken, sear
           const img = v?.images[0];
           const blur = blurNsfw && img && isNsfwImage(img);
           const queued = v ? queuedIds.has(`civitai-${m.id}-${v.id}`) : queuedIds.has(`civitai-${m.id}`);
+          const owned = v ? ownedIds.has(`${m.id}-${v.id}`) : false;
           return (
             <article
               key={m.id}
@@ -279,7 +281,7 @@ export default function Explorer({ onQueue, queuedIds, onOpen, searchToken, sear
                 </div>
                 <button
                   type="button"
-                  disabled={queued || !v}
+                  disabled={queued || owned || !v}
                   onClick={() =>
                     v &&
                     onQueue({
@@ -293,12 +295,12 @@ export default function Explorer({ onQueue, queuedIds, onOpen, searchToken, sear
                     })
                   }
                   className={`mt-2 w-full rounded border py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.06em] ${
-                    queued
+                    queued || owned
                       ? 'border-status-active/40 bg-status-active/10 text-status-active'
                       : 'border-primary/50 bg-primary/20 text-white hover:bg-primary/30 disabled:opacity-50'
                   }`}
                 >
-                  {queued ? '✓ Queued' : '+ Download queue'}
+                  {queued ? '✓ Queued' : owned ? '✓ Installed' : '+ Download queue'}
                 </button>
               </div>
             </article>

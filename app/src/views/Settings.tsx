@@ -16,6 +16,7 @@ import {
   getCustomDirs,
   getDirColors,
   getDirectories,
+  getOrganizeByBase,
   pushSettings,
   removeDirPath,
   setApiKey,
@@ -23,6 +24,7 @@ import {
   setApiUser,
   setCustomDir,
   setDirColor,
+  setOrganizeByBase,
 } from '../lib/settings';
 import { fetchMe } from '../lib/civitai';
 import {
@@ -246,6 +248,7 @@ function Dirs() {
   const [path, setPath] = useState('');
   const [savedKey, setSavedKey] = useState<string | null>(null);
   const [colors, setColors] = useState<Record<string, string>>(getDirColors);
+  const [organize, setOrganize] = useState(getOrganizeByBase);
   const [bound, setBound] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<Record<string, string>>({});
   const [scanning, setScanning] = useState(false);
@@ -423,6 +426,22 @@ function Dirs() {
         <PrimaryButton disabled={scanning} onClick={() => void scanAll()}>
           {scanning ? 'Scanning…' : 'Scan all folders'}
         </PrimaryButton>
+        <label
+          className="flex cursor-pointer items-center gap-2 rounded border border-white/10 px-2 py-1.5 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-muted hover:border-white/25"
+          title="Download into <type>/<BaseModel>/ subfolders, e.g. checkpoints/Anima/"
+        >
+          <input
+            type="checkbox"
+            checked={organize}
+            onChange={(e) => {
+              setOrganize(e.target.checked);
+              setOrganizeByBase(e.target.checked);
+              void pushSettings();
+            }}
+            className="accent-[#6366f1]"
+          />
+          Organize by base
+        </label>
       </div>
       <div className="mt-2 divide-y divide-white/[0.06]">
         {MODEL_TYPES.map((t) => {

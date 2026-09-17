@@ -251,6 +251,7 @@ export default function ModelModal({
   onClose,
   onQueue,
   queuedIds,
+  ownedIds,
   onSearchCreator,
   onForgetLocal,
   onLibraryChanged,
@@ -259,6 +260,7 @@ export default function ModelModal({
   onClose: () => void;
   onQueue: (item: QueueArg) => void;
   queuedIds: Set<string>;
+  ownedIds: Set<string>;
   onSearchCreator: (username: string) => void;
   onForgetLocal?: (modelId: number, versionId: number) => void;
   onLibraryChanged?: () => void;
@@ -586,6 +588,7 @@ export default function ModelModal({
                   {(version.files ?? []).map((f) => {
                     const qid = `civitai-${model.id}-${version.id}-${f.name}`;
                     const queued = queuedIds.has(`civitai-${model.id}-${version.id}`) || queuedIds.has(qid);
+                    const owned = ownedIds.has(`${model.id}-${version.id}`);
                     return (
                       <div key={f.name} className="mt-2 border-t border-white/[0.06] pt-2 first:border-0 first:pt-0">
                         <div className="truncate font-mono text-[12px] text-ink" title={f.name}>
@@ -603,7 +606,7 @@ export default function ModelModal({
                           {target.kind !== 'local' && (
                             <PrimaryButton
                               className="!px-3 !py-1 !text-[11px]"
-                              disabled={queued}
+                              disabled={queued || owned}
                               onClick={() =>
                                 onQueue({
                                   id: qid,
@@ -616,7 +619,7 @@ export default function ModelModal({
                                 })
                               }
                             >
-                              {queued ? '✓ Queued' : '⬇ Download'}
+                              {queued ? '✓ Queued' : owned ? '✓ Installed' : '⬇ Download'}
                             </PrimaryButton>
                           )}
                           {target.kind === 'local' && target.record && onForgetLocal && (

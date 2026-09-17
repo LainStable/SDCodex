@@ -146,6 +146,7 @@ def get_settings():
             "colors": {k[6:]: v for k, v in rows.items() if k.startswith("color_")},
             "civitaiApiKey": user.api_key or rows.get("civitai_api_key", ""),
             "apiMirror": rows.get("api_mirror", "civitai.com") or "civitai.com",
+            "organizeByBase": rows.get("organize_by_base", "0") == "1",
             "maxParallel": int(rows.get("max_parallel_downloads", "1") or 1),
         }
     )
@@ -198,6 +199,12 @@ def post_settings():
             row = Setting(key="api_mirror")
             db.session.add(row)
         row.value = mirror
+    if "organizeByBase" in data:
+        row = db.session.get(Setting, "organize_by_base")
+        if row is None:
+            row = Setting(key="organize_by_base")
+            db.session.add(row)
+        row.value = "1" if data.get("organizeByBase") else "0"
     db.session.commit()
     try:
         from .download_manager import download_manager
@@ -245,6 +252,18 @@ def downloads_status():
     from .download_manager import download_manager
 
     return jsonify(download_manager.get_status())
+
+
+@api_v1.post("/downloads/cancel")
+def downloads_cancel():
+    user, err = _require_user()
+    if err:
+        return err
+    from .download_manager import download_manager
+
+    data = request.get_json(force=True, silent=True) or {}
+    ok, msg = download_manager.cancel_task(data.get("modelId"), data.get("versionId"))
+    return jsonify({"ok": ok, "message": msg}), (200 if ok else 404)
 
 
 # --------------------------------------------------------------- library ---

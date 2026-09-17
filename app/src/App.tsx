@@ -11,6 +11,7 @@ import {
   clearCompleted,
   clearQueue,
   loadQueue,
+  removeFromQueue,
 } from './lib/queue';
 import { adoptServerUser, clearProfile, completeOidcCallback, endSession, fetchServerAuth, hasSession, initials, loadProfile, pullServerProfile, type Profile, type ServerAuthState } from './lib/auth';
 import { deleteScanned } from './lib/library';
@@ -28,6 +29,39 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [modal, setModal] = useState<ModalTarget | null>(null);
   const [libKey, setLibKey] = useState(0);
+  // Models already on disk (backend library + local scan records).
+  const [ownedIds, setOwnedIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    let live = true;
+    const refresh = async () => {
+      const ids = new Set<string>();
+      try {
+        const { apiGet, backendAvailable } = await import('./lib/backend');
+        if (await backendAvailable()) {
+          const r = await apiGet<{ items: Array<{ modelId: number; versionId: number }> }>('/library');
+          for (const it of r.items ?? []) ids.add(`${it.modelId}-${it.versionId}`);
+        }
+      } catch {
+        /* standalone */
+      }
+      try {
+        const { loadScanned } = await import('./lib/library');
+        for (const s of loadScanned()) {
+          if (s.modelId) ids.add(`${s.modelId}-${s.versionId}`);
+        }
+      } catch {
+        /* ignore */
+      }
+      if (live) setOwnedIds(ids);
+    };
+    void refresh();
+    const timer = setInterval(() => void refresh(), 30000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, []);
 
   // Central post-auth handler: profile state, session flag, then the full
   // server row (avatar/email) so login restores everything refresh would.
@@ -233,11 +267,13 @@ export default function App() {
                 }
               }}
               queuedIds={queuedIds}
+              ownedIds={ownedIds}
             />
           )}
           {view === 'models' && (
             <Explorer
               queuedIds={queuedIds}
+              ownedIds={ownedIds}
               onQueue={(item) => {
                 setQueue(addToQueue(item));
                 // Hand the real download to the backend worker when reachable.
@@ -265,6 +301,7 @@ export default function App() {
           {view === 'queue' && (
             <Queue
               items={queue}
+              onRemove={(id) => setQueue(removeFromQueue(id))}
               onClearCompleted={() => setQueue(clearCompleted())}
               onClearAll={() => setQueue(clearQueue())}
             />
@@ -284,6 +321,7 @@ export default function App() {
           target={modal}
           onClose={() => setModal(null)}
           queuedIds={queuedIds}
+          ownedIds={ownedIds}
           onQueue={(item) => setQueue(addToQueue(item))}
           onSearchCreator={(username) => {
             setModal(null);

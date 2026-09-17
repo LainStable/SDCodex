@@ -33,13 +33,14 @@ interface Props {
     baseModel: string;
   }) => void;
   queuedIds: Set<string>;
+  ownedIds: Set<string>;
 }
 
 function copyText(text: string): void {
   void navigator.clipboard?.writeText(text).catch(() => {});
 }
 
-export default function Home({ goModels, onOpen, onQueue, queuedIds }: Props) {
+export default function Home({ goModels, onOpen, onQueue, queuedIds, ownedIds }: Props) {
   const [rail, setRail] = useState<Rail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -146,7 +147,10 @@ export default function Home({ goModels, onOpen, onQueue, queuedIds }: Props) {
               <div className="mt-3 flex flex-wrap gap-2">
                 {heroVersion && (
                   <PrimaryButton
-                    disabled={queuedIds.has(`civitai-${hero.id}-${heroVersion.id}`)}
+                    disabled={
+                      queuedIds.has(`civitai-${hero.id}-${heroVersion.id}`) ||
+                      ownedIds.has(`${hero.id}-${heroVersion.id}`)
+                    }
                     onClick={() =>
                       onQueue({
                         id: `civitai-${hero.id}-${heroVersion.id}`,
@@ -161,7 +165,9 @@ export default function Home({ goModels, onOpen, onQueue, queuedIds }: Props) {
                   >
                     {queuedIds.has(`civitai-${hero.id}-${heroVersion.id}`)
                       ? '✓ Queued'
-                      : '⬇ 1-Click Download'}
+                      : ownedIds.has(`${hero.id}-${heroVersion.id}`)
+                        ? '✓ Installed'
+                        : '⬇ 1-Click Download'}
                   </PrimaryButton>
                 )}
                 <GhostButton onClick={() => onOpen(hero.id)}>Explore →</GhostButton>
@@ -206,6 +212,7 @@ export default function Home({ goModels, onOpen, onQueue, queuedIds }: Props) {
           {(rail?.featured ?? []).map((m) => {
             const v = m.modelVersions[0];
             const queued = v ? queuedIds.has(`civitai-${m.id}-${v.id}`) : false;
+            const owned = v ? ownedIds.has(`${m.id}-${v.id}`) : false;
             return (
               <article
                 key={m.id}
@@ -237,7 +244,7 @@ export default function Home({ goModels, onOpen, onQueue, queuedIds }: Props) {
                   </div>
                   {v && (
                     <GhostButton
-                      disabled={queued}
+                      disabled={queued || owned}
                       onClick={() =>
                         onQueue({
                           id: `civitai-${m.id}-${v.id}`,
@@ -250,7 +257,7 @@ export default function Home({ goModels, onOpen, onQueue, queuedIds }: Props) {
                         })
                       }
                     >
-                      {queued ? '✓ Queued' : '⬇ Download'}
+                      {queued ? '✓ Queued' : owned ? '✓ Installed' : '⬇ Download'}
                     </GhostButton>
                   )}
                 </div>
