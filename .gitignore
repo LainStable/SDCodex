@@ -26,6 +26,11 @@ app/dist/
 app/.env
 app/.env.*
 
+# Docker runtime (volumes, local overrides — generated, never pushed)
+db/
+models/
+docker-compose.override.yml
+
 # Logs
 *.log
 npm-debug.log*

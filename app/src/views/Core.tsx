@@ -651,6 +651,8 @@ export function Plugins() {
   const [filter, setFilter] = useState<'all' | 'official'>('all');
   const [catalog, setCatalog] = useState<HubCatalog | null>(null);
   const [live, setLive] = useState(false);
+  const [installing, setInstalling] = useState<string | null>(null);
+  const [installMsg, setInstallMsg] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let on = true;
@@ -708,14 +710,51 @@ export function Plugins() {
               </span>
             </div>
             <p className="mt-1 text-xs text-ink-muted">{p.description}</p>
-            <a
-              href={p.repository}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-2 inline-block font-mono text-[11px] text-secondary hover:underline"
-            >
-              {p.repository}
-            </a>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <a
+                href={p.repository}
+                target="_blank"
+                rel="noreferrer"
+                className="font-mono text-[11px] text-secondary hover:underline"
+              >
+                {p.repository}
+              </a>
+              <GhostButton
+                disabled={installing !== null}
+                onClick={() =>
+                  void (async () => {
+                    setInstalling(p.id);
+                    setInstallMsg((m) => ({ ...m, [p.id]: 'installing…' }));
+                    try {
+                      const { apiPost, backendAvailable } = await import('../lib/backend');
+                      if (!(await backendAvailable())) {
+                        throw new Error('Backend unreachable — start it to install.');
+                      }
+                      const r = await apiPost<{ ok: boolean; plugin?: { name?: string }; error?: string }>(
+                        '/plugins/install',
+                        { repo_url: p.repository },
+                      );
+                      setInstallMsg((m) => ({
+                        ...m,
+                        [p.id]: `installed ${r.plugin?.name ?? p.id} — restart/rebuild to mount volumes`,
+                      }));
+                    } catch (e) {
+                      setInstallMsg((m) => ({
+                        ...m,
+                        [p.id]: e instanceof Error ? e.message : 'Install failed',
+                      }));
+                    } finally {
+                      setInstalling(null);
+                    }
+                  })()
+                }
+              >
+                {installing === p.id ? 'Installing…' : 'Install'}
+              </GhostButton>
+            </div>
+            {installMsg[p.id] && (
+              <p className="mt-1 font-mono text-[10px] text-ink-faint">{installMsg[p.id]}</p>
+            )}
           </article>
         ))}
       </section>

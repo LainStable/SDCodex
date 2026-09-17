@@ -509,3 +509,135 @@ def oidc_callback():
     resp = make_response(jsonify({"ok": True, "user": _user_json(user)}))
     auth.set_session_cookie(resp, token)
     return resp
+
+
+# ------------------------------------------------- updates + plugins ---
+
+def _admin_or_401():
+    user = auth.current_user()
+    if user is None:
+        return None, (jsonify({"error": "unauthorized"}), 401)
+    if not user.is_admin:
+        return None, (jsonify({"error": "admin only"}), 403)
+    return user, None
+
+
+@api_v1.get("/updates/check")
+def updates_check():
+    _, err = _admin_or_401()
+    if err:
+        return err
+    from . import updater as updater_mod
+
+    core = updater_mod.check_core()
+    plugin_updates = updater_mod.check_plugin_updates()
+    return jsonify(
+        {
+            "core": core,
+            "plugins": plugin_updates,
+            "total": (1 if core.get("has_update") else 0) + len(plugin_updates),
+        }
+    )
+
+
+@api_v1.post("/updates/core")
+def updates_core_apply():
+    _, err = _admin_or_401()
+    if err:
+        return err
+    from . import updater as updater_mod
+
+    ok, msg = updater_mod.update_core()
+    return jsonify({"ok": ok, "message": msg}), (200 if ok else 409)
+
+
+@api_v1.get("/plugins")
+def plugins_list():
+    user, err = _require_user()
+    if err:
+        return err
+    from . import updater as updater_mod
+
+    installed = updater_mod.list_installed()
+    updates = {p["id"]: p for p in updater_mod.check_plugin_updates()}
+    for p in installed:
+        p["has_update"] = p["id"] in updates
+        if p["id"] in updates:
+            p["remote_sha"] = updates[p["id"]].get("remote_sha", "")
+    return jsonify({"installed": installed})
+
+
+@api_v1.get("/plugins/store")
+def plugins_store():
+    user, err = _require_user()
+    if err:
+        return err
+    from . import updater as updater_mod
+
+    catalog = updater_mod.fetch_store_catalog()
+    installed_ids = {p["id"] for p in updater_mod.list_installed()}
+    items = catalog.get("plugins", [])
+    for p in items:
+        p["installed"] = p.get("id") in installed_ids
+    return jsonify({"core": catalog.get("core"), "plugins": items})
+
+
+@api_v1.post("/plugins/install")
+def plugins_install():
+    _, err = _admin_or_401()
+    if err:
+        return err
+    from . import updater as updater_mod
+
+    data = request.get_json(force=True, silent=True) or {}
+    repo_url = (data.get("repo_url") or "").strip()
+    if not repo_url:
+        return jsonify({"error": "repo_url required"}), 400
+    ok, result = updater_mod.install_plugin(repo_url, data.get("volumes") or {})
+    if not ok:
+        return jsonify({"error": result}), 502
+    # Record the repo + wire volumes/env.
+    short, canonical = updater_mod.normalize_github_url(repo_url)
+    repo = PluginRepo.query.filter_by(repo_url=canonical).first()
+    if repo is None:
+        repo = PluginRepo(
+            repo_url=canonical,
+            name=result.get("name", short),
+            description="Installed via Plugin Hub",
+        )
+        db.session.add(repo)
+        db.session.commit()
+    updater_mod.apply_volume_config(
+        {"id": result["id"], "volumes": result.get("volumes", [])},
+        data.get("volumes") or {},
+    )
+    return jsonify({"ok": True, "plugin": result})
+
+
+@api_v1.post("/plugins/<plugin_id>/update")
+def plugins_update(plugin_id: str):
+    _, err = _admin_or_401()
+    if err:
+        return err
+    from . import updater as updater_mod
+
+    ok, msg = updater_mod.update_plugin(plugin_id)
+    return jsonify({"ok": ok, "message": msg}), (200 if ok else 409)
+
+
+@api_v1.delete("/plugins/<plugin_id>")
+def plugins_uninstall(plugin_id: str):
+    _, err = _admin_or_401()
+    if err:
+        return err
+    from . import updater as updater_mod
+
+    ok, msg = updater_mod.uninstall_plugin(plugin_id)
+    if ok:
+        row = PluginRepo.query.filter(
+            (PluginRepo.name == plugin_id) | (PluginRepo.repo_url.contains(plugin_id))
+        ).first()
+        if row:
+            db.session.delete(row)
+            db.session.commit()
+    return jsonify({"ok": ok, "message": msg}), (200 if ok else 404)

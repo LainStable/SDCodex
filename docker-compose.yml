@@ -1,0 +1,41 @@
+# SDCodex — Docker Compose (modular plugin architecture)
+#
+# Core provides Home, Models, Library, Queue, Settings.
+# Plugins (Gallery, GalleryDL, RemBG, ComfyCaption) install from the Plugin Hub
+# into ./plugins via Settings -> Plugins.
+
+services:
+  sdcodex:
+    build: .
+    image: sdcodex:latest
+    container_name: sdcodex
+    restart: unless-stopped
+    ports:
+      - "${SDCODEX_PORT:-5000}:5000"
+    environment:
+      PORT: "5000"
+      SECRET_KEY: "${SECRET_KEY:-}"
+      DATABASE_URL: "sqlite:////data/db/sdcodex.db"
+      PUID: "${PUID:-${UID:-1000}}"
+      PGID: "${PGID:-${GID:-1000}}"
+      UMASK: "${UMASK:-002}"
+      PLUGINS_DIR: /app/plugins
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
+    volumes:
+      # Whole repo mounted at /app so in-UI updates can `git pull` core and
+      # plugins internally (must stay rw).
+      - ./:/app
+      # Persistent data (kept out of the repo)
+      - ${DB:-./db}:/data/db
+      # External model/download directory
+      - ${MODELS:-./models}:/models
+      # Host Docker socket — required for container self-replace updates.
+      # Delete this line to disable self-update (everything else works).
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:5000/api/health', timeout=5)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    stop_grace_period: 30s

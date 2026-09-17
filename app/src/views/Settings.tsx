@@ -1088,6 +1088,47 @@ function Auth({
 }
 
 function System() {
+  const [updates, setUpdates] = useState<{
+    core?: { has_update?: boolean; local_sha?: string; remote_sha?: string; branch?: string; message?: string };
+    plugins?: Array<{ id: string; name: string }>;
+    total?: number;
+  } | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [updateMsg, setUpdateMsg] = useState<string | null>(null);
+
+  const check = async () => {
+    setChecking(true);
+    setUpdateMsg(null);
+    try {
+      const { apiGet, backendAvailable } = await import('../lib/backend');
+      if (!(await backendAvailable())) {
+        setUpdateMsg('Backend unreachable.');
+        return;
+      }
+      setUpdates(await apiGet('/updates/check'));
+    } catch (e) {
+      setUpdateMsg(e instanceof Error ? e.message : 'Check failed');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const applyCore = async () => {
+    setApplying(true);
+    setUpdateMsg(null);
+    try {
+      const { apiPost } = await import('../lib/backend');
+      const r = await apiPost<{ ok: boolean; message?: string }>('/updates/core', {});
+      setUpdateMsg(r.message ?? (r.ok ? 'Updated.' : 'Update failed.'));
+      await check();
+    } catch (e) {
+      setUpdateMsg(e instanceof Error ? e.message : 'Update failed');
+    } finally {
+      setApplying(false);
+    }
+  };
+
   return (
     <div className="glass-l1 rounded-lg p-4">
       <h2 className="font-display text-base font-semibold">System</h2>
@@ -1108,9 +1149,48 @@ function System() {
         </div>
       </dl>
       <p className="mt-3 font-mono text-[11px] text-ink-faint">
-        Check-for-updates and container replace arrive with the backend. Core update checks
-        will reuse the Plugin Hub surface.
+        Core and plugins update via git pull (bare-metal and Docker alike).
       </p>
+
+      <div className="mt-3 border-t border-white/[0.06] pt-3">
+        <div className="flex items-center gap-2">
+          <h3 className="font-display text-sm font-semibold">Updates</h3>
+          {updates && (updates.total ?? 0) > 0 && (
+            <span className="rounded border border-status-warning/40 bg-status-warning/10 px-2 py-0.5 font-mono text-[10px] uppercase text-[#fcd34d]">
+              {updates.total} available
+            </span>
+          )}
+          <GhostButton className="ml-auto" disabled={checking} onClick={() => void check()}>
+            {checking ? 'Checking…' : 'Check now'}
+          </GhostButton>
+        </div>
+        {updates?.core && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-white/[0.06] px-2 py-1.5 font-mono text-[11px]">
+            <span className="text-ink">Core</span>
+            <span className="text-ink-faint">
+              {(updates.core.local_sha ?? '').slice(0, 7) || 'unknown'} →{' '}
+              {(updates.core.remote_sha ?? '').slice(0, 7) || 'unknown'}
+            </span>
+            {updates.core.message && (
+              <span className="min-w-0 flex-1 truncate text-ink-faint">{updates.core.message}</span>
+            )}
+            {updates.core.has_update ? (
+              <PrimaryButton disabled={applying} onClick={() => void applyCore()}>
+                {applying ? 'Updating…' : 'Update core'}
+              </PrimaryButton>
+            ) : (
+              <span className="text-status-active">up to date</span>
+            )}
+          </div>
+        )}
+        {(updates?.plugins ?? []).length > 0 && (
+          <div className="mt-2 font-mono text-[11px] text-ink-muted">
+            Plugin updates: {(updates?.plugins ?? []).map((p) => p.name ?? p.id).join(', ')} — update
+            from the Plugins tab.
+          </div>
+        )}
+        {updateMsg && <p className="mt-2 font-mono text-[11px] text-ink-muted">{updateMsg}</p>}
+      </div>
     </div>
   );
 }

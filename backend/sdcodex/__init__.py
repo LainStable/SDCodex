@@ -25,6 +25,23 @@ def create_app(db_path: str | None = None) -> Flask:
 
     app.register_blueprint(api_v1, url_prefix="/api")
 
+    # Serve the built frontend in Docker (backend/static <- app/dist).
+    # Dev keeps using Vite; this only activates when the build is present.
+    static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+    index_html = os.path.join(static_dir, "index.html")
+    if os.path.exists(index_html):
+        from flask import send_from_directory
+
+        @app.route("/", defaults={"path": ""})
+        @app.route("/<path:path>")
+        def _frontend(path):
+            if path.startswith("api/"):
+                return {"error": "not found"}, 404
+            full = os.path.join(static_dir, path)
+            if path and os.path.isfile(full):
+                return send_from_directory(static_dir, path)
+            return send_from_directory(static_dir, "index.html")
+
     with app.app_context():
         db.create_all()
 
