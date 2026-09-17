@@ -260,11 +260,32 @@ function Dirs() {
     };
   }, []);
 
+  // Merge saved rows into drafts without clobbering unsaved edits.
+  const refreshDirs = () => {
+    const saved = getDirectories();
+    setDirs(saved);
+    setDrafts((d) => {
+      const next = { ...d };
+      for (const k of Object.keys(saved)) {
+        if (!(k in next)) next[k] = saved[k] ?? '';
+      }
+      for (const k of Object.keys(next)) {
+        if (!(k in saved)) delete next[k];
+      }
+      return next;
+    });
+  };
+
   const saveType = (t: string) => {
     const dirsNow = getDirectories();
     const next = { ...dirsNow };
     for (const k of Object.keys(drafts)) {
-      if (k === `dir_${t}` || k.startsWith(`dir_${t}__`)) next[k] = drafts[k] ?? '';
+      if (k === `dir_${t}` || k.startsWith(`dir_${t}__`)) {
+        const v = drafts[k] ?? '';
+        // Prune empty extra slots instead of storing blanks.
+        if (!v.trim() && k !== `dir_${t}`) delete next[k];
+        else next[k] = v;
+      }
     }
     try {
       localStorage.setItem('sdcodex.dirs.v1', JSON.stringify(next));
@@ -275,11 +296,6 @@ function Dirs() {
     setSavedKey(`dir_${t}`);
     setTimeout(() => setSavedKey((k) => (k === `dir_${t}` ? null : k)), 1500);
     void pushSettings();
-  };
-
-  const refreshDirs = () => {
-    setDirs(getDirectories());
-    setDrafts(getDirectories());
   };
 
   const say = (line: string) => pushScanLog(line);
