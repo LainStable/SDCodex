@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { BASE_MODELS } from '../lib/civitai';
 import { MODEL_TYPES, getDirectories, getDirColors } from '../lib/settings';
+import { folderForModelType } from '../lib/categories';
 import { loadScanned, type ScannedModel } from '../lib/library';
 import type { ModalTarget } from '../components/ModelModal';
 import { SocketPill, TypeBadge } from '../components/ui';
@@ -97,12 +98,12 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
   const localByType = (t: string) =>
     scanned.filter(
       (s) =>
-        s.type === t &&
+        folderForModelType(s.type) === t &&
         baseOk(s.baseModel ?? '') &&
         (matches(s.name) || matches(s.hash) || matches(s.filename)),
     );
   const serverByType = (t: string) =>
-    serverRows.filter((r) => r.type === t && matches(r.name));
+    serverRows.filter((r) => folderForModelType(r.type) === t && matches(r.name));
 
   const total = sections.reduce((n, t) => n + localByType(t).length + serverByType(t).length, 0);
   const active = activeTab && sections.includes(activeTab) ? activeTab : (sections[0] ?? null);
@@ -148,6 +149,7 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
             })}
             active={active ?? ''}
             onPick={setActiveTab}
+            activeColor={active ? colors[active] : undefined}
           />
         </div>
       )}

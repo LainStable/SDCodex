@@ -65,34 +65,41 @@ export interface ScanHandle {
   resolve: (type: string) => Promise<FileSystemDirectoryHandle | null>;
 }
 
-/** Scan one Settings dir. Returns files identified; appends seen keys for cleanup. */
+/** Scan one Settings type across every saved folder. Returns files identified;
+    appends seen keys for cleanup. */
 export async function scanDir(
   type: string,
-  resolve: (type: string) => Promise<FileSystemDirectoryHandle | null>,
+  resolveAll: (type: string) => Promise<FileSystemDirectoryHandle[]>,
   seen: Set<string>,
   onMsg: (msg: string) => void,
 ): Promise<number> {
-  const dir = await resolve(type);
-  if (!dir) return 0;
-  if (!(await ensurePermission(dir, 'readwrite'))) {
-    onMsg(`${type}: permission denied`);
-    return 0;
-  }
+  const roots = await resolveAll(type);
+  if (roots.length === 0) return 0;
 
   // Recursive: users sort models into subfolders. Sidecars stay next to
   // their model file; seen keys use paths relative to the linked folder.
   const files: { rel: string; handle: FileSystemFileHandle; dir: FileSystemDirectoryHandle }[] = [];
-  const walk = async (d: FileSystemDirectoryHandle, prefix: string) => {
+  const walkDir = async (
+    d: FileSystemDirectoryHandle,
+    prefix: string,
+    out: { rel: string; handle: FileSystemFileHandle; dir: FileSystemDirectoryHandle }[],
+  ) => {
     const it = (d as unknown as { values: ValuesFn }).values();
     for await (const [name, handle] of it) {
       if (handle.kind === 'directory') {
-        await walk(handle as unknown as FileSystemDirectoryHandle, `${prefix}${name}/`);
+        await walkDir(handle as unknown as FileSystemDirectoryHandle, `${prefix}${name}/`, out);
       } else if (handle.kind === 'file' && MODEL_EXTS.some((e) => name.toLowerCase().endsWith(e))) {
-        files.push({ rel: `${prefix}${name}`, handle: handle as FileSystemFileHandle, dir: d });
+        out.push({ rel: `${prefix}${name}`, handle: handle as FileSystemFileHandle, dir: d });
       }
     }
   };
-  await walk(dir, '');
+  for (const root of roots) {
+    if (!(await ensurePermission(root, 'readwrite'))) {
+      onMsg(`${type}: permission denied`);
+      continue;
+    }
+    await walkDir(root, '', files);
+  }
 
   let updated = 0;
   let done = 0;
@@ -142,7 +149,8 @@ export async function scanDir(
         modelId,
         versionId,
         name: version.model?.name ?? name,
-        type: version.model?.type ?? type,
+        // Folder category, not the API taxonomy — sections follow Settings.
+        type,
         baseModel: version.baseModel ?? '',
         dirKey: `dir_${type}`,
         dirPath: getDirectories()[`dir_${type}`] ?? '',
@@ -166,10 +174,14 @@ export async function resolveBound(type: string): Promise<FileSystemDirectoryHan
 }
 
 export async function bindDirectory(type: string): Promise<FileSystemDirectoryHandle | null> {
+  return bindDirectoryKey(`dir_${type}`);
+}
+
+export async function bindDirectoryKey(key: string): Promise<FileSystemDirectoryHandle | null> {
   try {
     const dir = await pickDirectory();
     if (!(await ensurePermission(dir, 'readwrite'))) return null;
-    await putHandle(`dir_${type}`, dir);
+    await putHandle(key, dir);
     return dir;
   } catch (e) {
     if ((e as Error).name === 'AbortError') return null;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FilterPills, GhostButton, PageHeader, PrimaryButton } from '../components/chrome';
 import { TypeBadge } from '../components/ui';
-import { bindDirectory, scanDir, serverScan, serverScanStatus } from '../lib/scan';
+import { bindDirectoryKey, scanDir, serverScan, serverScanStatus } from '../lib/scan';
 import { getHandle } from '../lib/idb';
 import { loadScanned, pruneScanned } from '../lib/library';
 import {
@@ -260,17 +260,20 @@ function Dirs() {
     };
   }, []);
 
-  const save = (key: string) => {
+  const saveType = (t: string) => {
     const dirsNow = getDirectories();
-    const next = { ...dirsNow, [key]: drafts[key] ?? '' };
+    const next = { ...dirsNow };
+    for (const k of Object.keys(drafts)) {
+      if (k === `dir_${t}` || k.startsWith(`dir_${t}__`)) next[k] = drafts[k] ?? '';
+    }
     try {
       localStorage.setItem('sdcodex.dirs.v1', JSON.stringify(next));
     } catch {
       /* ignore */
     }
     setDirs(getDirectories());
-    setSavedKey(key);
-    setTimeout(() => setSavedKey((k) => (k === key ? null : k)), 1500);
+    setSavedKey(`dir_${t}`);
+    setTimeout(() => setSavedKey((k) => (k === `dir_${t}` ? null : k)), 1500);
     void pushSettings();
   };
 
@@ -281,18 +284,29 @@ function Dirs() {
 
   const say = (line: string) => pushScanLog(line);
 
-  const resolve = async (type: string): Promise<FileSystemDirectoryHandle | null> => {
-    const existing = await getHandle(`dir_${type}`);
-    if (existing) return existing;
-    say(`${type}: pick the folder for this path`);
-    try {
-      const dir = await bindDirectory(type);
-      if (dir) setBound((b) => ({ ...b, [type]: true }));
-      return dir;
-    } catch {
-      setMsgs((m) => ({ ...m, [type]: 'pick failed' }));
-      return null;
+  const resolveAll = async (type: string): Promise<FileSystemDirectoryHandle[]> => {
+    // Every saved path for the category gets its own bound folder.
+    const keys = [`dir_${type}`, ...Object.keys(getDirectories()).filter((k) => k.startsWith(`dir_${type}__`)).sort()];
+    const out: FileSystemDirectoryHandle[] = [];
+    for (const key of keys) {
+      if (!(getDirectories()[key] ?? '').trim()) continue;
+      const existing = await getHandle(key);
+      if (existing) {
+        out.push(existing);
+        continue;
+      }
+      say(`${type}: pick the folder for this path`);
+      try {
+        const dir = await bindDirectoryKey(key);
+        if (dir) {
+          setBound((b) => ({ ...b, [type]: true }));
+          out.push(dir);
+        }
+      } catch {
+        setMsgs((m) => ({ ...m, [type]: 'pick failed' }));
+      }
     }
+    return out;
   };
 
   const scanOne = async (type: string) => {
@@ -316,7 +330,7 @@ function Dirs() {
     }
     try {
       const seen = new Set(loadScanned().map((e) => `${e.dirKey}/${e.filename}`));
-      await scanDir(type, resolve, seen, (msg) =>
+      await scanDir(type, resolveAll, seen, (msg) =>
         setMsgs((m) => ({ ...m, [type]: msg })),
       );
     } finally {
@@ -362,7 +376,7 @@ function Dirs() {
       const seen = new Set<string>();
       for (const t of MODEL_TYPES) {
         if (!(dirs[`dir_${t}`] ?? '').trim()) continue;
-        await scanDir(t, resolve, seen, (msg) => {
+        await scanDir(t, resolveAll, seen, (msg) => {
           say(msg);
           setMsgs((m) => ({ ...m, [t]: msg }));
         });
@@ -397,6 +411,7 @@ function Dirs() {
         {MODEL_TYPES.map((t) => {
           const keys = [`dir_${t}`, ...Object.keys(dirs).filter((k) => k.startsWith(`dir_${t}__`)).sort()];
           const hasSaved = keys.some((k) => (dirs[k] ?? '').trim() !== '');
+          const dirty = keys.some((k) => (drafts[k] ?? '') !== (dirs[k] ?? ''));
           const pickColor = (color: string) => {
             setDirColor(t, color);
             setColors(getDirColors());
@@ -410,21 +425,11 @@ function Dirs() {
                     <TypeBadge type={t} color={colors[t]} />
                   </span>
                 </ColorMenu>
-                {hasSaved && (
+                {hasSaved && !colors[t] && (
                   <span className="font-mono text-[10px] text-ink-faint">
                     click badge for color
                   </span>
                 )}
-                <GhostButton
-                  onClick={() => {
-                    const key = addDirPath(t, '');
-                    refreshDirs();
-                    setMsgs((m) => ({ ...m, [t]: '' }));
-                    void key;
-                  }}
-                >
-                  + Path
-                </GhostButton>
                 {(msgs[t] || (bound[t] ? 'linked' : '')) && (
                   <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-ink-faint">
                     {msgs[t] || 'linked'}
@@ -432,7 +437,6 @@ function Dirs() {
                 )}
               </div>
               {keys.map((key) => {
-                const dirty = (drafts[key] ?? '') !== (dirs[key] ?? '');
                 const extra = key !== `dir_${t}`;
                 return (
                   <div key={key} className="mt-1 flex items-center gap-2 sm:pl-32">
@@ -442,17 +446,6 @@ function Dirs() {
                       placeholder={extra ? 'Another folder…' : `/models/${t.toLowerCase()}/`}
                       className="min-w-0 flex-1 rounded border border-white/10 bg-obsidian-lowest px-2 py-1 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary"
                     />
-                    <GhostButton disabled={!dirty} onClick={() => save(key)} className="shrink-0">
-                      Save
-                    </GhostButton>
-                    <GhostButton
-                      disabled={scanning || !(dirs[key] ?? '').trim()}
-                      onClick={() => void scanOne(t)}
-                      title="Server scans its own path; standalone asks for the folder once"
-                      className="shrink-0"
-                    >
-                      Scan
-                    </GhostButton>
                     {extra && (
                       <GhostButton
                         className="shrink-0"
@@ -465,14 +458,34 @@ function Dirs() {
                         Remove
                       </GhostButton>
                     )}
-                    {savedKey === key && (
-                      <span className="rounded border border-status-active/40 bg-status-active/10 px-2 py-0.5 font-mono text-[10px] uppercase text-status-active">
-                        saved
-                      </span>
-                    )}
                   </div>
                 );
               })}
+              <div className="mt-1 flex items-center gap-2 sm:pl-32">
+                <GhostButton
+                  onClick={() => {
+                    addDirPath(t, '');
+                    refreshDirs();
+                  }}
+                >
+                  + Path
+                </GhostButton>
+                <GhostButton disabled={!dirty} onClick={() => saveType(t)}>
+                  Save
+                </GhostButton>
+                <GhostButton
+                  disabled={scanning || !keys.some((k) => (dirs[k] ?? '').trim())}
+                  onClick={() => void scanOne(t)}
+                  title="Scans every saved folder for this category"
+                >
+                  Scan
+                </GhostButton>
+                {savedKey === `dir_${t}` && (
+                  <span className="rounded border border-status-active/40 bg-status-active/10 px-2 py-0.5 font-mono text-[10px] uppercase text-status-active">
+                    saved
+                  </span>
+                )}
+              </div>
             </div>
           );
         })}

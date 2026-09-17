@@ -139,14 +139,15 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
                 downloaded_files['image'] = image_path
 
             # 4. Update Database
-            # Check if exists
+            # Check if exists. The row is grouped by folder category
+            # (model_type), not the API taxonomy — sections follow Settings.
             existing = Download.query.filter_by(model_id=model_id, version_id=version_id).first()
             if not existing:
                 download = Download(
                     model_id=model_id,
                     version_id=version_id,
                     name=model_name,
-                    type=model_type_api
+                    type=model_type
                 )
                 download.set_files(downloaded_files)
                 db.session.add(download)

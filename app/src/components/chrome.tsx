@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { hexToRgba } from './ui';
 
 /* Shared chrome matching all four Stitch prototypes:
    sidebar order, topbar, page headers, buttons, stats. */
@@ -379,27 +380,42 @@ export function FilterPills<T extends string>({
   options,
   active,
   onPick,
+  activeColor,
 }: {
   options: { id: T; label: string }[];
   active: T;
   onPick: (id: T) => void;
+  /** Optional accent for the active pill (e.g. category color). */
+  activeColor?: string;
 }) {
   return (
     <div className="flex flex-wrap gap-1.5">
-      {options.map((f) => (
-        <button
-          key={f.id}
-          type="button"
-          onClick={() => onPick(f.id)}
-          className={`rounded border px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
-            active === f.id
-              ? 'border-primary/50 bg-primary/20 text-white'
-              : 'border-white/10 bg-white/5 text-ink-muted hover:border-white/20'
-          }`}
-        >
-          {f.label}
-        </button>
-      ))}
+      {options.map((f) => {
+        const isActive = active === f.id;
+        return (
+          <button
+            key={f.id}
+            type="button"
+            onClick={() => onPick(f.id)}
+            style={
+              isActive && activeColor
+                ? {
+                    borderColor: hexToRgba(activeColor, 0.6),
+                    backgroundColor: hexToRgba(activeColor, 0.25),
+                    color: '#fff',
+                  }
+                : undefined
+            }
+            className={`rounded border px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
+              isActive
+                ? 'border-primary/50 bg-primary/20 text-white'
+                : 'border-white/10 bg-white/5 text-ink-muted hover:border-white/20'
+            }`}
+          >
+            {f.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
