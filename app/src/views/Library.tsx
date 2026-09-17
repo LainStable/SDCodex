@@ -4,7 +4,7 @@ import { MODEL_TYPES, getDirectories, getDirColors } from '../lib/settings';
 import { loadScanned, type ScannedModel } from '../lib/library';
 import type { ModalTarget } from '../components/ModelModal';
 import { SocketPill, TypeBadge } from '../components/ui';
-import { BaseCloud, PageHeader, SearchInput } from '../components/chrome';
+import { BaseCloud, FilterPills, PageHeader, SearchInput } from '../components/chrome';
 
 function formatBytes(n: number): string {
   if (n >= 1_073_741_824) return `${(n / 1_073_741_824).toFixed(2)} GB`;
@@ -36,9 +36,10 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
   const [scanned] = useState<ScannedModel[]>(loadScanned);
   const [serverRows, setServerRows] = useState<ServerRow[]>([]);
   const [colors] = useState<Record<string, string>>(getDirColors);
+  const [activeTab, setActiveTab] = useState<string | null>(null);
 
   // Sections follow Settings: only configured categories appear.
-  const sections = useMemo(() => {
+  const sections: string[] = useMemo(() => {
     const dirs = getDirectories();
     const configured = new Set<string>();
     for (const key of Object.keys(dirs)) {
@@ -76,6 +77,7 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
     serverRows.filter((r) => r.type === t && matches(r.name));
 
   const total = sections.reduce((n, t) => n + localByType(t).length + serverByType(t).length, 0);
+  const active = activeTab && sections.includes(activeTab) ? activeTab : (sections[0] ?? null);
 
   return (
     <div>
@@ -109,23 +111,37 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
         </p>
       )}
 
-      {sections.map((t) => {
-        const local = localByType(t);
-        const remote = serverByType(t);
-        return (
-          <section key={t} className="mt-5">
-            <div className="flex items-center gap-2">
-              <TypeBadge type={t} color={colors[t]} />
-              <span className="font-mono text-[11px] text-ink-faint">
-                {local.length + remote.length} model{local.length + remote.length === 1 ? '' : 's'}
-              </span>
-            </div>
-            {local.length + remote.length === 0 ? (
-              <p className="mt-2 font-mono text-[11px] text-ink-faint">
-                Empty — run Scan in Settings → Model dirs.
-              </p>
-            ) : (
-              <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      {sections.length > 0 && (
+        <div className="glass-l1 mt-4 rounded-lg p-3">
+          <FilterPills
+            options={sections.map((t) => {
+              const n = localByType(t).length + serverByType(t).length;
+              return { id: t, label: `${t} · ${n}` };
+            })}
+            active={active ?? ''}
+            onPick={setActiveTab}
+          />
+        </div>
+      )}
+
+      {active &&
+        (() => {
+          const local = localByType(active);
+          const remote = serverByType(active);
+          return (
+            <section key={active} className="mt-4">
+              <div className="flex items-center gap-2">
+                <TypeBadge type={active} color={colors[active]} />
+                <span className="font-mono text-[11px] text-ink-faint">
+                  {local.length + remote.length} model{local.length + remote.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              {local.length + remote.length === 0 ? (
+                <p className="mt-2 font-mono text-[11px] text-ink-faint">
+                  Empty — run Scan in Settings → Model dirs.
+                </p>
+              ) : (
+                <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {remote.map((r) => (
                   <article
                     key={`srv-${r.modelId}-${r.versionId}`}
@@ -196,11 +212,11 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                     </dl>
                   </article>
                 ))}
-              </div>
-            )}
-          </section>
-        );
-      })}
+                </div>
+              )}
+            </section>
+          );
+        })()}
     </div>
   );
 }
