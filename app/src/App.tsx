@@ -3,7 +3,8 @@ import Explorer from './views/Explorer';
 import Library from './views/Library';
 import Settings from './views/Settings';
 import ModelModal, { type ModalTarget } from './components/ModelModal';
-import { Home, Queue, BootstrapCard, DownloadFloat } from './views/Core';
+import { Queue, BootstrapCard, DownloadFloat } from './views/Core';
+import Home from './views/Home';
 import { MobileNav, Sidebar, Topbar, type Theme, type ViewId } from './components/chrome';
 import {
   addToQueue,
@@ -210,7 +211,30 @@ export default function App() {
             }}
           />
 
-          {view === 'home' && <Home go={go} />}
+          {view === 'home' && (
+            <Home
+              goModels={() => go('models')}
+              onOpen={(id) => setModal({ kind: 'civitai', modelId: id })}
+              onQueue={(item) => {
+                setQueue(addToQueue(item));
+                if (item.modelId && item.versionId) {
+                  void (async () => {
+                    try {
+                      if (await backendAvailable()) {
+                        await apiPost('/downloads', {
+                          modelId: item.modelId,
+                          versionId: item.versionId,
+                        });
+                      }
+                    } catch {
+                      /* worker offline — local stub keeps the entry */
+                    }
+                  })();
+                }
+              }}
+              queuedIds={queuedIds}
+            />
+          )}
           {view === 'models' && (
             <Explorer
               queuedIds={queuedIds}
