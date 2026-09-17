@@ -4,7 +4,7 @@
 # Model dirs, DB, plugins and git state live in volumes so updates
 # (`git pull` core/plugins) survive rebuilds.
 
-FROM node:22-alpine AS frontend
+FROM node:22-slim AS frontend
 WORKDIR /build
 COPY app/package.json app/package-lock.json ./app/
 RUN cd app && npm ci --no-audit --no-fund
