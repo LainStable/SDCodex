@@ -58,7 +58,8 @@ export interface CivitaiPage {
   currentPage: number;
   pageSize: number;
   totalPages: number;
-  nextCursor: number | null;
+  nextCursor: string | null;
+  nextPage?: string | null;
 }
 
 /** Model types exactly as the reference type list. */
@@ -120,7 +121,8 @@ export interface ExplorerQuery {
   type: string; // 'All' | MODEL_TYPES member
   baseModels: string[]; // empty = all
   sort: (typeof SORTS)[number];
-  page: number;
+  page?: number;
+  cursor?: string | number | null;
   nsfw: boolean;
 }
 
@@ -185,13 +187,18 @@ function authHeaders(signal?: AbortSignal): {
   };
 }
 
-export async function fetchModels(query: ExplorerQuery, signal?: AbortSignal): Promise<CivitaiPage> {  const params = new URLSearchParams({
+export async function fetchModels(query: ExplorerQuery, signal?: AbortSignal): Promise<CivitaiPage> {
+  const params = new URLSearchParams({
     limit: '24',
-    page: String(query.page),
     sort: query.sort,
     period: 'AllTime',
     nsfw: String(query.nsfw),
   });
+  if (query.cursor !== undefined && query.cursor !== null && query.cursor !== '') {
+    params.set('cursor', String(query.cursor));
+  } else if (query.page !== undefined && query.page !== null) {
+    params.set('page', String(query.page));
+  }
   if (query.q.trim()) params.set('query', query.q.trim());
   if (query.type !== 'All') params.set('types', query.type);
   for (const b of query.baseModels) params.append('baseModels', b);
@@ -199,13 +206,28 @@ export async function fetchModels(query: ExplorerQuery, signal?: AbortSignal): P
   const res = await fetch(`${apiBase()}?${params}`, authHeaders(signal));
   if (!res.ok) throw new Error(`Civitai API ${res.status}`);
   const json = await res.json();
+
+  let nextCursor: string | null = null;
+  if (json.metadata?.nextCursor !== undefined && json.metadata?.nextCursor !== null) {
+    nextCursor = String(json.metadata.nextCursor);
+  } else if (json.metadata?.nextPage) {
+    try {
+      const u = new URL(json.metadata.nextPage);
+      const c = u.searchParams.get('cursor');
+      if (c) nextCursor = c;
+    } catch {
+      /* ignore invalid URL */
+    }
+  }
+
   return {
     items: json.items ?? [],
     totalItems: json.metadata?.totalItems ?? 0,
-    currentPage: json.metadata?.currentPage ?? query.page,
+    currentPage: json.metadata?.currentPage ?? query.page ?? 1,
     pageSize: json.metadata?.pageSize ?? 24,
-    totalPages: json.metadata?.totalPages ?? 1,
-    nextCursor: null,
+    totalPages: json.metadata?.totalPages ?? (nextCursor ? 9999 : 1),
+    nextCursor,
+    nextPage: json.metadata?.nextPage ?? null,
   };
 }
 

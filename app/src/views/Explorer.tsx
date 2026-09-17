@@ -6,7 +6,7 @@ import {
   fetchModels,
   formatCount,
   probeCivitai,
-  type CivitaiPage,
+  type CivitaiModel,
   type ExplorerQuery,
 } from '../lib/civitai';
 import { targetDirFor } from '../lib/settings';
@@ -46,42 +46,159 @@ export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchT
     type: 'All',
     baseModels: [],
     sort: 'Highest Rated',
-    page: 1,
     nsfw: false,
   });
   const [draft, setDraft] = useState('');
-  const [page, setPage] = useState<CivitaiPage | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [items, setItems] = useState<CivitaiModel[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalItems, setTotalItems] = useState<number | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+
+  const [loadingInitial, setLoadingInitial] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [initialError, setInitialError] = useState<string | null>(null);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+
   const [blurNsfw, setBlurNsfw] = useState(true);
   const [latency, setLatency] = useState<number | null>(null);
   const [apiLive, setApiLive] = useState<boolean | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
 
-  const load = useCallback(async (q: ExplorerQuery) => {
-    abortRef.current?.abort();
+  const initialAbortRef = useRef<AbortController | null>(null);
+  const moreAbortRef = useRef<AbortController | null>(null);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  const loadInitial = useCallback(async (q: ExplorerQuery) => {
+    initialAbortRef.current?.abort();
+    moreAbortRef.current?.abort();
     const ctl = new AbortController();
-    abortRef.current = ctl;
-    setLoading(true);
-    setError(null);
+    initialAbortRef.current = ctl;
+
+    setLoadingInitial(true);
+    setLoadingMore(false);
+    setInitialError(null);
+    setLoadMoreError(null);
+
     const t0 = performance.now();
     try {
-      const data = await fetchModels(q, ctl.signal);
-      setPage(data);
+      const data = await fetchModels({ ...q, page: 1, cursor: undefined }, ctl.signal);
+      setItems(data.items);
+      setNextCursor(data.nextCursor);
+      setCurrentPage(data.currentPage);
+      setTotalItems(data.totalItems > 0 ? data.totalItems : null);
+
+      const more =
+        data.items.length > 0 &&
+        (Boolean(data.nextCursor) || data.currentPage < data.totalPages);
+      setHasMore(more);
       setLatency(Math.round(performance.now() - t0));
     } catch (e) {
       if ((e as Error).name !== 'AbortError') {
-        setError(e instanceof Error ? e.message : 'Request failed');
+        setInitialError(e instanceof Error ? e.message : 'Request failed');
       }
     } finally {
-      if (!ctl.signal.aborted) setLoading(false);
+      if (!ctl.signal.aborted) {
+        setLoadingInitial(false);
+      }
     }
   }, []);
 
+  const loadMore = useCallback(async () => {
+    if (loadingInitial || loadingMore || !hasMore || loadMoreError) return;
+
+    moreAbortRef.current?.abort();
+    const ctl = new AbortController();
+    moreAbortRef.current = ctl;
+
+    setLoadingMore(true);
+    setLoadMoreError(null);
+
+    const t0 = performance.now();
+    try {
+      const nextPage = currentPage + 1;
+      const data = await fetchModels(
+        {
+          ...query,
+          page: nextPage,
+          cursor: nextCursor,
+        },
+        ctl.signal,
+      );
+
+      setItems((prev) => {
+        const seen = new Set(prev.map((m) => m.id));
+        const added = data.items.filter((m) => !seen.has(m.id));
+        return [...prev, ...added];
+      });
+
+      setNextCursor(data.nextCursor);
+      setCurrentPage(data.currentPage);
+      if (data.totalItems > 0) setTotalItems(data.totalItems);
+
+      const more =
+        data.items.length > 0 &&
+        (Boolean(data.nextCursor) || data.currentPage < data.totalPages);
+      setHasMore(more);
+      setLatency(Math.round(performance.now() - t0));
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') {
+        setLoadMoreError(e instanceof Error ? e.message : 'Failed to load next page');
+      }
+    } finally {
+      if (!ctl.signal.aborted) {
+        setLoadingMore(false);
+      }
+    }
+  }, [loadingInitial, loadingMore, hasMore, loadMoreError, currentPage, query, nextCursor]);
+
+  const loadMoreRef = useRef(loadMore);
   useEffect(() => {
-    load(query);
-    return () => abortRef.current?.abort();
-  }, [query, load]);
+    loadMoreRef.current = loadMore;
+  }, [loadMore]);
+
+  // Infinite scroll trigger via IntersectionObserver
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || !hasMore || loadMoreError) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          loadMoreRef.current();
+        }
+      },
+      { root: null, rootMargin: '600px 0px' },
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, items.length, loadMoreError]);
+
+  // Passive window scroll listener as a secondary safeguard
+  useEffect(() => {
+    if (!hasMore || loadMoreError) return;
+
+    const onScroll = () => {
+      const scrollY = window.scrollY || document.documentElement.scrollTop;
+      const windowHeight = window.innerHeight;
+      const documentHeight = document.documentElement.scrollHeight;
+
+      if (documentHeight - (scrollY + windowHeight) < 600) {
+        loadMoreRef.current();
+      }
+    };
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [hasMore, loadMoreError]);
+
+  useEffect(() => {
+    loadInitial(query);
+    return () => {
+      initialAbortRef.current?.abort();
+      moreAbortRef.current?.abort();
+    };
+  }, [query, loadInitial]);
 
   // Liveness probe drives the status badge (static green lied when down).
   useEffect(() => {
@@ -109,11 +226,8 @@ export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchT
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchToken]);
 
-  const patch = (p: Partial<ExplorerQuery>, resetPage = true) =>
-    setQuery((q) => ({ ...q, ...p, page: resetPage ? 1 : q.page }));
-
-  const shown = page?.items.length ?? 0;
-  const total = page?.totalItems ?? 0;
+  const patch = (p: Partial<ExplorerQuery>) =>
+    setQuery((q) => ({ ...q, ...p }));
 
   return (
     <div>
@@ -134,9 +248,16 @@ export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchT
               />
               {apiLive === false ? 'Civitai API unreachable' : 'Civitai API'}
             </span>
-            {loading
-              ? 'Searching…'
-              : `Showing ${shown} of ${formatCount(total)} indexed${latency !== null ? ` · ${latency}ms` : ''}`}
+            {loadingInitial ? (
+              'Searching…'
+            ) : (
+              <>
+                {totalItems !== null
+                  ? `Showing ${items.length} of ${formatCount(totalItems)} indexed`
+                  : `Showing ${items.length} models`}
+                {latency !== null ? ` · ${latency}ms` : ''}
+              </>
+            )}
           </>
         }
       />
@@ -215,116 +336,144 @@ export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchT
         </div>
       </div>
 
-      {error && (
+      {initialError && (
         <div className="mt-4 rounded-lg border border-status-alert/40 bg-status-alert/10 p-4 text-sm">
-          <span className="font-semibold text-[#f87171]">Explorer unavailable:</span> {error}
-          <GhostButton className="ml-3" onClick={() => load(query)}>
+          <span className="font-semibold text-[#f87171]">Explorer unavailable:</span> {initialError}
+          <GhostButton className="ml-3" onClick={() => loadInitial(query)}>
             Retry
           </GhostButton>
         </div>
       )}
 
       <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {loading &&
+        {loadingInitial &&
           Array.from({ length: 6 }).map((_, i) => (
             <div key={`sk-${i}`} className="glass-l1 h-64 animate-pulse rounded-lg" />
           ))}
-        {!loading &&
-          (page?.items ?? []).map((m) => {
+        {!loadingInitial &&
+          items.map((m) => {
             const v = m.modelVersions[0];
-          const img = v?.images[0];
-          const blur = blurNsfw && img && isNsfwImage(img);
-          const queued = v ? queuedIds.has(`civitai-${m.id}-${v.id}`) : queuedIds.has(`civitai-${m.id}`);
-          const owned = v ? ownedIds.has(`${m.id}-${v.id}`) : false;
-          return (
-            <article
-              key={m.id}
-              className="glass-l1 group overflow-hidden rounded-lg transition-colors hover:border-primary/40"
-            >
-              <button
-                type="button"
-                onClick={() => onOpen(m.id)}
-                className="block w-full text-left"
-                title="Open model detail"
+            const img = v?.images[0];
+            const blur = blurNsfw && img && isNsfwImage(img);
+            const queued = v ? queuedIds.has(`civitai-${m.id}-${v.id}`) : queuedIds.has(`civitai-${m.id}`);
+            const owned = v ? ownedIds.has(`${m.id}-${v.id}`) : false;
+            return (
+              <article
+                key={m.id}
+                className="glass-l1 group overflow-hidden rounded-lg transition-colors hover:border-primary/40"
               >
-                <div className="relative aspect-[4/3] bg-obsidian-lowest">
-                  {img ? (
-                    <img
-                      src={img.url}
-                      alt=""
-                      loading="lazy"
-                      className={`h-full w-full object-cover ${blur ? 'blur-md' : ''}`}
-                    />
-                  ) : (
-                    <div className="flex h-full items-center justify-center font-mono text-[11px] text-ink-faint">
-                      no preview
-                    </div>
-                  )}
-                  <div className="absolute left-2 top-2">
-                    <TypeBadge type={m.type} />
-                  </div>
-                </div>
-                <div className="p-3 pb-0">
-                  <h2 className="truncate font-display text-sm font-semibold group-hover:text-white" title={m.name}>
-                    {m.name}
-                  </h2>
-                </div>
-              </button>
-              <div className="p-3 pt-1.5">
-                <div className="flex items-center justify-between font-mono text-[11px] text-ink-muted">
-                  <Stars rating={m.stats?.rating ?? 0} />
-                  <span>{formatCount(m.stats?.downloadCount ?? 0)} DL</span>
-                  <span className="truncate text-ink-faint">@{m.creator?.username ?? '—'}</span>
-                </div>
-                <div className="mt-1 truncate font-mono text-[10px] text-ink-faint">
-                  {targetDirFor(m.type, v?.baseModel ?? query.baseModels[0] ?? 'All')}
-                </div>
                 <button
                   type="button"
-                  disabled={queued || owned || !v}
-                  onClick={() =>
-                    v &&
-                    onQueue({
-                      id: `civitai-${m.id}-${v.id}`,
-                      name: m.name,
-                      detail: `${m.type} · ${v.baseModel}`,
-                      downloadUrl: v.downloadUrl,
-                      modelId: m.id,
-                      versionId: v.id,
-                      baseModel: v.baseModel,
-                    })
-                  }
-                  className={`mt-2 w-full rounded border py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.06em] ${
-                    queued || owned
-                      ? 'border-status-active/40 bg-status-active/10 text-status-active'
-                      : 'border-primary/50 bg-primary/20 text-white hover:bg-primary/30 disabled:opacity-50'
-                  }`}
+                  onClick={() => onOpen(m.id)}
+                  className="block w-full text-left"
+                  title="Open model detail"
                 >
-                  {queued ? '✓ Queued' : owned ? '✓ Installed' : '+ Download queue'}
+                  <div className="relative aspect-[4/3] bg-obsidian-lowest">
+                    {img ? (
+                      <img
+                        src={img.url}
+                        alt=""
+                        loading="lazy"
+                        className={`h-full w-full object-cover ${blur ? 'blur-md' : ''}`}
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center font-mono text-[11px] text-ink-faint">
+                        no preview
+                      </div>
+                    )}
+                    <div className="absolute left-2 top-2">
+                      <TypeBadge type={m.type} />
+                    </div>
+                  </div>
+                  <div className="p-3 pb-0">
+                    <h2 className="truncate font-display text-sm font-semibold group-hover:text-white" title={m.name}>
+                      {m.name}
+                    </h2>
+                  </div>
                 </button>
-              </div>
-            </article>
-          );
-        })}
+                <div className="p-3 pt-1.5">
+                  <div className="flex items-center justify-between font-mono text-[11px] text-ink-muted">
+                    <Stars rating={m.stats?.rating ?? 0} />
+                    <span>{formatCount(m.stats?.downloadCount ?? 0)} DL</span>
+                    <span className="truncate text-ink-faint">@{m.creator?.username ?? '—'}</span>
+                  </div>
+                  <div className="mt-1 truncate font-mono text-[10px] text-ink-faint">
+                    {targetDirFor(m.type, v?.baseModel ?? query.baseModels[0] ?? 'All')}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={queued || owned || !v}
+                    onClick={() =>
+                      v &&
+                      onQueue({
+                        id: `civitai-${m.id}-${v.id}`,
+                        name: m.name,
+                        detail: `${m.type} · ${v.baseModel}`,
+                        downloadUrl: v.downloadUrl,
+                        modelId: m.id,
+                        versionId: v.id,
+                        baseModel: v.baseModel,
+                      })
+                    }
+                    className={`mt-2 w-full rounded border py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.06em] ${
+                      queued || owned
+                        ? 'border-status-active/40 bg-status-active/10 text-status-active'
+                        : 'border-primary/50 bg-primary/20 text-white hover:bg-primary/30 disabled:opacity-50'
+                    }`}
+                  >
+                    {queued ? '✓ Queued' : owned ? '✓ Installed' : '+ Download queue'}
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+        {!loadingInitial &&
+          loadingMore &&
+          Array.from({ length: 6 }).map((_, i) => (
+            <div key={`more-sk-${i}`} className="glass-l1 h-64 animate-pulse rounded-lg" />
+          ))}
       </section>
 
-      {page && page.totalPages > 1 && (
-        <div className="mt-4 flex items-center justify-center gap-3 font-mono text-xs">
+      {!loadingInitial && items.length === 0 && !initialError && (
+        <div className="mt-8 rounded-lg border border-white/[0.06] bg-obsidian-lowest/40 py-16 text-center">
+          <p className="font-display text-base font-semibold text-ink">No models found</p>
+          <p className="mt-1 font-mono text-xs text-ink-muted">
+            Try adjusting your search query, type, or base model filters.
+          </p>
+        </div>
+      )}
+
+      {loadMoreError && (
+        <div className="mt-4 flex items-center justify-between rounded-lg border border-status-alert/40 bg-status-alert/10 p-3 text-xs">
+          <div className="text-[#f87171]">
+            <span className="font-semibold">Failed to load more models:</span> {loadMoreError}
+          </div>
           <GhostButton
-            disabled={query.page <= 1 || loading}
-            onClick={() => patch({ page: query.page - 1 }, false)}
+            onClick={() => {
+              setLoadMoreError(null);
+              void loadMore();
+            }}
           >
-            ← Prev
+            Retry
           </GhostButton>
-          <span className="text-ink-muted">
-            Page {page.currentPage} / {formatCount(page.totalPages)}
-          </span>
-          <GhostButton
-            disabled={query.page >= page.totalPages || loading}
-            onClick={() => patch({ page: query.page + 1 }, false)}
-          >
-            Next →
-          </GhostButton>
+        </div>
+      )}
+
+      {loadingMore && (
+        <div className="mt-4 flex items-center justify-center gap-2 font-mono text-xs text-ink-muted">
+          <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          Loading more models…
+        </div>
+      )}
+
+      {/* Sentinel for infinite scroll */}
+      {hasMore && !loadMoreError && (
+        <div ref={sentinelRef} className="h-10 w-full" aria-hidden="true" />
+      )}
+
+      {!loadingInitial && !hasMore && items.length > 0 && (
+        <div className="mt-8 py-4 text-center font-mono text-xs text-ink-faint">
+          All {totalItems ? `${formatCount(totalItems)} ` : `${items.length} `}models loaded
         </div>
       )}
     </div>
