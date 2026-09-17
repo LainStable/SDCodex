@@ -24,6 +24,8 @@ export const MODEL_TYPES = [
 
 const API_KEY = 'sdcodex.apiKey.v1';
 const API_USER = 'sdcodex.apiUser.v1';
+const API_MIRROR = 'sdcodex.apiMirror.v1';
+export const API_MIRRORS = ['civitai.com', 'civitai.red'] as const;
 const DIRS_KEY = 'sdcodex.dirs.v1';
 const CUSTOM_DIRS_KEY = 'sdcodex.customDirs.v1';
 const COLORS_KEY = 'sdcodex.dirColors.v1';
@@ -68,6 +70,16 @@ export function getApiUser(): string {
 
 export function setApiUser(username: string): void {
   write(API_USER, username);
+}
+
+/** API host: civitai.com (default) or civitai.red mirror. */
+export function getApiMirror(): string {
+  const m = read(API_MIRROR);
+  return m === 'civitai.red' ? 'civitai.red' : 'civitai.com';
+}
+
+export function setApiMirror(host: string): void {
+  write(API_MIRROR, host === 'civitai.red' ? 'civitai.red' : 'civitai.com');
 }
 
 /** Mirrors OldCode Setting dir_<type> rows. */
@@ -182,11 +194,15 @@ export async function pullSettings(): Promise<boolean> {
       dirs: Record<string, string>;
       colors?: Record<string, string>;
       civitaiApiKey: string;
+      apiMirror?: string;
     }>('/settings');
     write('sdcodex.dirs.v1', JSON.stringify(s.dirs ?? {}));
     write(COLORS_KEY, JSON.stringify(s.colors ?? {}));
     if (s.civitaiApiKey) {
       write('sdcodex.apiKey.v1', s.civitaiApiKey);
+    }
+    if (s.apiMirror === 'civitai.red' || s.apiMirror === 'civitai.com') {
+      write(API_MIRROR, s.apiMirror);
     }
     return true;
   } catch {
@@ -202,6 +218,7 @@ export async function pushSettings(): Promise<void> {
       dirs: getDirectories(),
       colors: getDirColors(),
       civitaiApiKey: getApiKey(),
+      apiMirror: getApiMirror(),
     });
   } catch {
     /* standalone mode — local cache stands */

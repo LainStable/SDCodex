@@ -5,11 +5,13 @@ import { bindDirectoryKey, scanDir, serverScan, serverScanStatus } from '../lib/
 import { getHandle } from '../lib/idb';
 import { loadScanned, pruneScanned } from '../lib/library';
 import {
+  API_MIRRORS,
   MODEL_TYPES,
   addDirPath,
   clearApiKey,
   deleteCustomDir,
   getApiKey,
+  getApiMirror,
   getApiUser,
   getCustomDirs,
   getDirColors,
@@ -17,6 +19,7 @@ import {
   pushSettings,
   removeDirPath,
   setApiKey,
+  setApiMirror,
   setApiUser,
   setCustomDir,
   setDirColor,
@@ -547,6 +550,7 @@ function Dirs() {
 function ApiKey() {
   const [key, setKey] = useState(getApiKey);
   const [user, setUser] = useState(getApiUser);
+  const [mirror, setMirror] = useState(getApiMirror);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -586,8 +590,24 @@ function ApiKey() {
       </div>
       <p className="mt-1 text-xs text-ink-muted">
         Sent as a Bearer token on every Civitai request (same as OldCode headers). Stored only
-        in this browser until user accounts land.
+        in this browser until user accounts land. Save validates against the selected host.
       </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+          API host:
+        </span>
+        <FilterPills
+          options={API_MIRRORS.map((h) => ({ id: h, label: h }))}
+          active={mirror}
+          onPick={(h) => {
+            setMirror(h);
+            setApiMirror(h);
+            setUser('');
+            setStatus(null);
+            void pushSettings();
+          }}
+        />
+      </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <input
           value={key}

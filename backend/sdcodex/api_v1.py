@@ -145,6 +145,7 @@ def get_settings():
             "dirs": {k: v for k, v in rows.items() if k.startswith("dir_")},
             "colors": {k[6:]: v for k, v in rows.items() if k.startswith("color_")},
             "civitaiApiKey": user.api_key or rows.get("civitai_api_key", ""),
+            "apiMirror": rows.get("api_mirror", "civitai.com") or "civitai.com",
             "maxParallel": int(rows.get("max_parallel_downloads", "1") or 1),
         }
     )
@@ -189,6 +190,14 @@ def post_settings():
             row = Setting(key="max_parallel_downloads")
             db.session.add(row)
         row.value = str(parallel)
+    if "apiMirror" in data:
+        mirror = data.get("apiMirror")
+        mirror = mirror if mirror in ("civitai.com", "civitai.red") else "civitai.com"
+        row = db.session.get(Setting, "api_mirror")
+        if row is None:
+            row = Setting(key="api_mirror")
+            db.session.add(row)
+        row.value = mirror
     db.session.commit()
     try:
         from .download_manager import download_manager

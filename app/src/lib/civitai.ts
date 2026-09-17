@@ -124,11 +124,32 @@ export interface ExplorerQuery {
   nsfw: boolean;
 }
 
-/** In dev, calls go through the Vite proxy (see vite.config.ts) because the
+/** In dev, calls go through Vite proxies (see vite.config.ts) because the
     Civitai preflight rejects browser Authorization headers. Prod builds will
     use the backend proxy at /api — same path shape. */
-const API = import.meta.env.DEV ? '/civitai/api/v1/models' : 'https://civitai.com/api/v1/models';
-const API_ROOT = import.meta.env.DEV ? '/civitai/api/v1' : 'https://civitai.com/api/v1';
+function mirrorHost(): string {
+  try {
+    return localStorage.getItem('sdcodex.apiMirror.v1') === 'civitai.red'
+      ? 'civitai.red'
+      : 'civitai.com';
+  } catch {
+    return 'civitai.com';
+  }
+}
+
+function apiBase(): string {
+  if (import.meta.env.DEV) {
+    return mirrorHost() === 'civitai.red' ? '/civitai-red/api/v1/models' : '/civitai/api/v1/models';
+  }
+  return `https://${mirrorHost()}/api/v1/models`;
+}
+
+function apiRoot(): string {
+  if (import.meta.env.DEV) {
+    return mirrorHost() === 'civitai.red' ? '/civitai-red/api/v1' : '/civitai/api/v1';
+  }
+  return `https://${mirrorHost()}/api/v1`;
+}
 
 /** Mirrors OldCode api._get_headers: bearer token when the user saved one. */
 function authHeaders(signal?: AbortSignal): { headers: Record<string, string>; signal?: AbortSignal } {
@@ -155,7 +176,7 @@ export async function fetchModels(query: ExplorerQuery, signal?: AbortSignal): P
   if (query.type !== 'All') params.set('types', query.type);
   for (const b of query.baseModels) params.append('baseModels', b);
 
-  const res = await fetch(`${API}?${params}`, authHeaders(signal));
+  const res = await fetch(`${apiBase()}?${params}`, authHeaders(signal));
   if (!res.ok) throw new Error(`Civitai API ${res.status}`);
   const json = await res.json();
   return {
@@ -176,7 +197,7 @@ export interface CivitaiMe {
 }
 
 export async function fetchMe(apiKey: string, signal?: AbortSignal): Promise<CivitaiMe> {
-  const res = await fetch(`${API_ROOT}/me`, {
+  const res = await fetch(`${apiRoot()}/me`, {
     headers: { Authorization: `Bearer ${apiKey.trim()}` },
     signal,
   });
@@ -188,7 +209,7 @@ export async function fetchMe(apiKey: string, signal?: AbortSignal): Promise<Civ
 }
 /** Single model detail — mirrors OldCode api.get_model(model_id). */
 export async function fetchModel(modelId: number, signal?: AbortSignal): Promise<CivitaiModel> {
-  const res = await fetch(`${API}/${modelId}`, authHeaders(signal));
+  const res = await fetch(`${apiBase()}/${modelId}`, authHeaders(signal));
   if (!res.ok) throw new Error(`Civitai API ${res.status}`);
   return res.json();
 }
@@ -198,7 +219,7 @@ export async function fetchVersionByHash(
   hash: string,
   signal?: AbortSignal,
 ): Promise<CivitaiVersion> {
-  const res = await fetch(`${API}/model-versions/by-hash/${hash}`, authHeaders(signal));
+  const res = await fetch(`${apiBase()}/model-versions/by-hash/${hash}`, authHeaders(signal));
   if (!res.ok) throw new Error(`Civitai API ${res.status}`);
   return res.json();
 }

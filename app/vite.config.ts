@@ -18,6 +18,12 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/civitai/, ''),
       },
+      // Mirror host (same preflight constraints as civitai.com).
+      '/civitai-red': {
+        target: 'https://civitai.red',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/civitai-red/, ''),
+      },
       // Local backend (Flask). Same-origin so session cookies just work.
       '/api': {
         target: 'http://127.0.0.1:5000',
