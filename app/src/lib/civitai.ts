@@ -6,7 +6,8 @@ export interface CivitaiImageMeta {
 
 export interface CivitaiImage {
   url: string;
-  nsfw: boolean | string;
+  /** Civitai nsfwLevel: 1=safe, 2=soft, 4=mature, 8=explicit, 32=blocked */
+  nsfwLevel: number;
   width: number | null;
   height: number | null;
   meta?: CivitaiImageMeta | null;

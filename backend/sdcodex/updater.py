@@ -59,12 +59,29 @@ def local_rev(path: str) -> str:
     except Exception:
         return ""
 
+def _detect_remote(path: str) -> str:
+    """Return the best remote to pull from: prefer 'origin', fall back to 'upstream', else first."""
+    try:
+        r = _git(["remote"], cwd=path)
+        if r.returncode != 0:
+            return "origin"
+        remotes = [l.strip() for l in r.stdout.splitlines() if l.strip()]
+        if not remotes:
+            return "origin"
+        for preferred in ("origin", "upstream"):
+            if preferred in remotes:
+                return preferred
+        return remotes[0]
+    except Exception:
+        return "origin"
+
 
 def remote_rev(repo_path_or_url: str) -> str:
     """Remote HEAD sha via the local remote (no API tokens needed)."""
     try:
         if os.path.isdir(os.path.join(repo_path_or_url, ".git")):
-            r = _git(["ls-remote", "origin", "HEAD"], cwd=repo_path_or_url)
+            remote = _detect_remote(repo_path_or_url)
+            r = _git(["ls-remote", remote, "HEAD"], cwd=repo_path_or_url)
         else:
             r = _git(["ls-remote", repo_path_or_url, "HEAD"], cwd=root_dir())
         if r.returncode != 0:
@@ -130,8 +147,9 @@ def update_core() -> tuple[bool, str]:
         return False, "Not a git checkout — cannot self-update."
     if not is_clean(root):
         return False, "Working tree has local changes — commit or stash first."
+    remote = _detect_remote(root)
     try:
-        r = _git(["pull", "--ff-only"], cwd=root)
+        r = _git(["pull", "--ff-only", remote], cwd=root)
         if r.returncode != 0:
             return False, (r.stderr or r.stdout).strip()[:500]
         return True, (r.stdout or "Already up to date.").strip()[:500]

@@ -36,8 +36,9 @@ interface Props {
   searchText: string;
 }
 
-function isNsfwImage(img: { nsfw: boolean | string }): boolean {
-  return img.nsfw === true || (typeof img.nsfw === 'string' && img.nsfw !== 'None');
+function isNsfwImage(img: { nsfwLevel: number }): boolean {
+  // nsfwLevel 1 = safe, anything above = soft/mature/explicit/blocked
+  return img.nsfwLevel > 1;
 }
 
 export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchToken, searchText }: Props) {
@@ -370,12 +371,14 @@ export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchT
                 >
                   <div className="relative aspect-[4/3] bg-obsidian-lowest">
                     {img ? (
-                      <img
-                        src={img.url}
-                        alt=""
-                        loading="lazy"
-                        className={`h-full w-full object-cover ${blur ? 'blur-md' : ''}`}
-                      />
+                      <div className="h-full w-full overflow-hidden">
+                        <img
+                          src={img.url}
+                          alt=""
+                          loading="lazy"
+                          className={`h-full w-full object-cover transition-[filter] ${blur ? 'scale-105 blur-md' : ''}`}
+                        />
+                      </div>
                     ) : (
                       <div className="flex h-full items-center justify-center font-mono text-[11px] text-ink-faint">
                         no preview
