@@ -82,30 +82,45 @@ def is_clean(path: str) -> bool:
         return False
 
 
+def _parse_version(v: str) -> tuple:
+    parts = []
+    for p in (v or "").strip().lstrip("v").split("."):
+        try:
+            parts.append(int(p))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts) or (0,)
+
+
+def local_core_version() -> str:
+    """This checkout's version (VERSION file, bumped every core push)."""
+    try:
+        with open(os.path.join(root_dir(), "VERSION"), encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return "0.0.0"
+
+
 # ------------------------------------------------------------------ core ---
 
 def check_core() -> dict:
-    root = root_dir()
-    local = local_rev(root)
+    """Compare the local VERSION file against the hub's core version.
+
+    The hub (plugins.json `core.version`, bumped every core push) is the
+    source of truth — no git/ssh needed inside containers.
+    """
+    local = local_core_version()
     remote = ""
-    branch = ""
-    if os.path.isdir(os.path.join(root, ".git")):
-        try:
-            r = _git(["symbolic-ref", "--short", "HEAD"], cwd=root)
-            branch = r.stdout.strip() if r.returncode == 0 else "main"
-            # Prefer origin, fall back to upstream (fork workflows).
-            for remote_name in ("origin", "upstream"):
-                rr = _git(["ls-remote", remote_name, "HEAD"], cwd=root)
-                if rr.returncode == 0 and rr.stdout.strip():
-                    remote = rr.stdout.split()[0]
-                    break
-        except Exception as e:
-            logger.warning("Core update check failed: %s", e)
+    try:
+        r = requests.get(HUB_URL, timeout=15)
+        if r.ok:
+            remote = ((r.json().get("core") or {}).get("version") or "").strip()
+    except Exception as e:
+        logger.warning("Core update check failed: %s", e)
     return {
-        "local_sha": local,
-        "remote_sha": remote,
-        "branch": branch,
-        "has_update": bool(local and remote and local != remote),
+        "local_version": local,
+        "remote_version": remote,
+        "has_update": bool(local and remote and _parse_version(remote) > _parse_version(local)),
     }
 
 

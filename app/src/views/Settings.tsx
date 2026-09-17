@@ -1108,7 +1108,7 @@ function Auth({
 
 function System() {
   const [updates, setUpdates] = useState<{
-    core?: { has_update?: boolean; local_sha?: string; remote_sha?: string; branch?: string; message?: string };
+    core?: { has_update?: boolean; local_version?: string; remote_version?: string };
     plugins?: Array<{ id: string; name: string }>;
     total?: number;
   } | null>(null);
@@ -1187,12 +1187,8 @@ function System() {
           <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-white/[0.06] px-2 py-1.5 font-mono text-[11px]">
             <span className="text-ink">Core</span>
             <span className="text-ink-faint">
-              {(updates.core.local_sha ?? '').slice(0, 7) || 'unknown'} →{' '}
-              {(updates.core.remote_sha ?? '').slice(0, 7) || 'unknown'}
+              v{updates.core.local_version || '?'} → v{updates.core.remote_version || '?'}
             </span>
-            {updates.core.message && (
-              <span className="min-w-0 flex-1 truncate text-ink-faint">{updates.core.message}</span>
-            )}
             {updates.core.has_update ? (
               <PrimaryButton disabled={applying} onClick={() => void applyCore()}>
                 {applying ? 'Updating…' : 'Update core'}
