@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { BASE_MODELS } from '../lib/civitai';
-import { MODEL_TYPES, getDirectories } from '../lib/settings';
+import { MODEL_TYPES, getDirectories, getDirColors } from '../lib/settings';
 import { loadScanned, type ScannedModel } from '../lib/library';
 import type { ModalTarget } from '../components/ModelModal';
 import { SocketPill, TypeBadge } from '../components/ui';
@@ -35,6 +35,7 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
   const [bases, setBases] = useState<string[]>([]);
   const [scanned] = useState<ScannedModel[]>(loadScanned);
   const [serverRows, setServerRows] = useState<ServerRow[]>([]);
+  const [colors] = useState<Record<string, string>>(getDirColors);
 
   // Sections follow Settings: only configured categories appear.
   const sections = useMemo(() => {
@@ -114,7 +115,7 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
         return (
           <section key={t} className="mt-5">
             <div className="flex items-center gap-2">
-              <TypeBadge type={t} />
+              <TypeBadge type={t} color={colors[t]} />
               <span className="font-mono text-[11px] text-ink-faint">
                 {local.length + remote.length} model{local.length + remote.length === 1 ? '' : 's'}
               </span>

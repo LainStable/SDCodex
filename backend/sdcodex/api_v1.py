@@ -143,6 +143,7 @@ def get_settings():
     return jsonify(
         {
             "dirs": {k: v for k, v in rows.items() if k.startswith("dir_")},
+            "colors": {k[6:]: v for k, v in rows.items() if k.startswith("color_")},
             "civitaiApiKey": user.api_key or rows.get("civitai_api_key", ""),
         }
     )
@@ -157,6 +158,13 @@ def post_settings():
     for key, value in (data.get("dirs") or {}).items():
         if not key.startswith("dir_"):
             continue
+        row = db.session.get(Setting, key)
+        if row is None:
+            row = Setting(key=key)
+            db.session.add(row)
+        row.value = (value or "").strip()
+    for type_name, value in (data.get("colors") or {}).items():
+        key = f"color_{type_name}"
         row = db.session.get(Setting, key)
         if row is None:
             row = Setting(key=key)

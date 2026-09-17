@@ -26,6 +26,7 @@ const API_KEY = 'sdcodex.apiKey.v1';
 const API_USER = 'sdcodex.apiUser.v1';
 const DIRS_KEY = 'sdcodex.dirs.v1';
 const CUSTOM_DIRS_KEY = 'sdcodex.customDirs.v1';
+const COLORS_KEY = 'sdcodex.dirColors.v1';
 
 function read(key: string): string | null {
   try {
@@ -147,6 +148,24 @@ export function removeDirPath(key: string): void {
   }
 }
 
+/** Per-category accent colors ({ [Type]: '#rrggbb' }). Empty = grey default. */
+export function getDirColors(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(COLORS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    /* fall through */
+  }
+  return {};
+}
+
+export function setDirColor(modelType: string, color: string): void {
+  const all = getDirColors();
+  if (color) all[modelType] = color;
+  else delete all[modelType];
+  write(COLORS_KEY, JSON.stringify(all));
+}
+
 /** Default target dir for a type, preferring configured dir — mirrors downloader.py. */
 export function targetDirFor(modelType: string, baseModel: string): string {
   const configured = getDirectories()[`dir_${modelType}`];
@@ -159,8 +178,13 @@ export function targetDirFor(modelType: string, baseModel: string): string {
 export async function pullSettings(): Promise<boolean> {
   try {
     if (!(await backendAvailable())) return false;
-    const s = await apiGet<{ dirs: Record<string, string>; civitaiApiKey: string }>('/settings');
+    const s = await apiGet<{
+      dirs: Record<string, string>;
+      colors?: Record<string, string>;
+      civitaiApiKey: string;
+    }>('/settings');
     write('sdcodex.dirs.v1', JSON.stringify(s.dirs ?? {}));
+    write(COLORS_KEY, JSON.stringify(s.colors ?? {}));
     if (s.civitaiApiKey) {
       write('sdcodex.apiKey.v1', s.civitaiApiKey);
     }
@@ -174,7 +198,11 @@ export async function pullSettings(): Promise<boolean> {
 export async function pushSettings(): Promise<void> {
   try {
     if (!(await backendAvailable())) return;
-    await apiPost('/settings', { dirs: getDirectories(), civitaiApiKey: getApiKey() });
+    await apiPost('/settings', {
+      dirs: getDirectories(),
+      colors: getDirColors(),
+      civitaiApiKey: getApiKey(),
+    });
   } catch {
     /* standalone mode — local cache stands */
   }

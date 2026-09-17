@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FilterPills, GhostButton, PageHeader, PrimaryButton } from '../components/chrome';
 import { TypeBadge } from '../components/ui';
 import { bindDirectory, scanDir, serverScan, serverScanStatus } from '../lib/scan';
@@ -12,12 +12,14 @@ import {
   getApiKey,
   getApiUser,
   getCustomDirs,
+  getDirColors,
   getDirectories,
   pushSettings,
   removeDirPath,
   setApiKey,
   setApiUser,
   setCustomDir,
+  setDirColor,
 } from '../lib/settings';
 import { fetchMe } from '../lib/civitai';
 import {
@@ -54,11 +56,168 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'plugins', label: 'Plugins' },
 ];
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
+function Row({ label, children }: { label: string; children: React.ReactNode }) {  return (
     <div className="flex flex-wrap items-center gap-2 py-1.5">
       <span className="w-40 shrink-0 font-mono text-[11px] text-ink-muted">{label}</span>
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{children}</div>
+    </div>
+  );
+}
+
+const SWATCHES = [
+  '#ffffff',
+  '#fb4d6d',
+  '#f97316',
+  '#fbbf24',
+  '#22c55e',
+  '#14b8a6',
+  '#3b82f6',
+  '#a855f7',
+];
+
+function isValidCssColor(v: string): boolean {
+  if (!v.trim()) return false;
+  const opt = new Option().style;
+  opt.color = v.trim();
+  return opt.color !== '';
+}
+
+/** Floating accent picker (swatches + custom dialog), as per reference. */
+function ColorMenu({
+  type,
+  current,
+  onPick,
+}: {
+  type: string;
+  current: string;
+  onPick: (color: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customValue, setCustomValue] = useState('');
+  const [customError, setCustomError] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open && !customOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+        setCustomOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false);
+        setCustomOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open, customOpen]);
+
+  const applyCustom = () => {
+    if (!isValidCssColor(customValue)) {
+      setCustomError('Enter a valid CSS color (hex, rgb, hsl).');
+      return;
+    }
+    onPick(customValue.trim());
+    setCustomOpen(false);
+    setOpen(false);
+    setCustomError(null);
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => {
+          setCustomOpen(false);
+          setOpen((o) => !o);
+        }}
+        title={`Accent color for ${type}`}
+        className="flex h-6 w-6 items-center justify-center rounded border border-white/15 text-xs hover:border-white/30"
+        style={
+          current
+            ? { backgroundColor: current, borderColor: current }
+            : undefined
+        }
+      >
+        {!current && <span className="text-ink-faint">🎨</span>}
+      </button>
+
+      {open && !customOpen && (
+        <div className="glass-l2 modal-pop absolute left-0 top-8 z-50 flex gap-1.5 rounded-lg p-2">
+          {SWATCHES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              title={c}
+              onClick={() => {
+                onPick(c);
+                setOpen(false);
+              }}
+              className={`h-6 w-6 rounded-full border-2 ${
+                current.toLowerCase() === c.toLowerCase()
+                  ? 'border-white'
+                  : 'border-transparent hover:border-white/50'
+              }`}
+              style={{ backgroundColor: c }}
+            />
+          ))}
+          <button
+            type="button"
+            title="Custom color"
+            onClick={() => {
+              setCustomValue(current.startsWith('#') ? current : '');
+              setCustomError(null);
+              setCustomOpen(true);
+            }}
+            className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-dashed border-white/40 text-[10px] text-white hover:border-white"
+          >
+            +
+          </button>
+        </div>
+      )}
+
+      {customOpen && (
+        <div className="glass-l2 modal-pop absolute left-0 top-8 z-50 w-72 rounded-lg p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h3 className="font-display text-sm font-semibold">Custom Accent Color</h3>
+              <p className="mt-0.5 text-[11px] text-ink-muted">
+                Enter a custom color using valid CSS color formats (e.g., hex, rgb, hsl).
+              </p>
+            </div>
+            <GhostButton onClick={() => setCustomOpen(false)}>✕</GhostButton>
+          </div>
+          <label className="mt-3 block">
+            <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+              Color Value
+            </span>
+            <input
+              value={customValue}
+              onChange={(e) => {
+                setCustomValue(e.target.value);
+                setCustomError(null);
+              }}
+              placeholder="#3b82f6"
+              className="mt-1 w-full rounded border border-white/15 bg-obsidian-lowest px-3 py-2 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary"
+            />
+          </label>
+          {customError && (
+            <p className="mt-1 font-mono text-[10px] text-[#f87171]">{customError}</p>
+          )}
+          <div className="mt-3 flex justify-end gap-2">
+            <GhostButton onClick={() => setCustomOpen(false)}>Cancel</GhostButton>
+            <PrimaryButton onClick={applyCustom}>Apply</PrimaryButton>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -72,6 +231,7 @@ function Dirs() {
   const [label, setLabel] = useState('');
   const [path, setPath] = useState('');
   const [savedKey, setSavedKey] = useState<string | null>(null);
+  const [colors, setColors] = useState<Record<string, string>>(getDirColors);
   const [bound, setBound] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<Record<string, string>>({});
   const [scanning, setScanning] = useState(false);
@@ -225,12 +385,19 @@ function Dirs() {
       <div className="mt-2 divide-y divide-white/[0.06]">
         {MODEL_TYPES.map((t) => {
           const keys = [`dir_${t}`, ...Object.keys(dirs).filter((k) => k.startsWith(`dir_${t}__`)).sort()];
+          const hasSaved = keys.some((k) => (dirs[k] ?? '').trim() !== '');
+          const pickColor = (color: string) => {
+            setDirColor(t, color);
+            setColors(getDirColors());
+            void pushSettings();
+          };
           return (
             <div key={t} className="py-1.5">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="w-28 shrink-0">
-                  <TypeBadge type={t} />
+                  <TypeBadge type={t} color={colors[t]} />
                 </span>
+                {hasSaved && <ColorMenu type={t} current={colors[t] ?? ''} onPick={pickColor} />}
                 <GhostButton
                   onClick={() => {
                     const key = addDirPath(t, '');

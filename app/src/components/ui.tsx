@@ -10,12 +10,30 @@ const TYPE_BADGE: Record<string, string> = {
   Controlnet: 'bg-badge-sdxl/15 border-badge-sdxl/30 text-[#22d3ee]',
 };
 
-export function TypeBadge({ type }: { type: string }) {
+export function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace('#', '');
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  const n = parseInt(full.slice(0, 6), 16);
+  if (Number.isNaN(n)) return `rgba(144,143,160,${alpha})`;
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
+/** A category badge. Custom `color` overrides the built-in hue; otherwise the
+    built-in map applies, falling back to grey. */
+export function TypeBadge({ type, color }: { type: string; color?: string }) {
   const cls =
     TYPE_BADGE[type] ?? 'bg-white/5 border-white/15 text-ink-muted';
+  const style = color
+    ? {
+        color,
+        borderColor: hexToRgba(color, 0.45),
+        backgroundColor: hexToRgba(color, 0.13),
+      }
+    : undefined;
   return (
     <span
       className={`rounded-[3px] border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${cls}`}
+      style={style}
     >
       {type}
     </span>
