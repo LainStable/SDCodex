@@ -27,8 +27,9 @@ RUN pip install -r backend/requirements.txt
 
 COPY backend ./backend
 
-# Frontend build output is served by Flask (see sdcodex.register_frontend).
-COPY --from=frontend /build/app/dist ./backend/static/
+# Frontend build output lives OUTSIDE /app: compose mounts the repo over /app
+# (for git-pull updates), which would mask anything baked in under /app.
+COPY --from=frontend /build/app/dist /srv/frontend
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

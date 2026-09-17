@@ -25,13 +25,20 @@ def create_app(db_path: str | None = None) -> Flask:
 
     app.register_blueprint(api_v1, url_prefix="/api")
 
-    # Serve the built frontend in Docker (backend/static <- app/dist).
-    # Dev keeps using Vite; this only activates when the build is present.
-    static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-    index_html = os.path.join(static_dir, "index.html")
-    if os.path.exists(index_html):
-        from flask import send_from_directory
+    # Serve the built frontend in Docker from /srv/frontend (outside the
+    # repo mount, which would mask anything baked under /app). Dev keeps
+    # using Vite; bare-metal can drop a build into backend/sdcodex/static/.
+    from flask import send_from_directory
 
+    candidates = [
+        "/srv/frontend",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "static"),
+    ]
+    static_dir = next(
+        (c for c in candidates if os.path.exists(os.path.join(c, "index.html"))),
+        "",
+    )
+    if static_dir:
         @app.route("/", defaults={"path": ""})
         @app.route("/<path:path>")
         def _frontend(path):
