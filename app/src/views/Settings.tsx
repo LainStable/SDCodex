@@ -261,6 +261,7 @@ function Dirs() {
   }, []);
 
   // Merge saved rows into drafts without clobbering unsaved edits.
+  // Never deletes: unsaved rows live in drafts only until Save persists them.
   const refreshDirs = () => {
     const saved = getDirectories();
     setDirs(saved);
@@ -268,9 +269,6 @@ function Dirs() {
       const next = { ...d };
       for (const k of Object.keys(saved)) {
         if (!(k in next)) next[k] = saved[k] ?? '';
-      }
-      for (const k of Object.keys(next)) {
-        if (!(k in saved)) delete next[k];
       }
       return next;
     });
@@ -467,6 +465,11 @@ function Dirs() {
                         className="shrink-0"
                         onClick={() => {
                           removeDirPath(key);
+                          setDrafts((d) => {
+                            const next = { ...d };
+                            delete next[key];
+                            return next;
+                          });
                           refreshDirs();
                           void pushSettings();
                         }}
