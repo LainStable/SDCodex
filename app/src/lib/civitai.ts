@@ -158,7 +158,7 @@ function apiRoot(): string {
 export async function probeCivitai(signal?: AbortSignal): Promise<{ ok: boolean; ms: number | null }> {
   const t0 = performance.now();
   try {
-    const res = await fetch(`${apiRoot()}/models?limit=1`, { signal });
+    const res = await fetch(`${apiRoot()}/models?limit=1`, { signal, credentials: 'include' });
     void res.status;
     return { ok: res.status < 500, ms: Math.round(performance.now() - t0) };
   } catch {
@@ -167,7 +167,11 @@ export async function probeCivitai(signal?: AbortSignal): Promise<{ ok: boolean;
 }
 
 /** Mirrors OldCode api._get_headers: bearer token when the user saved one. */
-function authHeaders(signal?: AbortSignal): { headers: Record<string, string>; signal?: AbortSignal } {
+function authHeaders(signal?: AbortSignal): {
+  headers: Record<string, string>;
+  signal?: AbortSignal;
+  credentials: RequestCredentials;
+} {
   let key = '';
   try {
     key = localStorage.getItem('sdcodex.apiKey.v1') ?? '';
@@ -177,6 +181,7 @@ function authHeaders(signal?: AbortSignal): { headers: Record<string, string>; s
   return {
     headers: key ? { Authorization: `Bearer ${key}` } : {},
     signal,
+    credentials: 'include',
   };
 }
 
@@ -215,6 +220,7 @@ export async function fetchMe(apiKey: string, signal?: AbortSignal): Promise<Civ
   const res = await fetch(`${apiRoot()}/me`, {
     headers: { Authorization: `Bearer ${apiKey.trim()}` },
     signal,
+    credentials: 'include',
   });
   if (res.status === 401 || res.status === 403) {
     throw new Error('Key rejected (unauthorized)');
