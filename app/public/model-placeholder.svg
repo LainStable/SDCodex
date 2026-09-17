@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">
+  <rect width="640" height="480" fill="#181b25"/>
+  <g fill="none" stroke="#464554" stroke-width="10">
+    <rect x="150" y="110" width="340" height="230" rx="16"/>
+    <circle cx="230" cy="180" r="28"/>
+    <path d="M150 300l110-110 70 70 60-60 100 100"/>
+  </g>
+  <text x="320" y="390" text-anchor="middle" font-family="monospace" font-size="24" fill="#908fa0">UNIDENTIFIED MODEL</text>
+</svg>

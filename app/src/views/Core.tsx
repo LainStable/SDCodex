@@ -12,33 +12,7 @@ import { isPaused, setPaused, type QueueItem } from '../lib/queue';
 import { bootstrapUser, startSession, verifyPassword, type Profile } from '../lib/auth';
 import { adoptServerUser, fetchPublicProviders, type ServerAuthState } from '../lib/auth';
 import { apiPost, mirrorAuth } from '../lib/backend';
-
-const PLUGINS = [
-  {
-    id: 'gallery',
-    name: 'SDCodex Gallery',
-    desc: 'Disk-backed media gallery. Scans folders, reads captions and ComfyUI workflows from image metadata.',
-    repo: 'https://github.com/LainStable/SDCodex-Gallery',
-  },
-  {
-    id: 'gallery-dl',
-    name: 'GalleryDL & Tools',
-    desc: 'Background gallery-dl and yt-dlp tasks, quick downloads, kiosks, OAuth config.',
-    repo: 'https://github.com/LainStable/SDCodex-GalleryDL',
-  },
-  {
-    id: 'rembg',
-    name: 'RemBG Background Tools',
-    desc: 'Background removal, replacement, and batch processing powered by BiRefNet.',
-    repo: 'https://github.com/LainStable/SDCodex-RemBG',
-  },
-  {
-    id: 'comfy-caption',
-    name: 'ComfyUI Captioning',
-    desc: 'Auto-captioning with vision LLMs and JoyCaption, plus ComfyUI workflow nodes.',
-    repo: 'https://github.com/LainStable/SDCodex-ComfyCaption',
-  },
-];
+import { fetchCatalog, type HubCatalog } from '../lib/plugins';
 
 /** Blocking auth gate (mirrors OldCode bootstrap + login). No session, no app:
     first-ever user sets a password and becomes admin; returning users sign in. */
@@ -642,17 +616,44 @@ export function DownloadFloat() {
 export function Plugins() {
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<'all' | 'official'>('all');
-  const shown = PLUGINS.filter((p) =>
-    p.name.toLowerCase().includes(q.trim().toLowerCase()),
-  );
+  const [catalog, setCatalog] = useState<HubCatalog | null>(null);
+  const [live, setLive] = useState(false);
+
+  useEffect(() => {
+    let on = true;
+    void (async () => {
+      const { catalog: c, live: ok } = await fetchCatalog();
+      if (on) {
+        setCatalog(c);
+        setLive(ok);
+      }
+    })();
+    return () => {
+      on = false;
+    };
+  }, []);
+
+  const list = catalog?.plugins ?? [];
+  const shown = list.filter((p) => p.name.toLowerCase().includes(q.trim().toLowerCase()));
 
   return (
     <div>
       <PageHeader
         title="Plugin Hub"
         subtitle="Extensions and system orchestrator. Installer backend pending — manifests below define the install contract."
-        meta={`${PLUGINS.length} official plugins · community index via SDCodex-Updater`}
+        meta={`${list.length} plugins · ${live ? 'live hub catalog' : 'built-in list (hub unreachable)'}${catalog?.core ? ` · core ${catalog.core.version}` : ''}`}
       />
+      {catalog?.core && (
+        <div className="glass-l1 mt-4 flex flex-wrap items-center gap-3 rounded-lg p-4">
+          <div className="min-w-0 flex-1">
+            <div className="font-display text-base font-semibold">{catalog.core.name}</div>
+            <div className="mt-0.5 font-mono text-[11px] text-ink-muted">{catalog.core.description}</div>
+          </div>
+          <span className="rounded border border-primary/50 bg-primary/20 px-2 py-0.5 font-mono text-[11px] text-white">
+            v{catalog.core.version}
+          </span>
+        </div>
+      )}
       <div className="glass-l1 edge-shimmer mt-4 flex flex-wrap items-center gap-2 rounded-lg p-3">
         <SearchInput value={q} onChange={setQ} placeholder="Search plugins…  ( / )" />
         <FilterPills
@@ -670,17 +671,17 @@ export function Plugins() {
             <div className="flex items-center justify-between gap-2">
               <h2 className="font-display text-base font-semibold">{p.name}</h2>
               <span className="rounded border border-white/15 bg-white/5 px-2 py-0.5 font-mono text-[10px] uppercase text-ink-muted">
-                planned
+                v{p.version}
               </span>
             </div>
-            <p className="mt-1 text-xs text-ink-muted">{p.desc}</p>
+            <p className="mt-1 text-xs text-ink-muted">{p.description}</p>
             <a
-              href={p.repo}
+              href={p.repository}
               target="_blank"
               rel="noreferrer"
               className="mt-2 inline-block font-mono text-[11px] text-secondary hover:underline"
             >
-              {p.repo}
+              {p.repository}
             </a>
           </article>
         ))}
