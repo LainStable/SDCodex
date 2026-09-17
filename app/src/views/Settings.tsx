@@ -41,6 +41,7 @@ import {
   type Profile,
 } from '../lib/auth';
 import { BootstrapCard, Plugins } from './Core';
+import { clearScanLog, getScanLog, pushScanLog, subscribeScanLog } from '../lib/scanlog';
 
 type Tab = 'dirs' | 'api' | 'auth' | 'system' | 'plugins';
 
@@ -73,7 +74,6 @@ function Dirs() {
   const [bound, setBound] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<Record<string, string>>({});
   const [scanning, setScanning] = useState(false);
-  const [log, setLog] = useState<string[]>([]);
 
   useEffect(() => {
     let live = true;
@@ -97,7 +97,7 @@ function Dirs() {
     void pushSettings();
   };
 
-  const say = (line: string) => setLog((l) => [...l.slice(-8), line]);
+  const say = (line: string) => pushScanLog(line);
 
   const resolve = async (type: string): Promise<FileSystemDirectoryHandle | null> => {
     const existing = await getHandle(`dir_${type}`);
@@ -169,7 +169,6 @@ function Dirs() {
 
   const scanAll = async () => {
     setScanning(true);
-    setLog([]);
     try {
       await serverScan();
       say('Scan started on server…');
@@ -213,20 +212,10 @@ function Dirs() {
       <div className="flex items-center gap-2">
         <h2 className="font-display text-base font-semibold">Model directories</h2>
       </div>
-      <p className="mt-1 font-mono text-[11px] text-ink-faint">
-        Keys mirror the backend Setting table. In Docker these are container-internal
-        paths the server scans directly — Scan never opens a picker. Standalone
-        (no backend), the first scan asks for the folder once, then remembers it.
-      </p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <PrimaryButton disabled={scanning} onClick={() => void scanAll()}>
           {scanning ? 'Scanning…' : 'Scan all folders'}
         </PrimaryButton>
-        {!supported && (
-          <span className="font-mono text-[11px] text-status-warning">
-            Folder linking needs Chromium
-          </span>
-        )}
       </div>
       <div className="mt-2 divide-y divide-white/[0.06]">
         {MODEL_TYPES.map((t) => {
@@ -273,13 +262,6 @@ function Dirs() {
           );
         })}
       </div>
-      {log.length > 0 && (
-        <div className="mt-2 rounded border border-white/[0.06] bg-black/30 p-2 font-mono text-[10px] leading-relaxed text-ink-muted">
-          {log.map((l, i) => (
-            <div key={i}>{l}</div>
-          ))}
-        </div>
-      )}
 
       <h2 className="mt-4 font-display text-base font-semibold">Custom directories</h2>
       {Object.entries(custom).map(([k, v]) => (
@@ -866,6 +848,32 @@ function System() {
   );
 }
 
+function ScanLogs() {
+  const [log, setLog] = useState<string[]>(getScanLog);
+
+  useEffect(() => subscribeScanLog(setLog), []);
+
+  return (
+    <div className="glass-l1 mt-3 rounded-lg p-4">
+      <div className="flex items-center gap-2">
+        <h2 className="font-display text-base font-semibold">Scan logs</h2>
+        {log.length > 0 && <GhostButton onClick={() => clearScanLog()}>Clear</GhostButton>}
+      </div>
+      {log.length === 0 ? (
+        <p className="mt-2 font-mono text-[11px] text-ink-faint">
+          No scans yet — run one from Model dirs.
+        </p>
+      ) : (
+        <div className="mt-2 max-h-64 overflow-y-auto rounded border border-white/[0.06] bg-black/30 p-2 font-mono text-[10px] leading-relaxed text-ink-muted">
+          {log.map((l, i) => (
+            <div key={i}>{l}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Settings({
   profile,
   onProfile,
@@ -889,8 +897,13 @@ export default function Settings({
         {tab === 'dirs' && <Dirs />}
         {tab === 'api' && <ApiKey />}
         {tab === 'auth' && <Auth profile={profile} onProfile={onProfile} onSignOut={onSignOut} />}
-        {tab === 'system' && <System />}
         {tab === 'plugins' && <Plugins />}
+        {tab === 'system' && (
+          <>
+            <System />
+            <ScanLogs />
+          </>
+        )}
       </div>
     </div>
   );
