@@ -44,8 +44,11 @@ def plugins_dir() -> str:
 def _git(args: list, cwd: str, timeout: int = 120) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     env["GIT_TERMINAL_PROMPT"] = "0"
+    # Mounted checkouts are owned by the host UID, which makes git refuse
+    # to operate ("dubious ownership") — seen live in the Docker container.
     return subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, env=env, timeout=timeout
+        ["git", "-c", "safe.directory=*", *args],
+        cwd=cwd, capture_output=True, text=True, env=env, timeout=timeout,
     )
 
 
