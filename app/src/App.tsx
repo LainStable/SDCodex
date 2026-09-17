@@ -187,6 +187,34 @@ export default function App() {
     setView(v);
   };
 
+  // Single queue entry point: local staged record + backend worker POST.
+  // Every Download button (Explorer, Home, modal) funnels through here.
+  const enqueue = (item: {
+    id: string;
+    name: string;
+    detail: string;
+    downloadUrl: string;
+    modelId: number;
+    versionId: number;
+    baseModel: string;
+  }) => {
+    setQueue(addToQueue(item));
+    if (item.modelId && item.versionId) {
+      void (async () => {
+        try {
+          if (await backendAvailable()) {
+            await apiPost('/downloads', {
+              modelId: item.modelId,
+              versionId: item.versionId,
+            });
+          }
+        } catch {
+          /* worker offline — local stub keeps the entry */
+        }
+      })();
+    }
+  };
+
   return (
     <div className="min-h-screen bg-obsidian-bg text-ink">
       <DownloadFloat go={() => go('queue')} />
@@ -249,23 +277,7 @@ export default function App() {
             <Home
               goModels={() => go('models')}
               onOpen={(id) => setModal({ kind: 'civitai', modelId: id })}
-              onQueue={(item) => {
-                setQueue(addToQueue(item));
-                if (item.modelId && item.versionId) {
-                  void (async () => {
-                    try {
-                      if (await backendAvailable()) {
-                        await apiPost('/downloads', {
-                          modelId: item.modelId,
-                          versionId: item.versionId,
-                        });
-                      }
-                    } catch {
-                      /* worker offline — local stub keeps the entry */
-                    }
-                  })();
-                }
-              }}
+              onQueue={enqueue}
               queuedIds={queuedIds}
               ownedIds={ownedIds}
             />
@@ -274,24 +286,7 @@ export default function App() {
             <Explorer
               queuedIds={queuedIds}
               ownedIds={ownedIds}
-              onQueue={(item) => {
-                setQueue(addToQueue(item));
-                // Hand the real download to the backend worker when reachable.
-                if (item.modelId && item.versionId) {
-                  void (async () => {
-                    try {
-                      if (await backendAvailable()) {
-                        await apiPost('/downloads', {
-                          modelId: item.modelId,
-                          versionId: item.versionId,
-                        });
-                      }
-                    } catch {
-                      /* worker offline — local stub keeps the entry */
-                    }
-                  })();
-                }
-              }}
+              onQueue={enqueue}
               onOpen={(id) => setModal({ kind: 'civitai', modelId: id })}
               searchToken={creatorSearch.token}
               searchText={creatorSearch.text}
@@ -322,7 +317,7 @@ export default function App() {
           onClose={() => setModal(null)}
           queuedIds={queuedIds}
           ownedIds={ownedIds}
-          onQueue={(item) => setQueue(addToQueue(item))}
+          onQueue={enqueue}
           onSearchCreator={(username) => {
             setModal(null);
             setView('models');
