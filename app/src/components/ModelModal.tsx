@@ -419,7 +419,7 @@ export default function ModelModal({
                 </div>
 
                 {model.tags && model.tags.length > 0 && (
-                  <div className="mt-3 rounded-lg border border-primary/25 bg-primary/[0.05] p-3">
+                  <div className="glass-l1 mt-3 rounded-lg p-3">
                     <h3 className="font-display text-sm font-semibold">Tags</h3>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {model.tags.map((tag) => (
