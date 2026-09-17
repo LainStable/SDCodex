@@ -13,6 +13,8 @@ export interface ScannedModel {
   hash: string;
   size: number;
   imageName: string | null;
+  /** False when Civitai had no match — shown with a placeholder. */
+  identified: boolean;
   scannedAt: number;
 }
 
@@ -46,6 +48,27 @@ export function upsertScanned(entry: ScannedModel): ScannedModel[] {
     (e) => !(e.modelId === entry.modelId && e.versionId === entry.versionId),
   );
   const next = [...list, entry];
+  persist(next);
+  return next;
+}
+
+/** Adopt a Civitai match for a previously-unknown record (keeps its file). */
+export function adoptScannedMatch(
+  oldModelId: number,
+  oldVersionId: number,
+  patch: { modelId: number; versionId: number; name: string; type: string; baseModel: string },
+): ScannedModel[] {
+  const list = loadScanned();
+  const old = list.find((e) => e.modelId === oldModelId && e.versionId === oldVersionId);
+  const rest = list.filter((e) => !(e.modelId === oldModelId && e.versionId === oldVersionId));
+  if (!old) {
+    persist(rest);
+    return rest;
+  }
+  const next = [
+    ...rest,
+    { ...old, ...patch, identified: true, scannedAt: Date.now() },
+  ];
   persist(next);
   return next;
 }

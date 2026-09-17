@@ -145,6 +145,7 @@ def get_settings():
             "dirs": {k: v for k, v in rows.items() if k.startswith("dir_")},
             "colors": {k[6:]: v for k, v in rows.items() if k.startswith("color_")},
             "civitaiApiKey": user.api_key or rows.get("civitai_api_key", ""),
+            "maxParallel": int(rows.get("max_parallel_downloads", "1") or 1),
         }
     )
 
@@ -178,7 +179,23 @@ def post_settings():
             row = Setting(key="civitai_api_key")
             db.session.add(row)
         row.value = key
+    if "maxParallel" in data:
+        try:
+            parallel = max(1, min(8, int(data.get("maxParallel") or 1)))
+        except (TypeError, ValueError):
+            parallel = 1
+        row = db.session.get(Setting, "max_parallel_downloads")
+        if row is None:
+            row = Setting(key="max_parallel_downloads")
+            db.session.add(row)
+        row.value = str(parallel)
     db.session.commit()
+    try:
+        from .download_manager import download_manager
+
+        download_manager.ensure_workers()
+    except Exception:
+        pass
     return jsonify({"ok": True})
 
 
@@ -233,6 +250,7 @@ def library():
         {
             "items": [
                 {
+                    "id": d.id,
                     "modelId": d.model_id,
                     "versionId": d.version_id,
                     "name": d.name,
@@ -241,6 +259,52 @@ def library():
                 }
                 for d in rows
             ]
+        }
+    )
+
+
+@api_v1.put("/library/<int:row_id>/identify")
+def library_identify(row_id: int):
+    """Adopt a Civitai match for an unidentified row (Update metadata)."""
+    user, err = _require_user()
+    if err:
+        return err
+    row = db.session.get(Download, row_id)
+    if row is None:
+        return jsonify({"error": "not found"}), 404
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        model_id = int(data.get("modelId") or 0)
+        version_id = int(data.get("versionId") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "modelId and versionId required"}), 400
+    if model_id <= 0 or version_id <= 0:
+        return jsonify({"error": "modelId and versionId required"}), 400
+    from . import api as civitai_api
+
+    try:
+        full = civitai_api.get_model(model_id, user.api_key or None)
+    except Exception as e:
+        return jsonify({"error": f"Civitai lookup failed: {e}"}), 502
+    version = next((v for v in full.get("modelVersions", []) if v.get("id") == version_id), None)
+    if version is None:
+        return jsonify({"error": "version not found on Civitai"}), 400
+    row.model_id = model_id
+    row.version_id = version_id
+    row.name = full.get("name", row.name)
+    row.type = full.get("type", row.type)
+    db.session.commit()
+    return jsonify(
+        {
+            "ok": True,
+            "item": {
+                "id": row.id,
+                "modelId": row.model_id,
+                "versionId": row.version_id,
+                "name": row.name,
+                "type": row.type,
+                "files": row.get_files(),
+            },
         }
     )
 

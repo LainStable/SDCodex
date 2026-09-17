@@ -357,6 +357,13 @@ export function Queue({
 }) {
   const [paused, setPausedState] = useState(isPaused);
   const [speedLimit, setSpeedLimit] = useState('Unlimited');
+  const [maxParallel, setMaxParallel] = useState(1);
+  const [server, setServer] = useState<{
+    active: Array<{ model_id?: number; version_id?: number; status?: string; progress?: number; message?: string }>;
+    queued: number;
+    max: number;
+    reachable: boolean;
+  }>({ active: [], queued: 0, max: 1, reachable: false });
   const active = items.filter((i) => i.status !== 'done');
 
   const togglePaused = () => {
@@ -365,12 +372,65 @@ export function Queue({
     setPausedState(next);
   };
 
+  // Backend worker state: max-parallel setting + live task polling.
+  useEffect(() => {
+    let live = true;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    void (async () => {
+      const { apiGet, backendAvailable } = await import('../lib/backend');
+      if (!(await backendAvailable())) return;
+      try {
+        const s = await apiGet<{ maxParallel?: number }>('/settings');
+        if (live && typeof s.maxParallel === 'number') {
+          setMaxParallel(Math.max(1, Math.min(8, s.maxParallel)));
+        }
+      } catch {
+        /* keep default */
+      }
+      const poll = async () => {
+        try {
+          const st = await apiGet<{
+            active_tasks?: Array<{ model_id?: number; version_id?: number; status?: string; progress?: number; message?: string }>;
+            queue_length?: number;
+            max_parallel?: number;
+          }>('/downloads/status');
+          if (!live) return;
+          setServer({
+            active: st.active_tasks ?? [],
+            queued: st.queue_length ?? 0,
+            max: st.max_parallel ?? 1,
+            reachable: true,
+          });
+        } catch {
+          /* worker offline — local list stands */
+        }
+      };
+      await poll();
+      timer = setInterval(() => void poll(), 2500);
+    })();
+    return () => {
+      live = false;
+      if (timer) clearInterval(timer);
+    };
+  }, []);
+
+  const saveParallel = async (n: number) => {
+    const v = Math.max(1, Math.min(8, n || 1));
+    setMaxParallel(v);
+    try {
+      const { apiPost, backendAvailable } = await import('../lib/backend');
+      if (await backendAvailable()) await apiPost('/settings', { maxParallel: v });
+    } catch {
+      /* standalone */
+    }
+  };
+
   return (
     <div>
       <PageHeader
         title="Download Manager"
-        subtitle="Parallel weight streamer with hash verification and metadata scraping. Worker backend pending — staged items wait here."
-        meta={`${active.length} active streams · 1.4 TB available`}
+        subtitle="Background worker streams weights with hash verification and metadata scraping. Beyond the parallel limit, downloads wait in queue."
+        meta={`${server.reachable ? server.active.length : active.length} active · ${server.reachable ? server.queued : 0} queued on server · 1.4 TB available`}
         actions={
           <>
             {paused ? (
@@ -385,30 +445,85 @@ export function Queue({
 
       <section className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Stat label="Throughput" value="— MB/s" />
-        <Stat label="Active sockets" value={`${active.length} of 4`} />
+        <Stat
+          label="Active sockets"
+          value={`${server.reachable ? server.active.length : active.length} of ${server.reachable ? server.max : maxParallel}`}
+        />
         <Stat label="Staged" value={String(items.length)} />
         <Stat label="State" value={paused ? 'Paused' : 'Ready'} />
       </section>
 
-      <div className="glass-l1 mt-3 flex items-center gap-2 rounded-lg p-3 text-xs">
-        <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
-          Speed limiter
+      <div className="glass-l1 mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg p-3 text-xs">
+        <label className="flex items-center gap-2">
+          <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+            Parallel downloads
+          </span>
+          <input
+            type="number"
+            min={1}
+            max={8}
+            value={maxParallel}
+            onChange={(e) => void saveParallel(Number(e.target.value))}
+            className="w-16 rounded border border-white/10 bg-obsidian-lowest px-2 py-1 font-mono text-xs outline-none focus:border-primary"
+          />
+        </label>
+        <span className="font-mono text-[10px] text-ink-faint">
+          {server.reachable ? 'enforced by the worker' : 'applies when the backend is up'}
         </span>
-        <select
-          value={speedLimit}
-          onChange={(e) => setSpeedLimit(e.target.value)}
-          className="rounded border border-white/10 bg-obsidian-lowest px-2 py-1 text-xs outline-none focus:border-primary"
-        >
-          {['Unlimited', '50 MB/s', '25 MB/s', '10 MB/s'].map((s) => (
-            <option key={s}>{s}</option>
-          ))}
-        </select>
+        <label className="flex items-center gap-2">
+          <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+            Speed limiter
+          </span>
+          <select
+            value={speedLimit}
+            onChange={(e) => setSpeedLimit(e.target.value)}
+            className="rounded border border-white/10 bg-obsidian-lowest px-2 py-1 text-xs outline-none focus:border-primary"
+          >
+            {['Unlimited', '50 MB/s', '25 MB/s', '10 MB/s'].map((s) => (
+              <option key={s}>{s}</option>
+            ))}
+          </select>
+        </label>
         {items.length > 0 && (
           <DangerButton className="ml-auto" onClick={onClearAll}>
             Clear all
           </DangerButton>
         )}
       </div>
+
+      {server.reachable && (server.active.length > 0 || server.queued > 0) && (
+        <div className="mt-3">
+          <h2 className="font-display text-sm font-semibold">Worker</h2>
+          <ul className="mt-2 space-y-2">
+            {server.active.map((t, i) => (
+              <li key={`${t.model_id}-${t.version_id}-${i}`} className="glass-l1 rounded-lg p-3">
+                <div className="flex items-center gap-3 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-semibold">
+                      model {t.model_id ?? '?'} · version {t.version_id ?? '?'}
+                    </div>
+                    <div className="truncate font-mono text-[11px] text-ink-muted">
+                      {t.message || t.status || 'running'}
+                    </div>
+                  </div>
+                  <span className="font-mono text-[11px] text-ink">{t.progress ?? 0}%</span>
+                </div>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-sm bg-white/10">
+                  <div
+                    className="h-full rounded-sm bg-gradient-to-r from-primary to-secondary transition-all"
+                    style={{ width: `${t.progress ?? 0}%` }}
+                  />
+                </div>
+              </li>
+            ))}
+            {server.queued > 0 && (
+              <li className="rounded-lg border border-white/[0.06] p-3 font-mono text-[11px] text-ink-faint">
+                +{server.queued} waiting behind the parallel limit
+              </li>
+            )}
+          </ul>
+        </div>
+      )}
 
       {items.length === 0 ? (
         <p className="glass-l1 mt-3 rounded-lg p-6 text-center font-mono text-xs text-ink-faint">
@@ -446,6 +561,79 @@ export function Queue({
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+/** Floating background-download indicator (top center, all pages). */
+export function DownloadFloat() {
+  const [state, setState] = useState<{
+    active: Array<{ model_id?: number; version_id?: number; message?: string; progress?: number }>;
+    queued: number;
+  } | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const poll = async () => {
+      try {
+        const { apiGet, backendAvailable } = await import('../lib/backend');
+        if (!(await backendAvailable())) {
+          if (live) setState(null);
+          return;
+        }
+        const st = await apiGet<{
+          active_tasks?: Array<{ model_id?: number; version_id?: number; message?: string; progress?: number }>;
+          queue_length?: number;
+        }>('/downloads/status');
+        if (!live) return;
+        const active = (st.active_tasks ?? []).filter((t) => t.model_id);
+        if (active.length === 0 && (st.queue_length ?? 0) === 0) {
+          setState(null);
+        } else {
+          setState({ active, queued: st.queue_length ?? 0 });
+        }
+      } catch {
+        /* offline — hidden */
+      }
+    };
+    void poll();
+    timer = setInterval(() => void poll(), 3000);
+    return () => {
+      live = false;
+      if (timer) clearInterval(timer);
+    };
+  }, []);
+
+  if (!state) return null;
+  const first = state.active[0];
+  const pct = first?.progress ?? 0;
+
+  return (
+    <div className="glass-l2 fixed left-1/2 top-3 z-[55] w-[min(420px,90vw)] -translate-x-1/2 rounded-lg p-3">
+      <div className="flex items-center gap-2 font-mono text-[11px]">
+        <span className="text-secondary">⬇</span>
+        <span className="min-w-0 flex-1 truncate text-ink">
+          {first
+            ? `model ${first.model_id} · ${first.message || 'downloading'}`
+            : 'download worker'}
+        </span>
+        <span className="text-ink">{pct}%</span>
+      </div>
+      <div className="mt-1.5 h-1.5 overflow-hidden rounded-sm bg-white/10">
+        <div
+          className="h-full rounded-sm bg-gradient-to-r from-primary to-secondary transition-all"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {state.active.length > 1 && (
+        <div className="mt-1 font-mono text-[10px] text-ink-faint">
+          +{state.active.length - 1} parallel
+        </div>
+      )}
+      {state.queued > 0 && (
+        <div className="font-mono text-[10px] text-ink-faint">+{state.queued} queued</div>
       )}
     </div>
   );

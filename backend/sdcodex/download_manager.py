@@ -20,20 +20,41 @@ class DownloadManager:
             cls._instance = super(DownloadManager, cls).__new__(cls)
             cls._instance.queue = queue.Queue()
             cls._instance.current_task = None
+            cls._instance.active_tasks = []
             cls._instance.history = []
             cls._instance.app = app
             cls._instance.running = False
+            cls._instance.lock = threading.Lock()
+            cls._instance.workers = 0
         return cls._instance
 
     def init_app(self, app):
         self.app = app
         self.start()
 
+    def max_workers(self):
+        """Parallel download limit (Setting max_parallel_downloads, default 1)."""
+        try:
+            from sdcodex.models import Setting
+
+            with self.app.app_context():
+                row = db.session.get(Setting, "max_parallel_downloads")
+                return max(1, min(8, int(row.value or 1)))
+        except Exception:
+            return 1
+
     def start(self):
         if not self.running:
             self.running = True
-            thread = threading.Thread(target=self._worker, daemon=True)
-            thread.start()
+            self.ensure_workers()
+
+    def ensure_workers(self):
+        """Top up worker threads to the configured parallelism."""
+        with self.lock:
+            while self.workers < self.max_workers():
+                self.workers += 1
+                thread = threading.Thread(target=self._worker, daemon=True)
+                thread.start()
 
     def add_task(self, model_id=None, version_id=None, api_key=None, task_type='download', **kwargs):
         task = {
@@ -47,11 +68,29 @@ class DownloadManager:
             **kwargs
         }
         self.queue.put(task)
+        try:
+            self.ensure_workers()
+        except Exception:
+            pass
         return task
 
     def get_status(self):
+        with self.lock:
+            active = list(self.active_tasks)
         status = {
             'current_task': self.current_task,
+            'active_tasks': [
+                {
+                    'type': t.get('type'),
+                    'model_id': t.get('model_id'),
+                    'version_id': t.get('version_id'),
+                    'status': t.get('status'),
+                    'progress': t.get('progress', 0),
+                    'message': t.get('message', ''),
+                }
+                for t in active
+            ],
+            'max_parallel': self.max_workers(),
             'queue_length': self.queue.qsize(),
             'recent_history': self.history[-5:] if self.history else []
         }
@@ -61,9 +100,20 @@ class DownloadManager:
         print("DownloadManager worker started")
         while True:
             try:
-                task = self.queue.get()
+                # Scale down when the limit was lowered: idle extras exit here.
+                with self.lock:
+                    if self.workers > self.max_workers() and self.queue.empty():
+                        self.workers -= 1
+                        print("DownloadManager worker exiting (limit lowered)")
+                        return
+                try:
+                    task = self.queue.get(timeout=2)
+                except queue.Empty:
+                    continue
                 print(f"Worker picked up task: {task.get('type', 'download')} - {task.get('model_id')}")
                 self.current_task = task
+                with self.lock:
+                    self.active_tasks.append(task)
                 task['status'] = 'running'
                 task['message'] = 'Starting...'
                 
@@ -153,11 +203,15 @@ class DownloadManager:
                 task['status'] = 'completed' if success else 'failed'
                 task['message'] = message
                 task['progress'] = 100 if success else 0
-                
+
                 self.history.append(task)
-                self.current_task = None
+                with self.lock:
+                    if task in self.active_tasks:
+                        self.active_tasks.remove(task)
+                if self.current_task is task:
+                    self.current_task = None
                 self.queue.task_done()
-                
+
             except Exception as e:
                 print(f"Worker error: {e}")
                 import traceback
@@ -166,6 +220,9 @@ class DownloadManager:
                     self.current_task['status'] = 'failed'
                     self.current_task['message'] = str(e)
                     self.history.append(self.current_task)
+                    with self.lock:
+                        if self.current_task in self.active_tasks:
+                            self.active_tasks.remove(self.current_task)
                     self.current_task = None
 
 # Global instance

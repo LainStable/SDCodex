@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   fetchModel,
+  fetchModels,
   formatCount,
   type CivitaiImage,
   type CivitaiModel,
@@ -24,6 +25,10 @@ export type ModalTarget =
       params?: string;
       modelId?: number;
       versionId?: number;
+      /** Set for scanned library records — enables record Delete. */
+      record?: { modelId: number; versionId: number };
+      /** Server library row id — enables Update-metadata write-back. */
+      rowId?: number;
     };
 
 interface QueueArg {
@@ -111,6 +116,136 @@ function parsePngText(buf: ArrayBuffer): Record<string, string> {
   return out;
 }
 
+export interface AdoptedMatch {
+  modelId: number;
+  versionId: number;
+  name: string;
+  type: string;
+  baseModel: string;
+}
+
+/** Write a user-confirmed match back to whichever store owns the row. */
+export async function adoptMatch(
+  t: Extract<ModalTarget, { kind: 'local' }>,
+  m: AdoptedMatch,
+  onLibraryChanged: () => void,
+): Promise<void> {
+  if (t.rowId != null) {
+    const { apiPost, backendAvailable } = await import('../lib/backend');
+    if (!(await backendAvailable())) throw new Error('Backend unreachable');
+    await apiPost(`/library/${t.rowId}/identify`, {
+      modelId: m.modelId,
+      versionId: m.versionId,
+    });
+  } else if (t.record) {
+    const { adoptScannedMatch } = await import('../lib/library');
+    adoptScannedMatch(t.record.modelId, t.record.versionId, m);
+  }
+  onLibraryChanged();
+}
+
+function UpdateMetadata({
+  defaultQuery,
+  onAdopt,
+}: {
+  defaultQuery: string;
+  onAdopt: (m: AdoptedMatch) => Promise<void>;
+}) {
+  const [q, setQ] = useState(defaultQuery);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const [cands, setCands] = useState<CivitaiModel[]>([]);
+  const [searched, setSearched] = useState(false);
+  const [adopting, setAdopting] = useState<number | null>(null);
+
+  const search = async () => {
+    if (!q.trim()) return;
+    setBusy(true);
+    setError(null);
+    setDone(null);
+    try {
+      const page = await fetchModels(
+        { q: q.trim(), type: 'All', baseModels: [], sort: 'Most Downloaded', page: 1, nsfw: false },
+      );
+      setCands(page.items.slice(0, 6));
+      setSearched(true);
+      if (page.items.length === 0) setError('No Civitai models match that name.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Search failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const adopt = async (id: number) => {
+    setAdopting(id);
+    setError(null);
+    try {
+      const full = await fetchModel(id);
+      const v0 = full.modelVersions[0];
+      if (!v0) throw new Error('Model has no versions');
+      await onAdopt({
+        modelId: full.id,
+        versionId: v0.id,
+        name: full.name,
+        type: full.type,
+        baseModel: v0.baseModel,
+      });
+      setDone(`Matched as ${full.name} — loading details…`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Adopt failed');
+    } finally {
+      setAdopting(null);
+    }
+  };
+
+  return (
+    <div className="glass-l1 mt-3 rounded-lg p-3">
+      <h3 className="font-display text-sm font-semibold">Update metadata</h3>
+      <p className="mt-1 font-mono text-[10px] text-ink-faint">
+        Not hosted on Civitai under its hash? Search by filename and pick the match.
+      </p>
+      <div className="mt-2 flex gap-2">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void search();
+          }}
+          placeholder="Model name from filename…"
+          className="min-w-0 flex-1 rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+        />
+        <GhostButton disabled={busy || !q.trim()} onClick={() => void search()}>
+          {busy ? 'Searching…' : 'Search Civitai'}
+        </GhostButton>
+      </div>
+      {error && <p className="mt-2 font-mono text-[11px] text-[#f87171]">{error}</p>}
+      {done && <p className="mt-2 font-mono text-[11px] text-status-active">{done}</p>}
+      {searched && cands.length > 0 && !done && (
+        <ul className="mt-2 space-y-1.5">
+          {cands.map((c) => (
+            <li
+              key={c.id}
+              className="flex items-center gap-2 rounded border border-white/[0.06] px-2 py-1.5"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold">{c.name}</div>
+                <div className="truncate font-mono text-[10px] text-ink-faint">
+                  {c.type} · {c.modelVersions[0]?.baseModel ?? '—'} · @{c.creator?.username ?? '—'}
+                </div>
+              </div>
+              <GhostButton disabled={adopting !== null} onClick={() => void adopt(c.id)}>
+                {adopting === c.id ? '…' : 'Select'}
+              </GhostButton>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function ModelModal({
   target,
   onClose,
@@ -118,6 +253,7 @@ export default function ModelModal({
   queuedIds,
   onSearchCreator,
   onForgetLocal,
+  onLibraryChanged,
 }: {
   target: ModalTarget;
   onClose: () => void;
@@ -125,6 +261,7 @@ export default function ModelModal({
   queuedIds: Set<string>;
   onSearchCreator: (username: string) => void;
   onForgetLocal?: (modelId: number, versionId: number) => void;
+  onLibraryChanged?: () => void;
 }) {
   const [model, setModel] = useState<CivitaiModel | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -134,7 +271,10 @@ export default function ModelModal({
   const [embedded, setEmbedded] = useState<Record<string, string> | null>(null);
   const mainRef = useRef<HTMLDivElement>(null);
 
-  const modelId = target.kind === 'civitai' ? target.modelId : (target.modelId ?? 0);
+  const baseModelId = target.kind === 'civitai' ? target.modelId : (target.modelId ?? 0);
+  // Adopted via Update-metadata: flips an unknown entry into the full view.
+  const [adoptedId, setAdoptedId] = useState<number | null>(null);
+  const modelId = adoptedId ?? baseModelId;
 
   useEffect(() => {
     if (!modelId) return;
@@ -226,8 +366,8 @@ export default function ModelModal({
 
   const closeLightbox = useCallback(() => setLightbox(false), []);
 
-  // Local-only entries (no Civitai id): render the known fields directly.
-  if (target.kind === 'local' && !target.modelId) {
+  // Local-only entries (no Civitai id yet): known fields + metadata matcher.
+  if (target.kind === 'local' && !modelId) {
     const t = target;
     return (
       <Overlay onClose={onClose}>
@@ -253,6 +393,13 @@ export default function ModelModal({
             )}
             {t.path && <div className="truncate pt-1 text-ink-faint">{t.path}</div>}
           </dl>
+          <UpdateMetadata
+            defaultQuery={(t.path?.split('/').pop() ?? t.title).replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ')}
+            onAdopt={async (m) => {
+              await adoptMatch(t, m, () => onLibraryChanged?.());
+              setAdoptedId(m.modelId);
+            }}
+          />
         </div>
       </Overlay>
     );
@@ -472,10 +619,10 @@ export default function ModelModal({
                               {queued ? '✓ Queued' : '⬇ Download'}
                             </PrimaryButton>
                           )}
-                          {target.kind === 'local' && onForgetLocal && (
+                          {target.kind === 'local' && target.record && onForgetLocal && (
                             <DangerButton
                               onClick={() => {
-                                onForgetLocal(model.id, version.id);
+                                onForgetLocal(target.record!.modelId, target.record!.versionId);
                                 onClose();
                               }}
                             >

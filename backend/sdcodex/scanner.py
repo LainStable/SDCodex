@@ -78,13 +78,49 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
                 pass
 
         # 2. If not identified or missing metadata, calculate hash
+        file_hash = None
         if not model_version:
             try:
                 file_hash = calculate_sha256(filepath)
                 model_version = api.get_model_version_by_hash(file_hash, api_key)
             except Exception as e:
                 print(f"Failed to identify {filename}: {e}")
-                continue
+                model_version = None
+
+        if not model_version:
+            # Unknown (maybe not hosted on Civitai): still list the model.
+            # Reuse a sidecar image / info file when the folder already has
+            # them; the placeholder covers the rest.
+            import zlib
+
+            sidecar_image = None
+            for ext in ['.png', '.jpg', '.jpeg', '.webp', '.preview.png']:
+                cand = os.path.join(file_dir, f"{base_name}{ext}")
+                if os.path.exists(cand):
+                    sidecar_image = cand
+                    break
+            downloaded_files = {'model': filepath}
+            if os.path.exists(metadata_path):
+                downloaded_files['metadata'] = metadata_path
+            if sidecar_image:
+                downloaded_files['image'] = sidecar_image
+            stand_in = zlib.crc32(f"{model_type}/{filepath}".encode()) & 0x7FFFFFFF
+            existing = Download.query.filter_by(model_id=0, version_id=stand_in).first()
+            if not existing:
+                download = Download(
+                    model_id=0,
+                    version_id=stand_in,
+                    name=base_name,
+                    type=model_type,
+                )
+                download.set_files(downloaded_files)
+                db.session.add(download)
+                updated_count += 1
+            else:
+                existing.set_files(downloaded_files)
+            db.session.commit()
+            found_ids.append((0, stand_in))
+            continue
 
         if model_version:
             # We identified the version!

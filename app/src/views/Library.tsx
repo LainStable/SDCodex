@@ -14,6 +14,7 @@ function formatBytes(n: number): string {
 }
 
 interface ServerRow {
+  id: number;
   modelId: number;
   versionId: number;
   name: string;
@@ -180,7 +181,14 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                     <button
                       type="button"
                       onClick={() =>
-                        onOpen({ kind: 'civitai', modelId: r.modelId })
+                        onOpen({
+                          kind: 'local',
+                          title: r.name,
+                          type: r.type,
+                          modelId: r.modelId || undefined,
+                          versionId: r.versionId || undefined,
+                          rowId: r.id,
+                        })
                       }
                       className="block w-full text-left"
                       title="Open details"
@@ -194,9 +202,12 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                             className="h-full w-full object-cover"
                           />
                         ) : (
-                          <div className="flex h-full items-center justify-center font-mono text-[11px] text-ink-faint">
-                            no preview
-                          </div>
+                          <img
+                              src="/model-placeholder.svg"
+                              alt="Unidentified model"
+                              loading="lazy"
+                              className="h-full w-full object-cover opacity-80"
+                            />
                         )}
                         <div className="absolute left-2 top-2">
                           <TypeBadge type={r.type} color={colors[r.type]} />
@@ -231,6 +242,10 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                           path: `${s.dirPath}/${s.filename}`,
                           modelId: s.modelId || undefined,
                           versionId: s.versionId || undefined,
+                          record:
+                            s.modelId && s.versionId
+                              ? { modelId: s.modelId, versionId: s.versionId }
+                              : undefined,
                         })
                       }
                       className="block w-full text-left"
@@ -245,9 +260,12 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                             className="h-full w-full object-cover"
                           />
                         ) : (
-                          <div className="flex h-full items-center justify-center font-mono text-[11px] text-ink-faint">
-                            no preview
-                          </div>
+                          <img
+                              src="/model-placeholder.svg"
+                              alt="Unidentified model"
+                              loading="lazy"
+                              className="h-full w-full object-cover opacity-80"
+                            />
                         )}
                         <div className="absolute left-2 top-2">
                           <TypeBadge type={s.type} color={colors[s.type]} />

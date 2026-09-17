@@ -39,6 +39,16 @@ export function pickDirectory(): Promise<FileSystemDirectoryHandle> {
   return w.showDirectoryPicker();
 }
 
+/** Stable stand-in id for unidentified files (unique per folder+name). */
+export function pathId(rel: string): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < rel.length; i++) {
+    crc ^= rel.charCodeAt(i);
+    for (let k = 0; k < 8; k++) crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
 async function writeBytesFile(
   dir: FileSystemDirectoryHandle,
   name: string,
@@ -158,11 +168,44 @@ export async function scanDir(
         hash: hash.slice(0, 12),
         size: file.size,
         imageName,
+        identified: true,
         scannedAt: Date.now(),
       });
       updated += 1;
     } catch {
-      onMsg(`${type}: could not identify ${f.rel}`);
+      // Unidentified: still display the model. Prefer a sidecar image the
+      // folder already has (<base>.png/.jpg/.webp); else the placeholder.
+      // A stable stand-in id lets Update-metadata adopt a match later.
+      let size = 0;
+      try {
+        size = (await f.handle.getFile()).size;
+      } catch {
+        /* unreadable — list by name only */
+      }
+      const base = (f.rel.split('/').pop() ?? f.rel).replace(/\.[^.]+$/, '');
+      let sidecar: string | null = null;
+      for (const ext of ['.png', '.jpg', '.jpeg', '.webp']) {
+        if (await fileExists(f.dir, `${base}${ext}`)) {
+          sidecar = `${base}${ext}`;
+          break;
+        }
+      }
+      upsertScanned({
+        modelId: 0,
+        versionId: pathId(`${type}/${f.rel}`),
+        name: base,
+        type,
+        baseModel: '',
+        dirKey: `dir_${type}`,
+        dirPath: getDirectories()[`dir_${type}`] ?? '',
+        filename: f.rel,
+        hash: '',
+        size,
+        imageName: sidecar,
+        identified: false,
+        scannedAt: Date.now(),
+      });
+      onMsg(`${type}: no Civitai match for ${f.rel} — kept as unknown`);
     }
   }
   onMsg(`${type}: scanned ${files.length} files, updated ${updated} models.`);

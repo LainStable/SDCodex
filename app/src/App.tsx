@@ -3,7 +3,7 @@ import Explorer from './views/Explorer';
 import Library from './views/Library';
 import Settings from './views/Settings';
 import ModelModal, { type ModalTarget } from './components/ModelModal';
-import { Home, Queue, BootstrapCard } from './views/Core';
+import { Home, Queue, BootstrapCard, DownloadFloat } from './views/Core';
 import { MobileNav, Sidebar, Topbar, type Theme, type ViewId } from './components/chrome';
 import {
   addToQueue,
@@ -154,6 +154,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-obsidian-bg text-ink">
+      <DownloadFloat />
       {callbackMsg && (
         <div className="fixed left-1/2 top-4 z-[70] -translate-x-1/2 rounded-lg border border-status-alert/40 bg-status-alert/15 px-4 py-2 font-mono text-xs text-[#f87171]">
           SSO: {callbackMsg}
@@ -269,6 +270,7 @@ export default function App() {
             deleteScanned(modelId, versionId);
             setLibKey((k) => k + 1);
           }}
+          onLibraryChanged={() => setLibKey((k) => k + 1)}
         />
       )}
     </div>
