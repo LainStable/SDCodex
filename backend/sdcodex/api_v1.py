@@ -641,3 +641,41 @@ def plugins_uninstall(plugin_id: str):
             db.session.delete(row)
             db.session.commit()
     return jsonify({"ok": ok, "message": msg}), (200 if ok else 404)
+
+
+# ------------------------------------------------------- civitai proxy ---
+
+@api_v1.get("/civitai/<path:subpath>")
+def civitai_proxy(subpath: str):
+    """Same-origin Civitai relay for production builds.
+
+    Browsers can't call Civitai cross-origin with an API key (preflight 405),
+    and Docker has no Vite dev proxy — so the backend forwards with the
+    user's key and selected mirror. Authed only.
+    """
+    import requests
+
+    user, err = _require_user()
+    if err:
+        return err
+    mirror_row = db.session.get(Setting, "api_mirror")
+    mirror = (mirror_row.value if mirror_row else "") or "civitai.com"
+    if mirror not in ("civitai.com", "civitai.red"):
+        mirror = "civitai.com"
+    headers = {"User-Agent": "SDCodex/1.0 (+https://github.com/LainStable/SDCodex)"}
+    if user.api_key:
+        headers["Authorization"] = f"Bearer {user.api_key}"
+    try:
+        resp = requests.get(
+            f"https://{mirror}/api/v1/{subpath}",
+            params=dict(request.args),
+            headers=headers,
+            timeout=30,
+        )
+    except Exception as e:
+        return jsonify({"error": f"upstream unreachable: {e}"}), 502
+    return (
+        resp.content,
+        resp.status_code,
+        {"Content-Type": resp.headers.get("Content-Type", "application/json")},
+    )

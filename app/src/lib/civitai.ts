@@ -141,14 +141,29 @@ function apiBase(): string {
   if (import.meta.env.DEV) {
     return mirrorHost() === 'civitai.red' ? '/civitai-red/api/v1/models' : '/civitai/api/v1/models';
   }
-  return `https://${mirrorHost()}/api/v1/models`;
+  // Production (Docker): same-origin backend relay — browsers can't call
+  // Civitai cross-origin with a key (preflight 405). Needs a session.
+  return '/api/civitai/models';
 }
 
 function apiRoot(): string {
   if (import.meta.env.DEV) {
     return mirrorHost() === 'civitai.red' ? '/civitai-red/api/v1' : '/civitai/api/v1';
   }
-  return `https://${mirrorHost()}/api/v1`;
+  return '/api/civitai';
+}
+
+/** Liveness probe for the status badge. Any HTTP answer means reachable —
+    even 401 (it proves the round trip works). */
+export async function probeCivitai(signal?: AbortSignal): Promise<{ ok: boolean; ms: number | null }> {
+  const t0 = performance.now();
+  try {
+    const res = await fetch(`${apiRoot()}/models?limit=1`, { signal });
+    void res.status;
+    return { ok: res.status < 500, ms: Math.round(performance.now() - t0) };
+  } catch {
+    return { ok: false, ms: null };
+  }
 }
 
 /** Mirrors OldCode api._get_headers: bearer token when the user saved one. */
