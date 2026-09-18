@@ -787,7 +787,7 @@ def plugins_github_token_status():
 _PAGE_RE = __import__("re").compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 _MISSING_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"/>
-<style>body{background:#0f131c;color:#c7c4d7;font:12px monospace;padding:32px}h1{color:#fff;font-size:15px}</style>
+<style>body{{background:#0f131c;color:#c7c4d7;font:12px monospace;padding:32px}}h1{{color:#fff;font-size:15px}}</style>
 </head><body><h1>{title}</h1><p>{detail}</p>
 <p>Ship <code>pages/{name}.html</code> in the plugin repo to fill this slot.</p></body></html>"""
 

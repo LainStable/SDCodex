@@ -55,8 +55,6 @@ const CORE_TABS: { id: string; label: string }[] = [
   { id: 'dirs', label: 'Model dirs' },
   { id: 'api', label: 'API key' },
   { id: 'auth', label: 'Users & SSO' },
-  { id: 'plugins', label: 'Plugins' },
-  { id: 'system', label: 'System' },
 ];
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {  return (
@@ -1189,12 +1187,15 @@ export default function Settings({
     settings: Array<{ label: string; page: string }>;
   }>;
 }) {
-  // Core tabs + one tab per plugin settings entry (manifest `settings`).
+  // Core tabs first, then one tab per plugin settings entry, with Plugins +
+  // System always last.
   const tabs: { id: string; label: string }[] = [
     ...CORE_TABS,
     ...(installed ?? []).flatMap((p) =>
       (p.settings ?? []).map((s, i) => ({ id: `plugin:${p.id}:${i}`, label: s.label })),
     ),
+    { id: 'plugins', label: 'Plugins' },
+    { id: 'system', label: 'System' },
   ];
   const [tab, setTab] = useState<string>(
     tabs.some((t) => t.id === initialTab) ? (initialTab as string) : 'dirs',
