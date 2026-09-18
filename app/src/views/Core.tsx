@@ -980,8 +980,14 @@ export function Plugins() {
       <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         {shown.map((p) => {
           const inst = installed[p.id];
+          const needsUpdate = Boolean(inst?.has_update);
           return (
-            <article key={p.id} className="glass-l1 rounded-lg p-4">
+            <article
+              key={p.id}
+              className={`glass-l1 rounded-lg p-4 ${
+                needsUpdate ? 'border-status-warning/50 ring-1 ring-inset ring-status-warning/30' : ''
+              }`}
+            >
               <div className="flex items-center justify-between gap-2">
                 <h2 className="font-display text-base font-semibold">{p.name}</h2>
                 <span className="flex items-center gap-1.5">
@@ -990,9 +996,15 @@ export function Plugins() {
                       installed{inst.version ? ` v${inst.version}` : ''}
                     </span>
                   )}
-                  <span className="rounded border border-white/15 bg-white/5 px-2 py-0.5 font-mono text-[10px] uppercase text-ink-muted">
-                    v{p.version}
-                  </span>
+                  {needsUpdate ? (
+                    <span className="rounded border border-status-warning/50 bg-status-warning/15 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-[#fcd34d]">
+                      update → v{p.version}
+                    </span>
+                  ) : (
+                    <span className="rounded border border-white/15 bg-white/5 px-2 py-0.5 font-mono text-[10px] uppercase text-ink-muted">
+                      v{p.version}
+                    </span>
+                  )}
                 </span>
               </div>
               <p className="mt-1 text-xs text-ink-muted">{p.description}</p>
