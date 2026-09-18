@@ -678,8 +678,33 @@ export function Plugins() {
   const [filter, setFilter] = useState<'all' | 'official'>('all');
   const [catalog, setCatalog] = useState<HubCatalog | null>(null);
   const [live, setLive] = useState(false);
-  const [installing, setInstalling] = useState<string | null>(null);
-  const [installMsg, setInstallMsg] = useState<Record<string, string>>({});
+  const [installed, setInstalled] = useState<
+    Record<string, { name?: string; version?: string; has_update?: boolean }>
+  >({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Record<string, string>>({});
+  // Per-plugin volume editor: open card + rows + edited values.
+  const [volOpen, setVolOpen] = useState<string | null>(null);
+  const [volRows, setVolRows] = useState<
+    Array<{ env_var: string; host_path?: string; container_path?: string; description?: string; value?: string }>
+  >([]);
+  const [volEdits, setVolEdits] = useState<Record<string, string>>({});
+  const [volMsg, setVolMsg] = useState<string | null>(null);
+
+  const refreshInstalled = async () => {
+    try {
+      const { apiGet, backendAvailable } = await import('../lib/backend');
+      if (!(await backendAvailable())) return;
+      const r = await apiGet<{ installed?: Array<{ id: string; name?: string; version?: string; has_update?: boolean }> }>(
+        '/plugins',
+      );
+      const map: Record<string, { name?: string; version?: string; has_update?: boolean }> = {};
+      for (const p of r.installed ?? []) map[p.id] = p;
+      setInstalled(map);
+    } catch {
+      /* standalone — hub only */
+    }
+  };
 
   useEffect(() => {
     let on = true;
@@ -690,10 +715,62 @@ export function Plugins() {
         setLive(ok);
       }
     })();
+    void refreshInstalled();
     return () => {
       on = false;
     };
   }, []);
+
+  const runAction = async (
+    id: string,
+    fn: (api: typeof import('../lib/backend')) => Promise<string>,
+  ) => {
+    setBusy(id);
+    try {
+      const api = await import('../lib/backend');
+      if (!(await api.backendAvailable())) throw new Error('Backend unreachable — start it to install.');
+      const done = await fn(api);
+      setMsg((m) => ({ ...m, [id]: done }));
+      window.dispatchEvent(new Event('sdcodex:plugins-changed'));
+      await refreshInstalled();
+    } catch (e) {
+      setMsg((m) => ({ ...m, [id]: e instanceof Error ? e.message : 'Failed' }));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const openVolumes = async (id: string) => {
+    if (volOpen === id) {
+      setVolOpen(null);
+      return;
+    }
+    setVolOpen(id);
+    setVolRows([]);
+    setVolEdits({});
+    setVolMsg(null);
+    try {
+      const { apiGet, backendAvailable } = await import('../lib/backend');
+      if (!(await backendAvailable())) throw new Error('Backend unreachable.');
+      const r = await apiGet<{ volumes?: typeof volRows }>('/plugins/' + id + '/volumes');
+      setVolRows(r.volumes ?? []);
+      setVolEdits(Object.fromEntries((r.volumes ?? []).map((v) => [v.env_var, v.value ?? v.host_path ?? ''])));
+    } catch (e) {
+      setVolMsg(e instanceof Error ? e.message : 'Failed to load volumes');
+    }
+  };
+
+  const saveVolumes = async (id: string) => {
+    setVolMsg('saving…');
+    try {
+      const { apiPost, backendAvailable } = await import('../lib/backend');
+      if (!(await backendAvailable())) throw new Error('Backend unreachable.');
+      await apiPost('/plugins/' + id + '/volumes', { volumes: volEdits });
+      setVolMsg('saved — restart/rebuild to mount volumes');
+    } catch (e) {
+      setVolMsg(e instanceof Error ? e.message : 'Save failed');
+    }
+  };
 
   const list = catalog?.plugins ?? [];
   const shown = list.filter((p) => p.name.toLowerCase().includes(q.trim().toLowerCase()));
@@ -728,63 +805,125 @@ export function Plugins() {
         />
       </div>
       <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {shown.map((p) => (
-          <article key={p.id} className="glass-l1 rounded-lg p-4">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="font-display text-base font-semibold">{p.name}</h2>
-              <span className="rounded border border-white/15 bg-white/5 px-2 py-0.5 font-mono text-[10px] uppercase text-ink-muted">
-                v{p.version}
-              </span>
-            </div>
-            <p className="mt-1 text-xs text-ink-muted">{p.description}</p>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <a
-                href={p.repository}
-                target="_blank"
-                rel="noreferrer"
-                className="font-mono text-[11px] text-secondary hover:underline"
-              >
-                {p.repository}
-              </a>
-              <GhostButton
-                disabled={installing !== null}
-                onClick={() =>
-                  void (async () => {
-                    setInstalling(p.id);
-                    setInstallMsg((m) => ({ ...m, [p.id]: 'installing…' }));
-                    try {
-                      const { apiPost, backendAvailable } = await import('../lib/backend');
-                      if (!(await backendAvailable())) {
-                        throw new Error('Backend unreachable — start it to install.');
-                      }
-                      const r = await apiPost<{ ok: boolean; plugin?: { name?: string }; error?: string }>(
-                        '/plugins/install',
-                        { repo_url: p.repository },
-                      );
-                      setInstallMsg((m) => ({
-                        ...m,
-                        [p.id]: `installed ${r.plugin?.name ?? p.id} — restart/rebuild to mount volumes`,
-                      }));
-                      window.dispatchEvent(new Event('sdcodex:plugins-changed'));
-                    } catch (e) {
-                      setInstallMsg((m) => ({
-                        ...m,
-                        [p.id]: e instanceof Error ? e.message : 'Install failed',
-                      }));
-                    } finally {
-                      setInstalling(null);
+        {shown.map((p) => {
+          const inst = installed[p.id];
+          return (
+            <article key={p.id} className="glass-l1 rounded-lg p-4">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="font-display text-base font-semibold">{p.name}</h2>
+                <span className="flex items-center gap-1.5">
+                  {inst && (
+                    <span className="rounded border border-status-active/40 bg-status-active/10 px-2 py-0.5 font-mono text-[10px] uppercase text-status-active">
+                      installed{inst.version ? ` v${inst.version}` : ''}
+                    </span>
+                  )}
+                  <span className="rounded border border-white/15 bg-white/5 px-2 py-0.5 font-mono text-[10px] uppercase text-ink-muted">
+                    v{p.version}
+                  </span>
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-ink-muted">{p.description}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <a
+                  href={p.repository}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-mono text-[11px] text-secondary hover:underline"
+                >
+                  {p.repository}
+                </a>
+                {!inst ? (
+                  <GhostButton
+                    disabled={busy !== null}
+                    onClick={() =>
+                      void runAction(p.id, async (api) => {
+                        const r = await api.apiPost<{ ok: boolean; plugin?: { name?: string }; error?: string }>(
+                          '/plugins/install',
+                          { repo_url: p.repository },
+                        );
+                        return `installed ${r.plugin?.name ?? p.id} — set volumes below, then restart/rebuild to mount`;
+                      })
                     }
-                  })()
-                }
-              >
-                {installing === p.id ? 'Installing…' : 'Install'}
-              </GhostButton>
-            </div>
-            {installMsg[p.id] && (
-              <p className="mt-1 font-mono text-[10px] text-ink-faint">{installMsg[p.id]}</p>
-            )}
-          </article>
-        ))}
+                  >
+                    {busy === p.id ? 'Installing…' : 'Install'}
+                  </GhostButton>
+                ) : (
+                  <>
+                    <GhostButton disabled={busy !== null} onClick={() => void openVolumes(p.id)}>
+                      {volOpen === p.id ? 'Hide volumes' : 'Volumes'}
+                    </GhostButton>
+                    {inst.has_update && (
+                      <GhostButton
+                        disabled={busy !== null}
+                        onClick={() =>
+                          void runAction(p.id, async (api) => {
+                            const r = await api.apiPost<{ ok: boolean; message?: string }>(
+                              `/plugins/${p.id}/update`,
+                              {},
+                            );
+                            return r.message ?? (r.ok ? 'Updated.' : 'Update failed.');
+                          })
+                        }
+                      >
+                        {busy === p.id ? 'Updating…' : 'Update'}
+                      </GhostButton>
+                    )}
+                    <GhostButton
+                      disabled={busy !== null}
+                      onClick={() =>
+                        void runAction(p.id, async (api) => {
+                          const r = await api.apiDelete<{ ok: boolean; message?: string }>(
+                            `/plugins/${p.id}`,
+                          );
+                          if (volOpen === p.id) setVolOpen(null);
+                          return r.message ?? (r.ok ? 'Uninstalled.' : 'Uninstall failed.');
+                        })
+                      }
+                    >
+                      {busy === p.id ? 'Working…' : 'Uninstall'}
+                    </GhostButton>
+                  </>
+                )}
+              </div>
+              {volOpen === p.id && inst && (
+                <div className="mt-3 rounded-lg border border-white/[0.06] bg-obsidian-lowest/60 p-3">
+                  <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+                    Volumes → .env + compose override
+                  </div>
+                  {volRows.length === 0 && !volMsg && (
+                    <p className="mt-2 font-mono text-[11px] text-ink-faint">loading…</p>
+                  )}
+                  {volRows.map((v) => (
+                    <div key={v.env_var} className="mt-2">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <span className="font-mono text-[11px] font-semibold text-secondary">{v.env_var}</span>
+                        <span className="font-mono text-[10px] text-ink-faint">→ {v.container_path}</span>
+                      </div>
+                      {v.description && (
+                        <p className="font-mono text-[10px] text-ink-faint">{v.description}</p>
+                      )}
+                      <input
+                        value={volEdits[v.env_var] ?? ''}
+                        onChange={(e) => setVolEdits((ed) => ({ ...ed, [v.env_var]: e.target.value }))}
+                        placeholder={v.host_path ?? './data'}
+                        className="mt-1 w-full rounded border border-white/10 bg-obsidian-lowest px-2 py-1.5 font-mono text-[11px] outline-none focus:border-primary"
+                      />
+                    </div>
+                  ))}
+                  {volRows.length > 0 && (
+                    <GhostButton className="mt-2" onClick={() => void saveVolumes(p.id)}>
+                      Save volumes
+                    </GhostButton>
+                  )}
+                  {volMsg && <p className="mt-1 font-mono text-[10px] text-ink-faint">{volMsg}</p>}
+                </div>
+              )}
+              {msg[p.id] && (
+                <p className="mt-1 font-mono text-[10px] text-ink-faint">{msg[p.id]}</p>
+              )}
+            </article>
+          );
+        })}
       </section>
     </div>
   );

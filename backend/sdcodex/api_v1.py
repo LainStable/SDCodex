@@ -666,6 +666,62 @@ def plugins_uninstall(plugin_id: str):
     return jsonify({"ok": ok, "message": msg}), (200 if ok else 404)
 
 
+@api_v1.get("/plugins/<plugin_id>/volumes")
+def plugin_volumes(plugin_id: str):
+    """Volume contract for an installed plugin (manifest + current .env values)."""
+    _, err = _require_user()
+    if err:
+        return err
+    from . import updater as updater_mod
+
+    base = updater_mod.plugin_path(plugin_id)
+    if not base:
+        return jsonify({"error": "Not installed."}), 404
+    mf = updater_mod.read_manifest(base) or {}
+    env_vals: dict = {}
+    env_path = os.path.join(updater_mod.root_dir(), ".env")
+    if os.path.exists(env_path):
+        with open(env_path, encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if s and not s.startswith("#") and "=" in s:
+                    k, v = s.split("=", 1)
+                    env_vals[k.strip()] = v.strip()
+    volumes = []
+    for v in mf.get("volumes", []):
+        if not isinstance(v, dict) or not v.get("env_var"):
+            continue
+        vv = dict(v)
+        vv["value"] = env_vals.get(vv["env_var"], vv.get("host_path", ""))
+        volumes.append(vv)
+    return jsonify({"id": plugin_id, "volumes": volumes})
+
+
+@api_v1.post("/plugins/<plugin_id>/volumes")
+def plugin_volumes_save(plugin_id: str):
+    """Save host paths for a plugin's volumes (.env + compose override)."""
+    _, err = _admin_or_401()
+    if err:
+        return err
+    from . import updater as updater_mod
+
+    base = updater_mod.plugin_path(plugin_id)
+    if not base:
+        return jsonify({"error": "Not installed."}), 404
+    mf = updater_mod.read_manifest(base) or {"id": plugin_id}
+    data = request.get_json(force=True, silent=True) or {}
+    values = data.get("volumes") or {}
+    resolved = {}
+    for v in mf.get("volumes", []):
+        if not isinstance(v, dict) or not v.get("env_var"):
+            continue
+        val = (values.get(v["env_var"]) or v.get("host_path") or "").strip()
+        if val:
+            resolved[v["env_var"]] = val
+    updater_mod.apply_volume_config({"id": mf.get("id", plugin_id), "volumes": mf.get("volumes", [])}, resolved)
+    return jsonify({"ok": True, "volumes": resolved})
+
+
 # ------------------------------------------------- plugin pages ----------
 # Installed plugins ship Stitch-styled static pages (pages/*.html). The React
 # shell embeds them (sidebar nav + settings tabs) — no OldCode templates.
