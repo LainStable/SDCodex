@@ -28,6 +28,10 @@ export function Sidebar({
   updating,
   onUpdateCore,
   onGoPlugins,
+  space,
+  plugins,
+  pluginPage,
+  onPluginPage,
 }: {
   view: ViewId;
   go: (v: ViewId) => void;
@@ -37,8 +41,21 @@ export function Sidebar({
   updating: boolean;
   onUpdateCore: () => void;
   onGoPlugins: () => void;
+  /** Active space: core views or one installed plugin (sidebar swaps). */
+  space: { kind: 'core' } | { kind: 'plugin'; id: string };
+  plugins: Array<{
+    id: string;
+    name: string;
+    version: string;
+    nav_items: Array<{ label: string; icon?: string; page: string }>;
+  }>;
+  pluginPage: string | null;
+  onPluginPage: (page: string) => void;
 }) {
   const hasUpdate = updates.core || updates.plugins;
+  const activePlugin =
+    space.kind === 'plugin' ? plugins.find((p) => p.id === space.id) : undefined;
+  const currentPage = pluginPage ?? activePlugin?.nav_items[0]?.page ?? null;
   return (
     <aside className="hidden w-60 shrink-0 border-r border-white/[0.06] p-4 md:block">
       <div className="font-display text-lg font-bold tracking-tight">SDCodex</div>
@@ -71,7 +88,30 @@ export function Sidebar({
         )}
       </div>
       <nav className="mt-6 space-y-1 text-sm">
-        {NAV.map((item) => (
+        {activePlugin ? (
+          <>
+            <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+              {activePlugin.name}
+              {activePlugin.version ? ` · v${activePlugin.version}` : ''}
+            </div>
+            {activePlugin.nav_items.map((item) => (
+              <button
+                key={item.page}
+                type="button"
+                onClick={() => onPluginPage(item.page)}
+                className={`flex w-full items-center gap-2 rounded px-3 py-2 text-left ${
+                  currentPage === item.page
+                    ? 'bg-primary/15 text-white ring-1 ring-inset ring-primary/40'
+                    : 'text-ink-muted hover:bg-white/5'
+                }`}
+              >
+                {item.icon ? <span aria-hidden="true">{item.icon}</span> : null}
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </>
+        ) : (
+          NAV.map((item) => (
           <button
             key={item.id}
             type="button"
@@ -95,8 +135,9 @@ export function Sidebar({
                 {queueCount}
               </span>
             )}
-          </button>
-        ))}
+            </button>
+          )))
+        }
       </nav>
       <div className="mt-6 border-t border-white/[0.06] pt-3 font-mono text-[10px] leading-relaxed text-ink-faint">
         Storage
@@ -146,6 +187,10 @@ export function UserMenu({
   avatarUrl,
   signedIn,
   onSignOut,
+  space,
+  plugins,
+  onSpaceCore,
+  onSpacePlugin,
 }: {
   go: (v: ViewId) => void;
   theme: Theme;
@@ -156,6 +201,11 @@ export function UserMenu({
   avatarUrl: string;
   signedIn: boolean;
   onSignOut: () => void;
+  /** Active space + installed plugin spaces (fan icons). */
+  space: { kind: 'core' } | { kind: 'plugin'; id: string };
+  plugins: Array<{ id: string; name: string; icon?: string }>;
+  onSpaceCore: () => void;
+  onSpacePlugin: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -180,10 +230,30 @@ export function UserMenu({
   // Fan-out arc: profile pic is the center (right side); items spread
   // left-to-bottom, i.e. 180° (west) → 90° (south) in screen coords.
   // Mirrors OldCode base.html: angle = start - (span * i) / (n - 1).
+  // Fan: theme toggle, core icon (once a plugin is installed), one icon per
+  // installed plugin, settings, sign out. Core icon returns to core views.
   const actions = [
     theme === 'dark'
       ? { id: 'theme', label: 'Light', icon: '☀', run: () => setTheme('light'), current: false }
       : { id: 'theme', label: 'Dark', icon: '☾', run: () => setTheme('dark'), current: false },
+    ...(plugins.length > 0
+      ? [
+          {
+            id: 'space-core',
+            label: 'Core',
+            icon: '⌂',
+            run: onSpaceCore,
+            current: space.kind === 'core',
+          },
+        ]
+      : []),
+    ...plugins.map((p) => ({
+      id: `space-${p.id}`,
+      label: p.name,
+      icon: p.icon || p.name.slice(0, 1).toUpperCase(),
+      run: () => onSpacePlugin(p.id),
+      current: space.kind === 'plugin' && space.id === p.id,
+    })),
     { id: 'settings', label: 'Settings', icon: '⚙', run: () => go('settings') },
     signedIn
       ? { id: 'signout', label: 'Sign out', icon: '→', run: onSignOut }
@@ -268,6 +338,10 @@ export function Topbar({
   avatarUrl,
   signedIn,
   onSignOut,
+  space,
+  plugins,
+  onSpaceCore,
+  onSpacePlugin,
 }: {
   socket?: 'rw' | 'ro';
   go: (v: ViewId) => void;
@@ -277,6 +351,10 @@ export function Topbar({
   avatarUrl: string;
   signedIn: boolean;
   onSignOut: () => void;
+  space: { kind: 'core' } | { kind: 'plugin'; id: string };
+  plugins: Array<{ id: string; name: string; icon?: string }>;
+  onSpaceCore: () => void;
+  onSpacePlugin: (id: string) => void;
 }) {
   return (
     <div className="mb-4 flex items-center gap-2">
@@ -315,6 +393,10 @@ export function Topbar({
         avatarUrl={avatarUrl}
         signedIn={signedIn}
         onSignOut={onSignOut}
+        space={space}
+        plugins={plugins}
+        onSpaceCore={onSpaceCore}
+        onSpacePlugin={onSpacePlugin}
       />
     </div>
   );

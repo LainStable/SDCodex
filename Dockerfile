@@ -26,6 +26,12 @@ WORKDIR /app
 COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install -r backend/requirements.txt
 
+# Plugin deps: every plugins/*/requirements.txt (wildcard over plugin
+# folders). Core docker-compose.yml stays pristine — plugin mounts live in
+# docker-compose.override.yml + .env instead.
+COPY plugins ./plugins.build
+RUN sh -c 'for r in ./plugins.build/*/requirements.txt; do [ -f "$r" ] && pip install -r "$r"; done; rm -rf ./plugins.build'
+
 COPY backend ./backend
 
 # Frontend build output lives OUTSIDE /app: compose mounts the repo over /app

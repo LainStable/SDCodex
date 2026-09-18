@@ -765,6 +765,7 @@ export function Plugins() {
                         ...m,
                         [p.id]: `installed ${r.plugin?.name ?? p.id} — restart/rebuild to mount volumes`,
                       }));
+                      window.dispatchEvent(new Event('sdcodex:plugins-changed'));
                     } catch (e) {
                       setInstallMsg((m) => ({
                         ...m,

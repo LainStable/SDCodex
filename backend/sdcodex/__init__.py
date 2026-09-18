@@ -52,6 +52,14 @@ def create_app(db_path: str | None = None) -> Flask:
     with app.app_context():
         db.create_all()
 
+    # Installed plugins (entrypoint init is optional; page-only plugins skip).
+    try:
+        from .updater import load_plugins
+
+        load_plugins(app)
+    except Exception:
+        app.logger.warning("Plugin loader failed", exc_info=True)
+
     # Background worker for downloads + library scans.
     from .download_manager import download_manager
 

@@ -51,9 +51,7 @@ import {
 import { BootstrapCard, Plugins } from './Core';
 import { clearScanLog, getScanLog, pushScanLog, subscribeScanLog } from '../lib/scanlog';
 
-type Tab = 'dirs' | 'api' | 'auth' | 'system' | 'plugins';
-
-const TABS: { id: Tab; label: string }[] = [
+const CORE_TABS: { id: string; label: string }[] = [
   { id: 'dirs', label: 'Model dirs' },
   { id: 'api', label: 'API key' },
   { id: 'auth', label: 'Users & SSO' },
@@ -1241,13 +1239,36 @@ export default function Settings({
   onProfile,
   onSignOut,
   initialTab,
+  installed,
 }: {
   profile: Profile | null;
   onProfile: (p: Profile | null) => void;
   onSignOut: () => void;
   initialTab?: string;
+  installed?: Array<{
+    id: string;
+    name: string;
+    settings: Array<{ label: string; page: string }>;
+  }>;
 }) {
-  const [tab, setTab] = useState<Tab>((TABS.some((t) => t.id === initialTab) ? initialTab : 'dirs') as Tab);
+  // Core tabs + one tab per plugin settings entry (manifest `settings`).
+  const tabs: { id: string; label: string }[] = [
+    ...CORE_TABS,
+    ...(installed ?? []).flatMap((p) =>
+      (p.settings ?? []).map((s, i) => ({ id: `plugin:${p.id}:${i}`, label: s.label })),
+    ),
+  ];
+  const [tab, setTab] = useState<string>(
+    tabs.some((t) => t.id === initialTab) ? (initialTab as string) : 'dirs',
+  );
+  const pluginTab = tab.startsWith('plugin:')
+    ? (() => {
+        const [, pid, idx] = tab.split(':');
+        const plugin = (installed ?? []).find((p) => p.id === pid);
+        const entry = plugin?.settings[Number(idx)];
+        return plugin && entry ? { plugin, entry } : null;
+      })()
+    : null;
   return (
     <div>
       <PageHeader
@@ -1255,7 +1276,7 @@ export default function Settings({
         subtitle="Download locations, credentials, access, and system — same tabs as the backend."
       />
       <div className="glass-l1 edge-shimmer mt-4 rounded-lg p-3">
-        <FilterPills options={TABS} active={tab} onPick={setTab} />
+        <FilterPills options={tabs} active={tab} onPick={setTab} />
       </div>
       <div className="mt-3">
         {tab === 'dirs' && <Dirs />}
@@ -1267,6 +1288,14 @@ export default function Settings({
             <System />
             <ScanLogs />
           </>
+        )}
+        {pluginTab && (
+          <iframe
+            key={tab}
+            title={`${pluginTab.plugin.name} — ${pluginTab.entry.label}`}
+            src={`/api/plugins/${pluginTab.plugin.id}/settings/${pluginTab.entry.page}`}
+            className="h-[calc(100vh-240px)] min-h-[420px] w-full rounded-lg border border-white/[0.06] bg-obsidian-lowest"
+          />
         )}
       </div>
     </div>

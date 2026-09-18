@@ -1,5 +1,7 @@
 """JSON API for the React frontend. Mirrors OldCode routes.py semantics."""
 
+import os
+
 from flask import Blueprint, jsonify, make_response, request
 
 from . import auth, db
@@ -662,6 +664,72 @@ def plugins_uninstall(plugin_id: str):
             db.session.delete(row)
             db.session.commit()
     return jsonify({"ok": ok, "message": msg}), (200 if ok else 404)
+
+
+# ------------------------------------------------- plugin pages ----------
+# Installed plugins ship Stitch-styled static pages (pages/*.html). The React
+# shell embeds them (sidebar nav + settings tabs) — no OldCode templates.
+
+_PAGE_RE = __import__("re").compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+
+_MISSING_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"/>
+<style>body{background:#0f131c;color:#c7c4d7;font:12px monospace;padding:32px}h1{color:#fff;font-size:15px}</style>
+</head><body><h1>{title}</h1><p>{detail}</p>
+<p>Ship <code>pages/{name}.html</code> in the plugin repo to fill this slot.</p></body></html>"""
+
+
+def _plugin_page_file(plugin_id: str, name: str) -> str | None:
+    from . import updater as updater_mod
+
+    if not _PAGE_RE.match(plugin_id or "") or not _PAGE_RE.match(name or ""):
+        return None
+    base = updater_mod.plugin_path(plugin_id)
+    if not base:
+        return None
+    cand = os.path.join(base, "pages", f"{name}.html")
+    if os.path.isfile(cand):
+        return cand
+    return None
+
+
+@api_v1.get("/plugins/<plugin_id>/page/<name>")
+def plugin_page(plugin_id: str, name: str):
+    """Serve a plugin's static page (sidebar nav target)."""
+    from flask import Response
+
+    _, err = _require_user()
+    if err:
+        return err
+    cand = _plugin_page_file(plugin_id, name)
+    if not cand:
+        html = _MISSING_PAGE.format(
+            title=f"{plugin_id} / {name}",
+            detail="This page is not drawn up yet.",
+            name=name,
+        )
+        return Response(html, content_type="text/html")
+    with open(cand, encoding="utf-8") as f:
+        return Response(f.read(), content_type="text/html")
+
+
+@api_v1.get("/plugins/<plugin_id>/settings/<tab>")
+def plugin_settings_page(plugin_id: str, tab: str):
+    """Serve a plugin's settings tab (pages/settings-<tab>.html)."""
+    from flask import Response
+
+    _, err = _require_user()
+    if err:
+        return err
+    cand = _plugin_page_file(plugin_id, f"settings-{tab}")
+    if not cand:
+        html = _MISSING_PAGE.format(
+            title=f"{plugin_id} settings / {tab}",
+            detail="This settings tab is not drawn up yet.",
+            name=f"settings-{tab}",
+        )
+        return Response(html, content_type="text/html")
+    with open(cand, encoding="utf-8") as f:
+        return Response(f.read(), content_type="text/html")
 
 
 # ------------------------------------------------------- civitai proxy ---

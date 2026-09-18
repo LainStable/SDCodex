@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Explorer from './views/Explorer';
 import Library from './views/Library';
 import Settings from './views/Settings';
+import PluginView from './views/PluginView';
 import ModelModal, { type ModalTarget } from './components/ModelModal';
 import { Queue, BootstrapCard, DownloadFloat } from './views/Core';
 import Home from './views/Home';
@@ -14,6 +15,7 @@ import {
   removeFromQueue,
 } from './lib/queue';
 import { adoptServerUser, clearProfile, completeOidcCallback, endSession, fetchServerAuth, hasSession, initials, loadProfile, pullServerProfile, type Profile, type ServerAuthState } from './lib/auth';
+import type { InstalledPlugin } from './lib/plugins';
 import { deleteScanned } from './lib/library';
 import { apiPost, backendLogout, backendAvailable } from './lib/backend';
 import { pullSettings } from './lib/settings';
@@ -33,6 +35,13 @@ export default function App() {
   const [appVersion, setAppVersion] = useState('…');
   const [updates, setUpdates] = useState<UpdateState>({ core: false, plugins: false, checking: false });
   const [updating, setUpdating] = useState(false);
+  // Plugin spaces: core views vs one installed plugin (sidebar swaps, fan
+  // gains core + per-plugin icons once anything is installed).
+  const [space, setSpace] = useState<{ kind: 'core' } | { kind: 'plugin'; id: string }>({
+    kind: 'core',
+  });
+  const [installed, setInstalled] = useState<InstalledPlugin[]>([]);
+  const [pluginPage, setPluginPage] = useState<string | null>(null);
   // Models already on disk (backend library + local scan records).
   const [ownedIds, setOwnedIds] = useState<Set<string>>(new Set());
 
@@ -80,6 +89,7 @@ export default function App() {
       /* standalone — local stands */
     }
     void checkUpdates();
+    void refreshInstalled();
   };
 
   /** Fetch backend version + update state (core, plugin updates, new plugins). */
@@ -213,6 +223,7 @@ export default function App() {
             const full = await pullServerProfile();
             if (full) setProfile(full);
             void checkUpdates();
+            void refreshInstalled();
           } else {
             setAuthed(hasSession() && loadProfile() !== null);
           }
@@ -247,15 +258,39 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // Plugin installs/uninstalls refresh spaces everywhere.
+  useEffect(() => {
+    const onChange = () => void refreshInstalled();
+    window.addEventListener('sdcodex:plugins-changed', onChange);
+    return () => window.removeEventListener('sdcodex:plugins-changed', onChange);
+  }, []);
+
   const go = (v: ViewId) => {
     setModal(null);
+    setSpace({ kind: 'core' });
     setView(v);
   };
 
   const goSettings = (tab: string) => {
     setSettingsTab(tab);
     setModal(null);
+    setSpace({ kind: 'core' });
     setView('settings');
+  };
+
+  const openPluginSpace = (id: string) => {
+    setModal(null);
+    setPluginPage(null);
+    setSpace({ kind: 'plugin', id });
+  };
+
+  /** Installed plugin spaces (fan icons, sidebar, settings tabs). */
+  const refreshInstalled = async () => {
+    const { fetchInstalled } = await import('./lib/plugins');
+    const list = await fetchInstalled();
+    setInstalled(list);
+    // Drop the space if its plugin went away.
+    setSpace((s) => (s.kind === 'plugin' && !list.some((p) => p.id === s.id) ? { kind: 'core' } : s));
   };
 
   // Single queue entry point: local staged record + backend worker POST.
@@ -335,6 +370,10 @@ export default function App() {
           updating={updating}
           onUpdateCore={() => void updateCore()}
           onGoPlugins={() => goSettings('plugins')}
+          space={space}
+          plugins={installed}
+          pluginPage={pluginPage}
+          onPluginPage={setPluginPage}
         />
 
         <main className="min-w-0 flex-1 p-4 md:p-5">
@@ -351,9 +390,23 @@ export default function App() {
               endSession();
               setAuthed(false);
             }}
+            space={space}
+            plugins={installed}
+            onSpaceCore={() => setSpace({ kind: 'core' })}
+            onSpacePlugin={openPluginSpace}
           />
 
-          {view === 'home' && (
+          {space.kind === 'plugin'
+            ? (() => {
+                const plugin = installed.find((q) => q.id === (space as { id: string }).id);
+                return plugin ? (
+                  <PluginView plugin={plugin} page={pluginPage} />
+                ) : (
+                  <p className="font-mono text-xs text-ink-faint">Plugin not installed.</p>
+                );
+              })()
+            : null}
+          {space.kind === 'core' && view === 'home' && (
             <Home
               goModels={() => go('models')}
               onOpen={(id) => setModal({ kind: 'civitai', modelId: id })}
@@ -362,7 +415,7 @@ export default function App() {
               ownedIds={ownedIds}
             />
           )}
-          {view === 'models' && (
+          {space.kind === 'core' && view === 'models' && (
             <Explorer
               queuedIds={queuedIds}
               ownedIds={ownedIds}
@@ -372,8 +425,8 @@ export default function App() {
               searchText={creatorSearch.text}
             />
           )}
-          {view === 'library' && <Library key={libKey} onOpen={(t) => setModal(t)} />}
-          {view === 'queue' && (
+          {space.kind === 'core' && view === 'library' && <Library key={libKey} onOpen={(t) => setModal(t)} />}
+          {space.kind === 'core' && view === 'queue' && (
             <Queue
               items={queue}
               onRemove={(id) => setQueue(removeFromQueue(id))}
@@ -381,10 +434,11 @@ export default function App() {
               onClearAll={() => setQueue(clearQueue())}
             />
           )}
-          {view === 'settings' && (
+          {space.kind === 'core' && view === 'settings' && (
             <Settings
               key={settingsTab}
               initialTab={settingsTab}
+              installed={installed}
               profile={profile}
               onProfile={setProfile}
               onSignOut={() => setAuthed(false)}

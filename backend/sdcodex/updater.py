@@ -182,6 +182,21 @@ def read_manifest(path: str) -> dict | None:
         return None
 
 
+def plugin_path(plugin_id: str) -> str | None:
+    """Install dir for a plugin id (matches manifest, not dirname)."""
+    base = plugins_dir()
+    if not os.path.isdir(base):
+        return None
+    for item in sorted(os.listdir(base)):
+        p = os.path.join(base, item)
+        if not os.path.isdir(p):
+            continue
+        mf = read_manifest(p)
+        if mf and mf.get("id", item) == plugin_id:
+            return p
+    return None
+
+
 def list_installed() -> list:
     out = []
     base = plugins_dir()
@@ -201,11 +216,47 @@ def list_installed() -> list:
                 "version": mf.get("version", ""),
                 "description": mf.get("description", ""),
                 "repository": mf.get("repository", ""),
+                "icon": mf.get("icon", ""),
+                "nav_items": mf.get("nav_items", []) if isinstance(mf.get("nav_items"), list) else [],
+                "settings": mf.get("settings", []) if isinstance(mf.get("settings"), list) else [],
                 "path": p,
                 "local_sha": local_rev(p),
             }
         )
     return out
+
+
+def load_plugins(app) -> list:
+    """Import each installed plugin's entrypoint (``module:func``) and init it.
+
+    OldCode convention: ``init(app, db)``. Missing/bad entrypoints are
+    skipped (page-only plugins) — never fatal to core boot.
+    """
+    loaded = []
+    for p in list_installed():
+        mf = read_manifest(p["path"]) or {}
+        ep = (mf.get("entrypoint") or "").strip()
+        if not ep or ":" not in ep:
+            continue
+        mod_name, func_name = ep.split(":", 1)
+        try:
+            import importlib
+            import sys as _sys
+
+            if p["path"] not in _sys.path:
+                _sys.path.insert(0, p["path"])
+            mod = importlib.import_module(mod_name)
+            fn = getattr(mod, func_name)
+            from . import db as _db
+
+            try:
+                fn(app, _db, mf)
+            except TypeError:
+                fn(app, _db)
+            loaded.append(p["id"])
+        except Exception as e:
+            logger.warning("Plugin '%s' init skipped: %s", p["id"], e)
+    return loaded
 
 
 def check_plugin_updates() -> list:
@@ -222,9 +273,8 @@ def check_plugin_updates() -> list:
 
 
 def update_plugin(plugin_id: str) -> tuple[bool, str]:
-    base = plugins_dir()
-    target = os.path.join(base, plugin_id)
-    if not os.path.isdir(os.path.join(target, ".git")):
+    target = plugin_path(plugin_id)
+    if not target or not os.path.isdir(os.path.join(target, ".git")):
         return False, "Not a git checkout — reinstall the plugin."
     if not is_clean(target):
         return False, "Plugin has local changes — reinstall instead."
@@ -324,6 +374,17 @@ def install_plugin(repo_url: str, volume_paths: dict | None = None) -> tuple[boo
     plugin_id = manifest.get("id", repo_name.lower())
     root = root_dir()
 
+    # Default host paths come from the manifest (OldCode convention); explicit
+    # caller values win.
+    volume_values = dict(volume_paths or {})
+    for v in manifest.get("volumes", []):
+        if not isinstance(v, dict) or not v.get("env_var"):
+            continue
+        var = v["env_var"]
+        if not (volume_values.get(var) or "").strip():
+            volume_values[var] = (v.get("host_path") or "").strip()
+    apply_volume_config({"id": plugin_id, "volumes": manifest.get("volumes", [])}, volume_values)
+
     req_path = os.path.join(target, "requirements.txt")
     if os.path.exists(req_path):
         _merge_requirements(root, plugin_id, req_path)
@@ -342,15 +403,26 @@ def install_plugin(repo_url: str, volume_paths: dict | None = None) -> tuple[boo
         threading.Thread(target=_bg_install, daemon=True).start()
 
     volumes = manifest.get("volumes", [])
-    needed = [v for v in volumes if isinstance(v, dict) and v.get("env_var")]
+    needed = []
+    for v in volumes:
+        if not isinstance(v, dict) or not v.get("env_var"):
+            continue
+        vv = dict(v)
+        vv["host_path"] = volume_values.get(vv["env_var"], vv.get("host_path", ""))
+        needed.append(vv)
     return True, {"id": plugin_id, "name": manifest.get("name", plugin_id), "volumes": needed}
 
 
 def uninstall_plugin(plugin_id: str) -> tuple[bool, str]:
-    target = os.path.join(plugins_dir(), plugin_id)
-    if not os.path.isdir(target):
+    target = plugin_path(plugin_id)
+    if not target or not os.path.isdir(target):
         return False, "Not installed."
+    manifest = read_manifest(target) or {}
     try:
+        remove_volume_config(plugin_id)
+        remove_env_keys(
+            [v.get("env_var") for v in manifest.get("volumes", []) if isinstance(v, dict) and v.get("env_var")]
+        )
         shutil.rmtree(target)
     except Exception as e:
         return False, str(e)
@@ -400,8 +472,24 @@ def override_path() -> str:
 
 
 def apply_volume_config(manifest: dict, volume_values: dict) -> None:
-    """Write plugin volume mounts + env vars (mirrors OldCode markers)."""
+    """Write plugin volume mounts + env vars (OldCode convention).
+
+    * ``.env`` gets ``VAR=host_path`` (seeded from ``.env.example`` when missing).
+    * ``docker-compose.override.yml`` mounts ``${VAR:-default}:container`` and
+      sets ``VAR: container`` — core ``docker-compose.yml`` is never touched.
+    * Rewrites are idempotent per plugin (``# [id]`` tagged lines).
+    """
     plugin_id = manifest.get("id", "plugin")
+    volumes = [v for v in manifest.get("volumes", []) if isinstance(v, dict) and v.get("env_var")]
+
+    env_updates = {}
+    for v in volumes:
+        host_path = ((volume_values or {}).get(v["env_var"]) or v.get("host_path") or "").strip()
+        if host_path:
+            env_updates[v["env_var"]] = host_path
+    if env_updates:
+        update_env_file(env_updates)
+
     path = override_path()
     try:
         with open(path, encoding="utf-8") as f:
@@ -410,42 +498,81 @@ def apply_volume_config(manifest: dict, volume_values: dict) -> None:
         text = OVERRIDE_SKELETON
     text = _ensure_markers(text)
 
-    vol_lines = []
-    env_lines = []
-    for v in manifest.get("volumes", []):
-        if not isinstance(v, dict) or not v.get("env_var"):
+    vol_lines = [
+        f"      - ${{{v['env_var']}:-{v.get('host_path', '')}}}:{v.get('container_path', f'/data/{plugin_id}')}"
+        for v in volumes
+    ]
+    env_lines = [f"      {v['env_var']}: {v.get('container_path', f'/data/{plugin_id}')}" for v in volumes]
+
+    # Single pass: drop this plugin's old tagged lines, then insert the fresh
+    # volume + env blocks after their markers (two separate splices would eat
+    # each other's tagged lines).
+    tag = f"# [{plugin_id}]"
+    out = []
+    for line in text.splitlines(keepends=True):
+        if tag in line:
             continue
-        var = v["env_var"]
-        host_path = (volume_values or {}).get(var) or v.get("host_path", "")
-        container_path = v.get("container_path", f"/data/{plugin_id}")
-        if host_path:
-            vol_lines.append(f"      - {host_path}:{container_path}")
-        env_lines.append(f"      {var}: {container_path}")
-
-    def splice(text: str, marker: str, block: list) -> str:
-        tag = f"# [{plugin_id}]"
-        # Drop this plugin's previous lines first (idempotent rewrites).
-        lines = [l for l in text.splitlines(keepends=True) if tag not in l]
-        res = []
-        for l in lines:
-            res.append(l)
-            if l.rstrip("\n") == marker:
-                for b in block:
-                    res.append(f"{b}  {tag}\n")
-        return "".join(res)
-
-    text = splice(text, VOL_START, vol_lines)
-    text = splice(text, ENV_START, env_lines)
+        out.append(line)
+        if line.rstrip("\n") == VOL_START:
+            out.extend(f"{b}  {tag}\n" for b in vol_lines)
+        elif line.rstrip("\n") == ENV_START:
+            out.extend(f"{b}  {tag}\n" for b in env_lines)
     with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
+        f.write("".join(out))
+
+
+def remove_volume_config(plugin_id: str) -> None:
+    """Drop a plugin's tagged lines from the compose override."""
+    path = override_path()
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.readlines()
+        tag = f"# [{plugin_id}]"
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines([l for l in lines if tag not in l])
+    except Exception as e:
+        logger.error("Removing plugin compose config: %s", e)
+
+
+def remove_env_keys(keys: list) -> None:
+    """Drop exact keys from .env (plugin uninstall)."""
+    keys = {k for k in keys if k}
+    if not keys:
+        return
+    path = os.path.join(root_dir(), ".env")
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.readlines()
+        out = []
+        for line in lines:
+            s = line.strip()
+            if s and not s.startswith("#") and "=" in s and s.split("=", 1)[0].strip() in keys:
+                continue
+            out.append(line)
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(out)
+    except Exception as e:
+        logger.error("Removing plugin env keys: %s", e)
 
 
 def update_env_file(updates: dict) -> None:
+    if not updates:
+        return
     path = os.path.join(root_dir(), ".env")
     lines: list = []
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
             lines = f.readlines()
+    else:
+        # Seed structure from the example so plugin keys land in a sane file.
+        example = os.path.join(root_dir(), ".env.example")
+        if os.path.exists(example):
+            with open(example, encoding="utf-8") as f:
+                lines = f.readlines()
     keys = set(updates)
     out = []
     for line in lines:

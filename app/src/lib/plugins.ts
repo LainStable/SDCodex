@@ -76,3 +76,37 @@ export async function fetchCatalog(signal?: AbortSignal): Promise<{ catalog: Hub
     return { catalog: FALLBACK, live: false };
   }
 }
+
+/** An installed plugin space: fan icon, sidebar nav, settings tabs. */
+export interface PluginNavItem {
+  label: string;
+  icon?: string;
+  page: string;
+}
+
+export interface PluginSettingTab {
+  label: string;
+  page: string;
+}
+
+export interface InstalledPlugin {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  icon?: string;
+  nav_items: PluginNavItem[];
+  settings: PluginSettingTab[];
+  has_update?: boolean;
+}
+
+export async function fetchInstalled(): Promise<InstalledPlugin[]> {
+  try {
+    const { apiGet, backendAvailable } = await import('./backend');
+    if (!(await backendAvailable())) return [];
+    const r = await apiGet<{ installed?: InstalledPlugin[] }>('/plugins');
+    return Array.isArray(r.installed) ? r.installed : [];
+  } catch {
+    return [];
+  }
+}

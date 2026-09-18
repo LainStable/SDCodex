@@ -15,6 +15,15 @@ backend/__pycache__
 **/__pycache__
 db/
 models/
-plugins/
+# Plugin work dirs stay out of the image; manifests + code ride along so the
+# Dockerfile can wildcard-install plugins/*/requirements.txt at build time.
+plugins/*/.git
+plugins/*/node_modules
+plugins/*/db
+plugins/*/models
+plugins/*/downloads
+plugins/*/tasks
+plugins/*/data
+plugins/*/.venv
 .env
 .venv
