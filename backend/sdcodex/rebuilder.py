@@ -155,8 +155,12 @@ def _merge_env(a, b) -> dict:
     return d
 
 
-def _split_bind(spec: str):
-    """host:container[:opts] (long-form dicts pass through as-is)."""
+def _split_bind(spec: str, project_host_dir: str):
+    """host:container[:opts] (long-form dicts pass through as-is).
+
+    Relative host paths are compose-project-relative — resolved against the
+    HOST project dir (own /app mount source), never the container's /app.
+    """
     if isinstance(spec, dict):
         return spec
     parts = spec.split(":")
@@ -165,8 +169,22 @@ def _split_bind(spec: str):
     host, cont = parts[0], parts[1]
     mode = parts[2] if len(parts) > 2 else "rw"
     if host.startswith("."):
-        host = os.path.abspath(os.path.join(root_dir(), host))
+        host = os.path.abspath(os.path.join(project_host_dir, host))
     return (host, {"bind": cont, "mode": mode})
+
+
+def _host_project_dir(client, me) -> str:
+    """Host path of the compose project (source of our own /app mount)."""
+    try:
+        me.reload()
+        for m in me.attrs.get("Mounts", []):
+            if m.get("Destination") == "/app":
+                src = m.get("Source", "")
+                if src and src != "/app":
+                    return src
+    except Exception as e:
+        _rlog(f"project dir detect: {e}")
+    return root_dir()
 
 
 # ------------------------------------------------- rebuild --------------
@@ -231,11 +249,23 @@ def _rebuild_container() -> None:
                     _rlog("BUILD ERROR: " + str(chunk["error"])[:500])
                     return
         cfg = _load_service(root)
+        try:
+            me_early = client.containers.get(socket.gethostname())
+        except Exception:
+            me_early = None
+        proj = _host_project_dir(client, me_early) if me_early else root
         binds = {}
         for spec in cfg.get("volumes", []):
-            b = _split_bind(spec)
+            b = _split_bind(spec, proj)
             if isinstance(b, tuple):
                 binds[b[0]] = b[1]
+        _rlog(f"binds: {sorted(binds)}")
+        # Fail fast: if project-dir detection fell back to the container's own
+        # /app, relative binds would point inside the image and the sibling
+        # would boot-loop (run.py missing). Never swap on a bad bind.
+        if proj in ("", "/app"):
+            _rlog("ABORT: could not resolve host project dir for relative binds")
+            return
         # stale sibling from a previous attempt
         try:
             stale = client.containers.get(new_name)
@@ -244,7 +274,7 @@ def _rebuild_container() -> None:
         except Exception:
             pass
         _rlog("creating sibling container (no ports — old self holds 5000)")
-        client.containers.run(
+        sibling = client.containers.run(
             IMAGE_TAG,
             name=new_name,
             detach=True,
@@ -252,6 +282,21 @@ def _rebuild_container() -> None:
             volumes=binds,
             restart_policy={"Name": "unless-stopped"},
         )
+        # Join the old container's networks (e.g. sdcodex) so the sibling
+        # lands on the same fabric before the swap.
+        try:
+            me_nets = client.containers.get(socket.gethostname())
+            me_nets.reload()
+            for net_name in (me_nets.attrs.get("NetworkSettings", {}).get("Networks", {}) or {}):
+                if net_name == "bridge":
+                    continue
+                try:
+                    client.networks.get(net_name).connect(sibling)
+                    _rlog(f"sibling joined network {net_name}")
+                except Exception as e:
+                    _rlog(f"network {net_name}: {e}")
+        except Exception as e:
+            _rlog(f"network copy: {e}")
         _rlog("sibling started, waiting for health")
         if not _wait_healthy(client, new_name):
             _rlog("sibling never healthy — keeping current container")

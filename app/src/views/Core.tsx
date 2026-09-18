@@ -673,9 +673,18 @@ export function DownloadFloat({ go }: { go: (v: 'queue') => void }) {
   );
 }
 
+/** Small indeterminate progress bar for git operations (replaces raw output). */
+function ProgressBar() {
+  return (
+    <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+      <div className="h-full w-1/3 animate-[slide_1.2s_ease-in-out_infinite] rounded-full bg-gradient-to-r from-primary to-secondary" />
+      <style>{'@keyframes slide { 0% { margin-left: -33%; } 100% { margin-left: 100%; } }'}</style>
+    </div>
+  );
+}
+
 export function Plugins() {
-  const [q, setQ] = useState('');
-  const [filter, setFilter] = useState<'all' | 'official'>('all');
+  const [q, setQ] = useState('');  const [filter, setFilter] = useState<'all' | 'official'>('all');
   const [catalog, setCatalog] = useState<HubCatalog | null>(null);
   const [live, setLive] = useState(false);
   const [installed, setInstalled] = useState<
@@ -744,13 +753,22 @@ export function Plugins() {
     setRebuildLog([]);
     setShowRebuildLog(true);
     setUpdateMsg(null);
+    // Version-aware reload: the OLD container keeps answering health until
+    // the swap, so only reload once a DIFFERENT version responds.
+    let preVersion = '';
     try {
+      const { apiGet } = await import('../lib/backend');
+      try {
+        const h = await apiGet<{ version?: string }>('/health');
+        preVersion = h.version ?? '';
+      } catch {
+        /* ignore */
+      }
       const { apiPost, resetBackendProbe } = await import('../lib/backend');
       const r = await apiPost<{ ok: boolean; message?: string }>('/system/rebuild', {});
       if (!r.ok) throw new Error(r.message ?? 'Rebuild refused.');
       setUpdateMsg(r.message ?? 'Rebuilding…');
       // Stream the rebuild log into the floating window while polling health.
-      const { apiGet } = await import('../lib/backend');
       for (let i = 0; i < 180; i++) {
         await new Promise((res) => setTimeout(res, 10000));
         try {
@@ -763,8 +781,15 @@ export function Plugins() {
           resetBackendProbe();
           const h = await fetch('/api/health', { cache: 'no-store' });
           if (h.ok) {
-            window.location.reload();
-            return;
+            const j = (await h.json().catch(() => ({}))) as { version?: string };
+            if (j.version && preVersion && j.version !== preVersion) {
+              window.location.reload();
+              return;
+            }
+            if (!preVersion && i > 2) {
+              window.location.reload();
+              return;
+            }
           }
         } catch {
           /* still down */
@@ -845,12 +870,15 @@ export function Plugins() {
     try {
       const api = await import('../lib/backend');
       if (!(await api.backendAvailable())) throw new Error('Backend unreachable — start it to install.');
-      const done = await fn(api);
-      setMsg((m) => ({ ...m, [id]: done }));
+      await fn(api);
+      // Git chatter stays out of the UI — a short confirmation instead.
+      setMsg((m) => ({ ...m, [id]: 'Done.' }));
       window.dispatchEvent(new Event('sdcodex:plugins-changed'));
       await refreshInstalled();
+      await check();
     } catch (e) {
-      setMsg((m) => ({ ...m, [id]: e instanceof Error ? e.message : 'Failed' }));
+      const text = e instanceof Error ? e.message : 'Failed';
+      setMsg((m) => ({ ...m, [id]: text.length > 160 ? text.slice(0, 160) + '…' : text }));
     } finally {
       setBusy(null);
     }
@@ -939,9 +967,15 @@ export function Plugins() {
               v{updates.core.local_version || '?'} → v{updates.core.remote_version || '?'}
             </span>
             {updates.core.has_update ? (
-              <PrimaryButton disabled={applying} onClick={() => void applyCore()}>
-                {applying ? 'Updating…' : 'Update core'}
-              </PrimaryButton>
+              applying ? (
+                <div className="min-w-40 flex-1">
+                  <ProgressBar />
+                </div>
+              ) : (
+                <PrimaryButton disabled={applying} onClick={() => void applyCore()}>
+                  Update core
+                </PrimaryButton>
+              )
             ) : (
               <span className="text-status-active">up to date</span>
             )}
@@ -1148,6 +1182,11 @@ export function Plugins() {
               )}
               {msg[p.id] && (
                 <p className="mt-1 font-mono text-[10px] text-ink-faint">{msg[p.id]}</p>
+              )}
+              {busy === p.id && (
+                <div className="mt-2">
+                  <ProgressBar />
+                </div>
               )}
             </article>
           );
