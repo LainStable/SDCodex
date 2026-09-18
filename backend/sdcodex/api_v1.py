@@ -828,13 +828,13 @@ def plugin_page(plugin_id: str, name: str):
 
 @api_v1.get("/plugins/<plugin_id>/settings/<tab>")
 def plugin_settings_page(plugin_id: str, tab: str):
-    """Serve a plugin's settings tab (pages/settings-<tab>.html)."""
+    """Serve a plugin's settings tab (pages/settings-<tab>.html, else pages/<tab>.html)."""
     from flask import Response
 
     _, err = _require_user()
     if err:
         return err
-    cand = _plugin_page_file(plugin_id, f"settings-{tab}")
+    cand = _plugin_page_file(plugin_id, f"settings-{tab}") or _plugin_page_file(plugin_id, tab)
     if not cand:
         html = _MISSING_PAGE.format(
             title=f"{plugin_id} settings / {tab}",
