@@ -693,10 +693,13 @@ export function Plugins() {
   const [updates, setUpdates] = useState<{
     core?: { has_update?: boolean; local_version?: string; remote_version?: string };
     plugins?: Array<{ id: string; name: string }>;
+    rebuild_required?: boolean;
+    rebuild?: { can_rebuild?: boolean; mode?: string };
     total?: number;
   } | null>(null);
   const [checking, setChecking] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
   const [tokenSaved, setTokenSaved] = useState<boolean | null>(null);
   const [tokenInput, setTokenInput] = useState('');
@@ -731,6 +734,36 @@ export function Plugins() {
       setUpdateMsg(e instanceof Error ? e.message : 'Update failed');
     } finally {
       setApplying(false);
+    }
+  };
+
+  const rebuild = async () => {
+    setRebuilding(true);
+    setUpdateMsg(null);
+    try {
+      const { apiPost, resetBackendProbe } = await import('../lib/backend');
+      const r = await apiPost<{ ok: boolean; message?: string }>('/system/rebuild', {});
+      if (!r.ok) throw new Error(r.message ?? 'Rebuild refused.');
+      setUpdateMsg(`${r.message ?? 'Rebuilding…'} Waiting for the backend to come back…`);
+      // Poll health until the new container/process answers, then reload.
+      for (let i = 0; i < 180; i++) {
+        await new Promise((res) => setTimeout(res, 10000));
+        try {
+          resetBackendProbe();
+          const h = await fetch('/api/health', { cache: 'no-store' });
+          if (h.ok) {
+            window.location.reload();
+            return;
+          }
+        } catch {
+          /* still down */
+        }
+      }
+      setUpdateMsg('Still waiting — reload manually once the container is back.');
+    } catch (e) {
+      setUpdateMsg(e instanceof Error ? e.message : 'Rebuild failed');
+    } finally {
+      setRebuilding(false);
     }
   };
 
@@ -906,6 +939,24 @@ export function Plugins() {
           <div className="mt-2 font-mono text-[11px] text-ink-muted">
             Plugin updates: {(updates?.plugins ?? []).map((p) => p.name ?? p.id).join(', ')} — use
             the Update button on each card below.
+          </div>
+        )}
+        {updates?.rebuild_required && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-status-warning/30 bg-status-warning/[0.07] px-2 py-1.5 font-mono text-[11px]">
+            <span className="text-[#fcd34d]">Rebuild required</span>
+            <span className="text-ink-faint">
+              {updates.rebuild?.mode === 'docker'
+                ? 'new image + container replace'
+                : updates.rebuild?.mode === 'baremetal'
+                  ? 'backend restart'
+                  : 'mount the docker socket to enable self-rebuild'}
+            </span>
+            <PrimaryButton
+              disabled={rebuilding || updates.rebuild?.can_rebuild === false}
+              onClick={() => void rebuild()}
+            >
+              {rebuilding ? 'Rebuilding…' : 'Rebuild now'}
+            </PrimaryButton>
           </div>
         )}
         {updateMsg && <p className="mt-2 font-mono text-[11px] text-ink-muted">{updateMsg}</p>}

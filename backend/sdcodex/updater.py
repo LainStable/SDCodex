@@ -152,6 +152,9 @@ def update_core() -> tuple[bool, str]:
         r = _git(["pull", "--ff-only", remote], cwd=root)
         if r.returncode != 0:
             return False, (r.stderr or r.stdout).strip()[:500]
+        from . import rebuilder as rebuilder_mod
+
+        rebuilder_mod.mark_rebuild("core update")
         return True, (r.stdout or "Already up to date.").strip()[:500]
     except Exception as e:
         return False, str(e)
@@ -412,6 +415,9 @@ def install_plugin(repo_url: str, volume_paths: dict | None = None) -> tuple[boo
         vv = dict(v)
         vv["host_path"] = volume_values.get(vv["env_var"], vv.get("host_path", ""))
         needed.append(vv)
+    from . import rebuilder as rebuilder_mod
+
+    rebuilder_mod.mark_rebuild(f"install {plugin_id}")
     return True, {"id": plugin_id, "name": manifest.get("name", plugin_id), "volumes": needed}
 
 
@@ -426,6 +432,9 @@ def uninstall_plugin(plugin_id: str) -> tuple[bool, str]:
             [v.get("env_var") for v in manifest.get("volumes", []) if isinstance(v, dict) and v.get("env_var")]
         )
         shutil.rmtree(target)
+        from . import rebuilder as rebuilder_mod
+
+        rebuilder_mod.mark_rebuild(f"uninstall {plugin_id}")
     except Exception as e:
         return False, str(e)
     # Drop its requirements block.

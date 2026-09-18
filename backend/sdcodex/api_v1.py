@@ -550,15 +550,21 @@ def updates_check():
     _, err = _admin_or_401()
     if err:
         return err
+    from . import rebuilder as rebuilder_mod
     from . import updater as updater_mod
 
     core = updater_mod.check_core()
     plugin_updates = updater_mod.check_plugin_updates()
+    rebuild_required = rebuilder_mod.needs_rebuild()
     return jsonify(
         {
             "core": core,
             "plugins": plugin_updates,
-            "total": (1 if core.get("has_update") else 0) + len(plugin_updates),
+            "rebuild_required": rebuild_required,
+            "rebuild": rebuilder_mod.rebuild_capability(),
+            "total": (1 if core.get("has_update") else 0)
+            + len(plugin_updates)
+            + (1 if rebuild_required else 0),
         }
     )
 
@@ -571,6 +577,20 @@ def updates_core_apply():
     from . import updater as updater_mod
 
     ok, msg = updater_mod.update_core()
+    return jsonify({"ok": ok, "message": msg}), (200 if ok else 409)
+
+
+@api_v1.post("/system/rebuild")
+def system_rebuild():
+    """Pull-triggered rebuild: image build + container replace (Docker) or
+    backend restart (bare metal). Runs in the background; the frontend polls
+    health and reloads."""
+    _, err = _admin_or_401()
+    if err:
+        return err
+    from . import rebuilder as rebuilder_mod
+
+    ok, msg = rebuilder_mod.start_rebuild()
     return jsonify({"ok": ok, "message": msg}), (200 if ok else 409)
 
 
@@ -719,6 +739,9 @@ def plugin_volumes_save(plugin_id: str):
         if val:
             resolved[v["env_var"]] = val
     updater_mod.apply_volume_config({"id": mf.get("id", plugin_id), "volumes": mf.get("volumes", [])}, resolved)
+    from . import rebuilder as rebuilder_mod
+
+    rebuilder_mod.mark_rebuild(f"volumes {mf.get('id', plugin_id)}")
     return jsonify({"ok": True, "volumes": resolved})
 
 
