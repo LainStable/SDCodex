@@ -700,6 +700,8 @@ export function Plugins() {
   const [checking, setChecking] = useState(false);
   const [applying, setApplying] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildLog, setRebuildLog] = useState<string[]>([]);
+  const [showRebuildLog, setShowRebuildLog] = useState(false);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
   const [tokenSaved, setTokenSaved] = useState<boolean | null>(null);
   const [tokenInput, setTokenInput] = useState('');
@@ -739,15 +741,24 @@ export function Plugins() {
 
   const rebuild = async () => {
     setRebuilding(true);
+    setRebuildLog([]);
+    setShowRebuildLog(true);
     setUpdateMsg(null);
     try {
       const { apiPost, resetBackendProbe } = await import('../lib/backend');
       const r = await apiPost<{ ok: boolean; message?: string }>('/system/rebuild', {});
       if (!r.ok) throw new Error(r.message ?? 'Rebuild refused.');
-      setUpdateMsg(`${r.message ?? 'Rebuilding…'} Waiting for the backend to come back…`);
-      // Poll health until the new container/process answers, then reload.
+      setUpdateMsg(r.message ?? 'Rebuilding…');
+      // Stream the rebuild log into the floating window while polling health.
+      const { apiGet } = await import('../lib/backend');
       for (let i = 0; i < 180; i++) {
         await new Promise((res) => setTimeout(res, 10000));
+        try {
+          const lj = await apiGet<{ lines?: string[] }>('/system/rebuild/log');
+          if (lj.lines) setRebuildLog(lj.lines);
+        } catch {
+          /* backend going down — keep last lines */
+        }
         try {
           resetBackendProbe();
           const h = await fetch('/api/health', { cache: 'no-store' });
@@ -977,6 +988,38 @@ export function Plugins() {
           {tokenMsg && <span className="font-mono text-[10px] text-ink-faint">{tokenMsg}</span>}
         </div>
       </div>
+      {showRebuildLog && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="glass-l2 edge-shimmer w-full max-w-2xl rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-display text-sm font-semibold">
+                Rebuilding container {rebuilding ? '…' : '(done)'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowRebuildLog(false)}
+                className="font-mono text-[11px] text-ink-faint hover:text-white"
+              >
+                Hide
+              </button>
+            </div>
+            <div className="mt-3 h-72 overflow-y-auto rounded-lg bg-[#070a10] p-3 font-mono text-[11px] leading-relaxed">
+              {rebuildLog.length === 0 ? (
+                <p className="text-ink-faint">waiting for build output…</p>
+              ) : (
+                rebuildLog.map((l, i) => (
+                  <div key={i} className="text-ink-muted">
+                    {l}
+                  </div>
+                ))
+              )}
+            </div>
+            <p className="mt-2 font-mono text-[10px] text-ink-faint">
+              The page reloads automatically once the new container answers health checks.
+            </p>
+          </div>
+        </div>
+      )}
       <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         {shown.map((p) => {
           const inst = installed[p.id];

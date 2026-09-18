@@ -243,15 +243,14 @@ def _rebuild_container() -> None:
             _rlog("removed stale sibling")
         except Exception:
             pass
-        _rlog("creating sibling container")
+        _rlog("creating sibling container (no ports — old self holds 5000)")
         client.containers.run(
             IMAGE_TAG,
             name=new_name,
             detach=True,
             environment=cfg.get("environment", {}),
-            ports=_port_map(cfg.get("ports", [])),
             volumes=binds,
-            restart_policy={"Name": cfg.get("restart", "unless-stopped")},
+            restart_policy={"Name": "unless-stopped"},
         )
         _rlog("sibling started, waiting for health")
         if not _wait_healthy(client, new_name):
@@ -264,32 +263,69 @@ def _rebuild_container() -> None:
             return
         me_id = socket.gethostname()
         me = client.containers.get(me_id)
-        _rlog("sibling healthy — swapping")
+        cname = cfg.get("container_name", "sdcodex")
+        # The sibling starts WITHOUT published ports (5000 is held by us);
+        # health is checked via exec. Only after it proves healthy do we
+        # free the port by stopping ourselves, then start it.
+        _rlog("starting sibling (no published ports yet)")
+        try:
+            new = client.containers.get(new_name)
+            new.start()
+        except Exception as e:
+            _rlog(f"sibling start failed — keeping current container: {e}")
+            return
+        _rlog("sibling started, waiting for health")
+        if not _wait_healthy(client, new_name):
+            _rlog("sibling never healthy — keeping current container")
+            try:
+                bad = client.containers.get(new_name)
+                bad.remove(force=True)
+            except Exception:
+                pass
+            return
+        _rlog("sibling healthy — stopping old self to free the port")
+        try:
+            me.stop(timeout=30)
+        except Exception as e:
+            _rlog(f"stop old self failed: {e}")
+            return
+        _rlog("starting sibling with the port")
+        try:
+            new.stop(timeout=10)
+            new.remove()
+        except Exception as e:
+            _rlog(f"sibling teardown failed: {e}")
+        try:
+            final = client.containers.run(
+                IMAGE_TAG,
+                name=new_name,
+                detach=True,
+                environment=cfg.get("environment", {}),
+                ports=_port_map(cfg.get("ports", [])),
+                volumes=binds,
+                restart_policy={"Name": cfg.get("restart", "unless-stopped")},
+            )
+        except Exception as e:
+            _rlog(f"final start failed — RESTARTING OLD SELF: {e}")
+            try:
+                me.start()
+            except Exception as e2:
+                _rlog(f"old self restart also failed: {e2}")
+            return
         try:
             me.rename("sdcodex-old")
         except Exception as e:
             _rlog(f"rename old failed: {e}")
-            return
         try:
-            new = client.containers.get(new_name)
-            new.rename(cfg.get("container_name", "sdcodex"))
+            final.rename(cname)
         except Exception as e:
-            _rlog(f"rename new failed: {e}; restoring old name")
-            try:
-                me.rename(cfg.get("container_name", "sdcodex"))
-            except Exception:
-                pass
-            return
-        clear_rebuild()
-        _rlog("swap done — stopping old self")
-        try:
-            me.stop(timeout=30)
-        except Exception as e:
-            _rlog(f"stop old self: {e}")
+            _rlog(f"rename new failed: {e}")
         try:
             me.remove()
         except Exception:
             pass
+        clear_rebuild()
+        _rlog("swap done")
     except Exception:
         logger.error("Rebuild failed", exc_info=True)
         try:

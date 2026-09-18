@@ -594,6 +594,22 @@ def system_rebuild():
     return jsonify({"ok": ok, "message": msg}), (200 if ok else 409)
 
 
+@api_v1.get("/system/rebuild/log")
+def system_rebuild_log():
+    """Tail the rebuild log for the floating progress window."""
+    _, err = _admin_or_401()
+    if err:
+        return err
+    from . import rebuilder as rebuilder_mod
+
+    try:
+        with open(os.path.join(rebuilder_mod.root_dir(), ".rebuild.log"), encoding="utf-8") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        lines = []
+    return jsonify({"lines": [l.rstrip("\n") for l in lines[-120:]]})
+
+
 @api_v1.get("/plugins")
 def plugins_list():
     user, err = _require_user()
