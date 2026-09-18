@@ -217,17 +217,26 @@ def get_session_token_from_request() -> str | None:
 def validate_session(token: str | None) -> User | None:
     if not token:
         return None
-    sess = db.session.get(Session, token)
-    if not sess:
+    try:
+        sess = db.session.get(Session, token)
+        if not sess:
+            return None
+        if sess.expires_at < datetime.utcnow():
+            db.session.delete(sess)
+            db.session.commit()
+            return None
+        user = db.session.get(User, sess.user_id)
+        if not user or not user.is_active:
+            return None
+        return user
+    except Exception as e:
+        logger.warning("Session validation DB error: %s", e)
+        try:
+            db.session.rollback()
+            db.session.remove()
+        except Exception:
+            pass
         return None
-    if sess.expires_at < datetime.utcnow():
-        db.session.delete(sess)
-        db.session.commit()
-        return None
-    user = db.session.get(User, sess.user_id)
-    if not user or not user.is_active:
-        return None
-    return user
 
 
 def destroy_session(token: str | None) -> None:

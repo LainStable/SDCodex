@@ -41,9 +41,11 @@ class DownloadManager:
 
             with self.app.app_context():
                 row = db.session.get(Setting, "max_parallel_downloads")
-                return max(1, min(8, int(row.value or 1)))
+                return max(1, min(8, int(row.value or 1))) if row else 1
         except Exception:
             return 1
+        finally:
+            db.session.remove()
 
     def start(self):
         if not self.running:
@@ -96,123 +98,46 @@ class DownloadManager:
 
             try:
                 with self.app.app_context():
-                    only = task.get("model_types") or None
-                    dir_rows = {
-                        s.key: (s.value or "").strip()
-                        for s in Setting.query.all()
-                        if s.key.startswith("dir_") and (s.value or "").strip()
-                    }
-                    directories = []
-                    for m_type in MODEL_TYPES:
-                        if only and m_type not in only:
-                            continue
-                        paths = [dir_rows[f"dir_{m_type}"]] if f"dir_{m_type}" in dir_rows else []
-                        extra = sorted(
-                            v for k, v in dir_rows.items() if k.startswith(f"dir_{m_type}__")
+                    try:
+                        only = task.get("model_types") or None
+                        dir_rows = {
+                            s.key: (s.value or "").strip()
+                            for s in Setting.query.all()
+                            if s.key.startswith("dir_") and (s.value or "").strip()
+                        }
+                        directories = []
+                        for m_type in MODEL_TYPES:
+                            if only and m_type not in only:
+                                continue
+                            paths = [dir_rows[f"dir_{m_type}"]] if f"dir_{m_type}" in dir_rows else []
+                            extra = sorted(
+                                v for k, v in dir_rows.items() if k.startswith(f"dir_{m_type}__")
+                            )
+                            for path in paths + extra:
+                                directories.append((path, m_type))
+                        total_updated = 0
+                        all_found_ids = set()
+                        for directory, m_type in directories:
+                            task['message'] = f"Scanning {m_type} directory..."
+                            updated, msg, found_ids = scan_directory(
+                                directory, m_type, task['api_key'], progress_callback
+                            )
+                            total_updated += updated
+                            all_found_ids.update(found_ids)
+                        removed_count = 0
+                        for download in Download.query.all():
+                            if (download.model_id, download.version_id) not in all_found_ids:
+                                db.session.delete(download)
+                                removed_count += 1
+                        if removed_count > 0:
+                            db.session.commit()
+                        success = True
+                        message = (
+                            f"Scan complete. Updated {total_updated} models. "
+                            f"Removed {removed_count} missing models."
                         )
-                        for path in paths + extra:
-                            directories.append((path, m_type))
-                    total_updated = 0
-                    all_found_ids = set()
-                    for directory, m_type in directories:
-                        task['message'] = f"Scanning {m_type} directory..."
-                        updated, msg, found_ids = scan_directory(
-                            directory, m_type, task['api_key'], progress_callback
-                        )
-                        total_updated += updated
-                        all_found_ids.update(found_ids)
-                    removed_count = 0
-                    for download in Download.query.all():
-                        if (download.model_id, download.version_id) not in all_found_ids:
-                            db.session.delete(download)
-                            removed_count += 1
-                    if removed_count > 0:
-                        db.session.commit()
-                    task['status'] = 'completed'
-                    task['message'] = (
-                        f"Scan complete. Updated {total_updated} models. "
-                        f"Removed {removed_count} missing models."
-                    )
-                    task['progress'] = 100
-            except DownloadManager._Cancelled:
-                print("Scan task cancelled")
-                task['status'] = 'cancelled'
-                task['message'] = 'Cancelled by user'
-                task['progress'] = 0
-            except Exception as e:
-                print(f"Scan worker error: {e}")
-                task['status'] = 'failed'
-                task['message'] = str(e)
-            self.history.append(task)
-            with self.lock:
-                if task in self.active_tasks:
-                    self.active_tasks.remove(task)
-            if self.current_task is task:
-                self.current_task = None
-            self.scan_queue.task_done()
-
-    def _scan_worker(self):
-        from sdcodex.models import Download, Setting
-        from sdcodex.scanner import scan_directory
-
-        print("DownloadManager scan worker started")
-        while True:
-            try:
-                task = self.scan_queue.get(timeout=5)
-            except queue.Empty:
-                continue
-            print("Scan worker picked up task")
-            self.current_task = task
-            with self.lock:
-                self.active_tasks.append(task)
-            task['status'] = 'running'
-            task['message'] = 'Starting scan...'
-
-            def progress_callback(percentage, msg=None):
-                if task.get('cancel'):
-                    raise DownloadManager._Cancelled()
-                task['progress'] = percentage
-                task['message'] = msg or f"Processing... {percentage}%"
-
-            try:
-                with self.app.app_context():
-                    only = task.get("model_types") or None
-                    dir_rows = {
-                        s.key: (s.value or "").strip()
-                        for s in Setting.query.all()
-                        if s.key.startswith("dir_") and (s.value or "").strip()
-                    }
-                    directories = []
-                    for m_type in MODEL_TYPES:
-                        if only and m_type not in only:
-                            continue
-                        paths = [dir_rows[f"dir_{m_type}"]] if f"dir_{m_type}" in dir_rows else []
-                        extra = sorted(
-                            v for k, v in dir_rows.items() if k.startswith(f"dir_{m_type}__")
-                        )
-                        for path in paths + extra:
-                            directories.append((path, m_type))
-                    total_updated = 0
-                    all_found_ids = set()
-                    for directory, m_type in directories:
-                        task['message'] = f"Scanning {m_type} directory..."
-                        updated, msg, found_ids = scan_directory(
-                            directory, m_type, task['api_key'], progress_callback
-                        )
-                        total_updated += updated
-                        all_found_ids.update(found_ids)
-                    removed_count = 0
-                    for download in Download.query.all():
-                        if (download.model_id, download.version_id) not in all_found_ids:
-                            db.session.delete(download)
-                            removed_count += 1
-                    if removed_count > 0:
-                        db.session.commit()
-                    success = True
-                    message = (
-                        f"Scan complete. Updated {total_updated} models. "
-                        f"Removed {removed_count} missing models."
-                    )
+                    finally:
+                        db.session.remove()
                 print(f"Scan finished: {message}")
                 if task.get('cancel'):
                     task['status'] = 'cancelled'
@@ -231,6 +156,8 @@ class DownloadManager:
                 print(f"Scan worker error: {e}")
                 task['status'] = 'failed'
                 task['message'] = str(e)
+            finally:
+                db.session.remove()
             self.history.append(task)
             with self.lock:
                 if task in self.active_tasks:
@@ -347,80 +274,63 @@ class DownloadManager:
 
                 # Use app context for DB access
                 with self.app.app_context():
-                    print("Worker entering app context")
-                    if task.get('type') == 'scan':
-                        from sdcodex.scanner import scan_directory
-                        # Scan all configured directories? Or specific one?
-                        # Implementation plan said iterate over all.
-                        # Let's assume the task contains the list of directories or we fetch them here.
-                        # Better to fetch here to be fresh.
-                        from sdcodex.models import Setting
+                    try:
+                        print("Worker entering app context")
+                        if task.get('type') == 'scan':
+                            from sdcodex.scanner import scan_directory
+                            from sdcodex.models import Setting
 
-                        total_updated = 0
-                        directories = []
-                        only = task.get("model_types") or None
-                        # All dir settings, so one type can map several folders:
-                        # dir_<Type>, dir_<Type>__1, dir_<Type>__2, ...
-                        dir_rows = {
-                            s.key: (s.value or "").strip()
-                            for s in Setting.query.all()
-                            if s.key.startswith("dir_") and (s.value or "").strip()
-                        }
-                        for m_type in MODEL_TYPES:
-                            if only and m_type not in only:
-                                continue
-                            paths = [dir_rows[f"dir_{m_type}"]] if f"dir_{m_type}" in dir_rows else []
-                            extra = sorted(
-                                v for k, v in dir_rows.items() if k.startswith(f"dir_{m_type}__")
+                            total_updated = 0
+                            directories = []
+                            only = task.get("model_types") or None
+                            dir_rows = {
+                                s.key: (s.value or "").strip()
+                                for s in Setting.query.all()
+                                if s.key.startswith("dir_") and (s.value or "").strip()
+                            }
+                            for m_type in MODEL_TYPES:
+                                if only and m_type not in only:
+                                    continue
+                                paths = [dir_rows[f"dir_{m_type}"]] if f"dir_{m_type}" in dir_rows else []
+                                extra = sorted(
+                                    v for k, v in dir_rows.items() if k.startswith(f"dir_{m_type}__")
+                                )
+                                for path in paths + extra:
+                                    directories.append((path, m_type))
+
+                            total_dirs = len(directories)
+                            all_found_ids = set()
+
+                            for i, (directory, m_type) in enumerate(directories):
+                                task['message'] = f"Scanning {m_type} directory..."
+                                updated, msg, found_ids = scan_directory(directory, m_type, task['api_key'], progress_callback)
+                                total_updated += updated
+                                all_found_ids.update(found_ids)
+
+                            from sdcodex.models import Download
+                            all_downloads = Download.query.all()
+                            removed_count = 0
+                            for download in all_downloads:
+                                if (download.model_id, download.version_id) not in all_found_ids:
+                                    db.session.delete(download)
+                                    removed_count += 1
+
+                            if removed_count > 0:
+                                db.session.commit()
+
+                            success = True
+                            message = f"Scan complete. Updated {total_updated} models. Removed {removed_count} missing models."
+                        else:
+                            success, message = download_model(
+                                task['model_id'],
+                                task['version_id'],
+                                task['api_key'],
+                                progress_callback,
+                                is_cancelled=lambda: bool(task.get('cancel')),
                             )
-                            for path in paths + extra:
-                                directories.append((path, m_type))
-                        
-                        # Fallback default dirs
-                        # Actually, if not set, we might not want to scan random places.
-                        # But we have defaults in downloader.
-                        # Let's stick to configured ones for now, or defaults if we use them.
-                        
-                        if not directories:
-                             # Maybe add defaults?
-                             pass
-
-                        count = 0
-                        total_dirs = len(directories)
-                        all_found_ids = set()
-                        
-                        for i, (directory, m_type) in enumerate(directories):
-                            task['message'] = f"Scanning {m_type} directory..."
-                            updated, msg, found_ids = scan_directory(directory, m_type, task['api_key'], progress_callback)
-                            total_updated += updated
-                            all_found_ids.update(found_ids)
-                        
-                        # Cleanup missing models
-                        from sdcodex.models import Download
-                        all_downloads = Download.query.all()
-                        removed_count = 0
-                        for download in all_downloads:
-                            if (download.model_id, download.version_id) not in all_found_ids:
-                                db.session.delete(download)
-                                removed_count += 1
-                        
-                        if removed_count > 0:
-                            db.session.commit()
-                        
-                        success = True
-                        message = f"Scan complete. Updated {total_updated} models. Removed {removed_count} missing models."
-                        
-                    else:
-                        # Normal download
-                        success, message = download_model(
-                            task['model_id'],
-                            task['version_id'],
-                            task['api_key'],
-                            progress_callback,
-                            is_cancelled=lambda: bool(task.get('cancel')),
-                        )
-                    
-                    print(f"Task finished: {success} - {message}")
+                        print(f"Task finished: {success} - {message}")
+                    finally:
+                        db.session.remove()
 
                 if task.get('cancel'):
                     task['status'] = 'cancelled'

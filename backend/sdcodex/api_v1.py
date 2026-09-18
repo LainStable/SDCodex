@@ -839,7 +839,10 @@ def plugin_page(plugin_id: str, name: str):
         )
         return Response(html, content_type="text/html")
     with open(cand, encoding="utf-8") as f:
-        return Response(f.read(), content_type="text/html")
+        resp = Response(f.read(), content_type="text/html")
+    # Plugin pages iterate fast — never let browsers cache them.
+    resp.headers["Cache-Control"] = "no-store, max-age=0"
+    return resp
 
 
 @api_v1.get("/plugins/<plugin_id>/settings/<tab>")
@@ -859,7 +862,9 @@ def plugin_settings_page(plugin_id: str, tab: str):
         )
         return Response(html, content_type="text/html")
     with open(cand, encoding="utf-8") as f:
-        return Response(f.read(), content_type="text/html")
+        resp = Response(f.read(), content_type="text/html")
+    resp.headers["Cache-Control"] = "no-store, max-age=0"
+    return resp
 
 
 # ------------------------------------------------------- civitai proxy ---
