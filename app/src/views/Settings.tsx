@@ -54,7 +54,7 @@ import { clearScanLog, getScanLog, pushScanLog, subscribeScanLog } from '../lib/
 const CORE_TABS: { id: string; label: string }[] = [
   { id: 'dirs', label: 'Model dirs' },
   { id: 'api', label: 'API key' },
-  { id: 'auth', label: 'Users & SSO' },
+  { id: 'auth', label: 'Profile' },
 ];
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {  return (
@@ -1104,19 +1104,11 @@ function Auth({
           )}
         </div>
       </div>
-
-      {profile.isAdmin ? (
-        <OidcManager />
-      ) : (
-        <p className="mt-4 border-t border-white/[0.06] pt-3 font-mono text-[11px] text-ink-faint">
-          SSO provider settings are visible to administrators only.
-        </p>
-      )}
     </div>
   );
 }
 
-function System() {
+function System({ isAdmin }: { isAdmin: boolean }) {
   return (
     <div className="glass-l1 rounded-lg p-4">
       <h2 className="font-display text-base font-semibold">System</h2>
@@ -1140,6 +1132,18 @@ function System() {
         Core and plugins update via git pull (bare-metal and Docker alike). Update checks live on the
         Plugins tab.
       </p>
+      <div className="mt-4 border-t border-white/[0.06] pt-3">
+        <h3 className="font-display text-sm font-semibold">Single sign-on</h3>
+        {isAdmin ? (
+          <div className="mt-2">
+            <OidcManager />
+          </div>
+        ) : (
+          <p className="mt-2 font-mono text-[11px] text-ink-faint">
+            SSO provider settings are visible to administrators only.
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -1224,7 +1228,7 @@ export default function Settings({
         {tab === 'plugins' && <Plugins />}
         {tab === 'system' && (
           <>
-            <System />
+            <System isAdmin={profile?.isAdmin ?? false} />
             <ScanLogs />
           </>
         )}
