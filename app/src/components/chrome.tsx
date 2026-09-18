@@ -181,8 +181,9 @@ export function UserMenu({
   // left-to-bottom, i.e. 180° (west) → 90° (south) in screen coords.
   // Mirrors OldCode base.html: angle = start - (span * i) / (n - 1).
   const actions = [
-    { id: 'light', label: 'Light', icon: '☀', run: () => setTheme('light'), current: theme === 'light' },
-    { id: 'dark', label: 'Dark', icon: '☾', run: () => setTheme('dark'), current: theme === 'dark' },
+    theme === 'dark'
+      ? { id: 'theme', label: 'Light', icon: '☀', run: () => setTheme('light'), current: false }
+      : { id: 'theme', label: 'Dark', icon: '☾', run: () => setTheme('dark'), current: false },
     { id: 'settings', label: 'Settings', icon: '⚙', run: () => go('settings') },
     signedIn
       ? { id: 'signout', label: 'Sign out', icon: '→', run: onSignOut }
