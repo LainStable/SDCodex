@@ -32,6 +32,9 @@ export default function App() {
   const [modal, setModal] = useState<ModalTarget | null>(null);
   const [libKey, setLibKey] = useState(0);
   const [settingsTab, setSettingsTab] = useState('dirs');
+  // Bumped on every programmatic nav to Settings so the badge re-click
+  // remounts the tab (re-running its check) even when already there.
+  const [settingsNonce, setSettingsNonce] = useState(0);
   const [appVersion, setAppVersion] = useState('…');
   const [updates, setUpdates] = useState<UpdateState>({ core: false, plugins: false, checking: false });
   const [updating, setUpdating] = useState(false);
@@ -273,6 +276,7 @@ export default function App() {
 
   const goSettings = (tab: string) => {
     setSettingsTab(tab);
+    setSettingsNonce((n) => n + 1);
     setModal(null);
     setSpace({ kind: 'core' });
     setView('settings');
@@ -436,7 +440,7 @@ export default function App() {
           )}
           {space.kind === 'core' && view === 'settings' && (
             <Settings
-              key={settingsTab}
+              key={`${settingsTab}:${settingsNonce}`}
               initialTab={settingsTab}
               installed={installed}
               profile={profile}

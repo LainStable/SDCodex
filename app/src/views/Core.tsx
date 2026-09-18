@@ -820,6 +820,7 @@ export function Plugins() {
     })();
     void refreshInstalled();
     void refreshTokenStatus();
+    void check();
     return () => {
       on = false;
     };
