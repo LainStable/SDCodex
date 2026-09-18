@@ -29,6 +29,10 @@ app/.env.*
 # Docker runtime (volumes, local overrides — generated, never pushed)
 db/
 models/
+downloads/
+tasks/
+config/
+plugin-requirements.txt
 docker-compose.override.yml
 
 # Logs
@@ -65,3 +69,4 @@ __pycache__/
 
 # Rebuild-required marker (set by plugin install/uninstall/volume changes)
 .rebuild-required
+.rebuild.log

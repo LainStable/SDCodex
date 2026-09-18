@@ -177,50 +177,125 @@ def _docker_client():
     return docker.DockerClient(base_url="unix:///var/run/docker.sock", timeout=1200)
 
 
+def _rlog(msg: str) -> None:
+    line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}"
+    logger.warning("rebuild: %s", msg)
+    try:
+        with open(os.path.join(root_dir(), ".rebuild.log"), "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+
+def _wait_healthy(client, name: str, timeout_s: int = 420) -> bool:
+    """Exec the backend healthcheck inside the new container until 200."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            c = client.containers.get(name)
+            if c.status != "running":
+                c.reload()
+                if c.status != "running":
+                    time.sleep(5)
+                    continue
+            rc, _ = c.exec_run(
+                ["python", "-c",
+                 "import urllib.request as u; u.urlopen('http://127.0.0.1:5000/api/health', timeout=5)"],
+                demux=False,
+            )
+            if rc == 0:
+                return True
+        except Exception as e:
+            _rlog(f"health wait: {e}")
+        time.sleep(10)
+    return False
+
+
 def _rebuild_container() -> None:
-    """Build the image from /app, then self-replace. Runs in a thread."""
+    """Blue-green self-replace. Runs in a thread; progress in .rebuild.log.
+
+    Build the image, start a -new sibling, wait for its healthcheck, then
+    swap names and stop the old self. A failed build/start leaves the running
+    container untouched — it can never strand the app anymore.
+    """
+    new_name = "sdcodex-new"
     try:
         client = _docker_client()
         root = root_dir()
-        logger.warning("Rebuild started (image build from %s)", root)
+        _rlog(f"image build started from {root}")
         for chunk in client.api.build(path=root, dockerfile="Dockerfile", tag=IMAGE_TAG, rm=True, decode=True):
-            if isinstance(chunk, dict) and chunk.get("stream"):
-                logger.info("build: %s", chunk["stream"].strip()[:200])
+            if isinstance(chunk, dict):
+                if chunk.get("stream"):
+                    _rlog("build: " + chunk["stream"].strip()[:160])
+                if chunk.get("error"):
+                    _rlog("BUILD ERROR: " + str(chunk["error"])[:500])
+                    return
         cfg = _load_service(root)
         binds = {}
         for spec in cfg.get("volumes", []):
             b = _split_bind(spec)
             if isinstance(b, tuple):
                 binds[b[0]] = b[1]
-        me_id = socket.gethostname()
+        # stale sibling from a previous attempt
         try:
-            me = client.containers.get(me_id)
+            stale = client.containers.get(new_name)
+            stale.remove(force=True)
+            _rlog("removed stale sibling")
         except Exception:
-            logger.error("Cannot find own container (%s); aborting replace", me_id)
-            return
-        name = cfg.get("container_name", "sdcodex")
-        logger.warning("Recreating container %s", name)
-        try:
-            me.stop(timeout=30)
-        except Exception as e:
-            logger.warning("Stop: %s", e)
-        try:
-            me.remove()
-        except Exception as e:
-            logger.warning("Remove: %s", e)
+            pass
+        _rlog("creating sibling container")
         client.containers.run(
             IMAGE_TAG,
-            name=name,
+            name=new_name,
             detach=True,
             environment=cfg.get("environment", {}),
             ports=_port_map(cfg.get("ports", [])),
             volumes=binds,
             restart_policy={"Name": cfg.get("restart", "unless-stopped")},
         )
+        _rlog("sibling started, waiting for health")
+        if not _wait_healthy(client, new_name):
+            _rlog("sibling never healthy — keeping current container")
+            try:
+                bad = client.containers.get(new_name)
+                bad.remove(force=True)
+            except Exception:
+                pass
+            return
+        me_id = socket.gethostname()
+        me = client.containers.get(me_id)
+        _rlog("sibling healthy — swapping")
+        try:
+            me.rename("sdcodex-old")
+        except Exception as e:
+            _rlog(f"rename old failed: {e}")
+            return
+        try:
+            new = client.containers.get(new_name)
+            new.rename(cfg.get("container_name", "sdcodex"))
+        except Exception as e:
+            _rlog(f"rename new failed: {e}; restoring old name")
+            try:
+                me.rename(cfg.get("container_name", "sdcodex"))
+            except Exception:
+                pass
+            return
         clear_rebuild()
-        logger.warning("Replacement launched — this container exits now")
+        _rlog("swap done — stopping old self")
+        try:
+            me.stop(timeout=30)
+        except Exception as e:
+            _rlog(f"stop old self: {e}")
+        try:
+            me.remove()
+        except Exception:
+            pass
     except Exception:
         logger.error("Rebuild failed", exc_info=True)
+        try:
+            _rlog("rebuild exception — see backend log")
+        except Exception:
+            pass
 
 
 def _port_map(ports: list) -> dict:
