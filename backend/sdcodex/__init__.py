@@ -5,6 +5,8 @@ import os
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 
+from sqlalchemy.pool import NullPool
+
 db = SQLAlchemy()
 
 
@@ -18,10 +20,7 @@ def create_app(db_path: str | None = None) -> Flask:
     )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-        "pool_pre_ping": True,
-        "pool_recycle": 300,
-        "pool_size": 10,
-        "max_overflow": 20,
+        "poolclass": NullPool,
     }
 
     db.init_app(app)
