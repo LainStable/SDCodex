@@ -309,9 +309,9 @@ export function setLastServerAvatar(dataUrl: string): void {
     pull is exactly how avatars get "lost". */
 export async function pushProfile(p: Profile): Promise<boolean> {
   try {
-    const { apiPost, backendAvailable } = await import('./backend');
+    const { apiPut, backendAvailable } = await import('./backend');
     if (!(await backendAvailable())) return false;
-    await apiPost('/profile', {
+    await apiPut('/profile', {
       displayName: p.displayName,
       email: p.email,
       avatar: p.avatar,

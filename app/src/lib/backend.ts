@@ -51,6 +51,21 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {  con
   return res.json() as Promise<T>;
 }
 
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const res = await call(path, { method: 'PUT', body: JSON.stringify(body ?? {}) });
+  if (!res.ok) {
+    let detail = `backend ${res.status}`;
+    try {
+      const j = await res.json();
+      if (j?.error) detail = j.error;
+    } catch {
+      /* keep status */
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<T>;
+}
+
 export async function apiDelete<T>(path: string): Promise<T> {
   if (!(await backendAvailable())) throw new Error('backend unreachable');
   const res = await fetch(`/api${path}`, { method: 'DELETE', credentials: 'include' });
