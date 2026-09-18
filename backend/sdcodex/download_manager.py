@@ -40,12 +40,13 @@ class DownloadManager:
             from sdcodex.models import Setting
 
             with self.app.app_context():
-                row = db.session.get(Setting, "max_parallel_downloads")
-                return max(1, min(8, int(row.value or 1))) if row else 1
+                try:
+                    row = db.session.get(Setting, "max_parallel_downloads")
+                    return max(1, min(8, int(row.value or 1))) if row else 1
+                finally:
+                    db.session.remove()
         except Exception:
             return 1
-        finally:
-            db.session.remove()
 
     def start(self):
         if not self.running:
@@ -156,8 +157,6 @@ class DownloadManager:
                 print(f"Scan worker error: {e}")
                 task['status'] = 'failed'
                 task['message'] = str(e)
-            finally:
-                db.session.remove()
             self.history.append(task)
             with self.lock:
                 if task in self.active_tasks:
