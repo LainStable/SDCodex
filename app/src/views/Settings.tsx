@@ -37,7 +37,6 @@ import {
   hashPassword,
   initials,
   loadProviders,
-  processAvatar,
   pushProfile,
   saveProfile,
   saveProvider,
@@ -49,6 +48,7 @@ import {
   type Profile,
 } from '../lib/auth';
 import { BootstrapCard, Plugins } from './Core';
+import AvatarCrop from '../components/AvatarCrop';
 import { clearScanLog, getScanLog, pushScanLog, subscribeScanLog } from '../lib/scanlog';
 
 const CORE_TABS: { id: string; label: string }[] = [
@@ -872,6 +872,7 @@ function Auth({
   const [editEmail, setEditEmail] = useState(profile?.email ?? '');
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
   const [curPw, setCurPw] = useState('');
   const [newPw, setNewPw] = useState('');
   const [newPw2, setNewPw2] = useState('');
@@ -891,7 +892,11 @@ function Auth({
     onProfile(next);
     setSavedTick(true);
     setTimeout(() => setSavedTick(false), 1500);
-    void pushProfile(next);
+    // Surface sync failure instead of swallowing it: an unpushed avatar
+    // followed by a pull is how profile pictures get "lost".
+    void pushProfile(next).then((ok) => {
+      if (!ok) setAvatarError('Saved locally — server sync failed, will retry automatically.');
+    });
   };
 
   const onAvatarFile = async (file: File | undefined) => {
@@ -900,15 +905,14 @@ function Auth({
       setAvatarError('That file is not an image.');
       return;
     }
-    setAvatarBusy(true);
     setAvatarError(null);
-    try {
-      persist({ ...profile, avatar: await processAvatar(file) });
-    } catch (e) {
-      setAvatarError(e instanceof Error ? e.message : 'Upload failed');
-    } finally {
-      setAvatarBusy(false);
-    }
+    setCropSrc(URL.createObjectURL(file));
+  };
+
+  const closeCrop = () => {
+    if (cropSrc) URL.revokeObjectURL(cropSrc);
+    setCropSrc(null);
+    setAvatarBusy(false);
   };
 
   const changePassword = async () => {
@@ -1003,6 +1007,16 @@ function Auth({
           )}
         </div>
       </div>
+      {cropSrc && (
+        <AvatarCrop
+          src={cropSrc}
+          onCancel={closeCrop}
+          onDone={(dataUrl) => {
+            persist({ ...profile, avatar: dataUrl });
+            closeCrop();
+          }}
+        />
+      )}
 
       <div className="mt-3 grid max-w-xl grid-cols-1 gap-2 sm:grid-cols-2">
         <label className="block">

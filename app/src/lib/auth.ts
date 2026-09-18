@@ -241,7 +241,10 @@ export interface ServerProfile extends NonNullable<ServerAuthState['user']> {
   avatarData?: string;
 }
 
-/** Pull the full server profile (incl. avatar data) and merge over local. */
+/** Pull the full server profile (incl. avatar data) and merge over local.
+    Avatar merge is divergence-safe: the server copy is adopted only when it
+    differs from the last-seen server copy (i.e. changed elsewhere). A local
+    edit whose push failed is kept and re-pushed instead of being clobbered. */
 export async function pullServerProfile(): Promise<Profile | null> {
   try {
     const { apiGet, backendAvailable } = await import('./backend');
@@ -249,6 +252,23 @@ export async function pullServerProfile(): Promise<Profile | null> {
     const u = await apiGet<ServerProfile>('/profile');
     const existing = loadProfile();
     const sameUser = existing && existing.username === u.username;
+    const lastSeen = getLastServerAvatar();
+    const serverAvatar = u.avatarData || '';
+    let avatar: string;
+    if (serverAvatar !== lastSeen) {
+      // Server changed elsewhere (or first sight) — adopt it.
+      avatar = serverAvatar || (sameUser ? (existing?.avatar ?? '') : '');
+      setLastServerAvatar(serverAvatar);
+    } else {
+      // Server unchanged since last seen — local may hold an unpushed edit.
+      avatar = sameUser ? (existing?.avatar ?? '') : serverAvatar;
+      if (sameUser && existing && existing.avatar && existing.avatar !== serverAvatar) {
+        // Heal the divergence in the background.
+        void pushProfile(existing).then((ok) => {
+          if (ok) setLastServerAvatar(existing.avatar);
+        });
+      }
+    }
     const p: Profile = {
       username: u.username,
       displayName: u.displayName || existing?.displayName || u.username,
@@ -256,8 +276,7 @@ export async function pullServerProfile(): Promise<Profile | null> {
       isAdmin: u.isAdmin,
       authProvider: u.authProvider || 'local',
       passwordHash: sameUser ? (existing?.passwordHash ?? '') : '',
-      // Server avatar wins when set (edits push there); else keep local.
-      avatar: u.avatarData || (sameUser ? (existing?.avatar ?? '') : ''),
+      avatar,
       createdAt: existing?.createdAt ?? Date.now(),
     };
     saveProfile(p);
@@ -267,18 +286,40 @@ export async function pullServerProfile(): Promise<Profile | null> {
   }
 }
 
-/** Push local profile edits to the server (best-effort). */
-export async function pushProfile(p: Profile): Promise<void> {
+const SERVER_AVATAR_KEY = 'sdcodex.avatar.server.v1';
+
+export function getLastServerAvatar(): string {
+  try {
+    return localStorage.getItem(SERVER_AVATAR_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function setLastServerAvatar(dataUrl: string): void {
+  try {
+    localStorage.setItem(SERVER_AVATAR_KEY, dataUrl);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Push local profile edits to the server. Returns false (instead of throwing
+    away the failure) so callers can warn — a silent failed push followed by a
+    pull is exactly how avatars get "lost". */
+export async function pushProfile(p: Profile): Promise<boolean> {
   try {
     const { apiPost, backendAvailable } = await import('./backend');
-    if (!(await backendAvailable())) return;
+    if (!(await backendAvailable())) return false;
     await apiPost('/profile', {
       displayName: p.displayName,
       email: p.email,
       avatar: p.avatar,
     });
+    setLastServerAvatar(p.avatar);
+    return true;
   } catch {
-    /* standalone — local stands */
+    return false;
   }
 }
 
