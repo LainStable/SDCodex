@@ -232,10 +232,18 @@ export function UserMenu({
   // Mirrors OldCode base.html: angle = start - (span * i) / (n - 1).
   // Fan: theme toggle, core icon (once a plugin is installed), one icon per
   // installed plugin, settings, sign out. Core icon returns to core views.
-  const actions = [
+  // The theme toggle keeps the fan open (click-off still closes it).
+  const actions: Array<{
+    id: string;
+    label: string;
+    icon: string;
+    run: () => void;
+    current?: boolean;
+    keep?: boolean;
+  }> = [
     theme === 'dark'
-      ? { id: 'theme', label: 'Light', icon: '☀', run: () => setTheme('light'), current: false }
-      : { id: 'theme', label: 'Dark', icon: '☾', run: () => setTheme('dark'), current: false },
+      ? { id: 'theme', label: 'Light', icon: '☀', run: () => setTheme('light'), current: false, keep: true }
+      : { id: 'theme', label: 'Dark', icon: '☾', run: () => setTheme('dark'), current: false, keep: true },
     ...(plugins.length > 0
       ? [
           {
@@ -303,7 +311,7 @@ export function UserMenu({
                 tabIndex={open ? 0 : -1}
                 title={a.label}
                 onClick={() => {
-                  setOpen(false);
+                  if (!a.keep) setOpen(false);
                   a.run();
                 }}
                 className={`glass-l2 flex h-11 w-11 items-center justify-center rounded-lg text-base hover:border-primary/50 ${

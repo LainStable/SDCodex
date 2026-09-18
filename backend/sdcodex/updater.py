@@ -350,9 +350,6 @@ def install_plugin(repo_url: str, volume_paths: dict | None = None) -> tuple[boo
     repo_name = short.split("/")[-1] if "/" in short else short
     target = os.path.join(plugins_dir(), repo_name.lower())
     token = _github_token()
-    clone_url = canonical
-    if token and "github.com" in canonical:
-        clone_url = f"https://x-access-token:{token}@github.com/{short}.git"
 
     if os.path.isdir(os.path.join(target, ".git")):
         r = _git(["pull", "--ff-only"], cwd=target)
@@ -361,9 +358,14 @@ def install_plugin(repo_url: str, volume_paths: dict | None = None) -> tuple[boo
     else:
         if os.path.exists(target):
             shutil.rmtree(target)
-        r = _git(["clone", clone_url, target], cwd=root_dir())
+        # Anonymous first (public repos); token only as fallback for private
+        # repos — a stale/invalid token must never break public clones.
+        r = _git(["clone", canonical, target], cwd=root_dir())
+        if r.returncode != 0 and token:
+            clone_url = f"https://x-access-token:{token}@github.com/{short}.git"
+            r = _git(["clone", clone_url, target], cwd=root_dir())
         if r.returncode != 0:
-            r = _git(["clone", "-b", "master", clone_url, target], cwd=root_dir())
+            r = _git(["clone", "-b", "master", canonical, target], cwd=root_dir())
             if r.returncode != 0:
                 msg = f"Clone failed: {(r.stderr or r.stdout).strip()[:300]}"
                 if not token:

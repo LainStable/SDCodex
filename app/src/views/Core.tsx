@@ -683,13 +683,83 @@ export function Plugins() {
   >({});
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<Record<string, string>>({});
-  // Per-plugin volume editor: open card + rows + edited values.
   const [volOpen, setVolOpen] = useState<string | null>(null);
   const [volRows, setVolRows] = useState<
     Array<{ env_var: string; host_path?: string; container_path?: string; description?: string; value?: string }>
   >([]);
   const [volEdits, setVolEdits] = useState<Record<string, string>>({});
   const [volMsg, setVolMsg] = useState<string | null>(null);
+  // Update check (moved off the System tab) + GitHub token for private repos.
+  const [updates, setUpdates] = useState<{
+    core?: { has_update?: boolean; local_version?: string; remote_version?: string };
+    plugins?: Array<{ id: string; name: string }>;
+    total?: number;
+  } | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [updateMsg, setUpdateMsg] = useState<string | null>(null);
+  const [tokenSaved, setTokenSaved] = useState<boolean | null>(null);
+  const [tokenInput, setTokenInput] = useState('');
+  const [tokenMsg, setTokenMsg] = useState<string | null>(null);
+
+  const check = async () => {
+    setChecking(true);
+    setUpdateMsg(null);
+    try {
+      const { apiGet, backendAvailable } = await import('../lib/backend');
+      if (!(await backendAvailable())) {
+        setUpdateMsg('Backend unreachable.');
+        return;
+      }
+      setUpdates(await apiGet('/updates/check'));
+    } catch (e) {
+      setUpdateMsg(e instanceof Error ? e.message : 'Check failed');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const applyCore = async () => {
+    setApplying(true);
+    setUpdateMsg(null);
+    try {
+      const { apiPost } = await import('../lib/backend');
+      const r = await apiPost<{ ok: boolean; message?: string }>('/updates/core', {});
+      setUpdateMsg(r.message ?? (r.ok ? 'Updated.' : 'Update failed.'));
+      await check();
+    } catch (e) {
+      setUpdateMsg(e instanceof Error ? e.message : 'Update failed');
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const refreshTokenStatus = async () => {
+    try {
+      const { apiGet, backendAvailable } = await import('../lib/backend');
+      if (!(await backendAvailable())) return;
+      const r = await apiGet<{ saved?: boolean }>('/plugins/github-token');
+      setTokenSaved(Boolean(r.saved));
+    } catch {
+      /* standalone */
+    }
+  };
+
+  const saveToken = async () => {
+    setTokenMsg('saving…');
+    try {
+      const { apiPost, backendAvailable } = await import('../lib/backend');
+      if (!(await backendAvailable())) throw new Error('Backend unreachable.');
+      const r = await apiPost<{ ok: boolean; saved?: boolean }>('/plugins/github-token', {
+        token: tokenInput,
+      });
+      setTokenSaved(Boolean(r.saved));
+      setTokenInput('');
+      setTokenMsg(r.saved ? 'saved to DB + .env' : 'cleared');
+    } catch (e) {
+      setTokenMsg(e instanceof Error ? e.message : 'Save failed');
+    }
+  };
 
   const refreshInstalled = async () => {
     try {
@@ -716,6 +786,7 @@ export function Plugins() {
       }
     })();
     void refreshInstalled();
+    void refreshTokenStatus();
     return () => {
       on = false;
     };
@@ -803,6 +874,56 @@ export function Plugins() {
           active={filter}
           onPick={setFilter}
         />
+      </div>
+      <div className="glass-l1 mt-4 rounded-lg p-4">
+        <div className="flex items-center gap-2">
+          <h3 className="font-display text-sm font-semibold">Updates</h3>
+          {updates && (updates.total ?? 0) > 0 && (
+            <span className="rounded border border-status-warning/40 bg-status-warning/10 px-2 py-0.5 font-mono text-[10px] uppercase text-[#fcd34d]">
+              {updates.total} available
+            </span>
+          )}
+          <GhostButton className="ml-auto" disabled={checking} onClick={() => void check()}>
+            {checking ? 'Checking…' : 'Check now'}
+          </GhostButton>
+        </div>
+        {updates?.core && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-white/[0.06] px-2 py-1.5 font-mono text-[11px]">
+            <span className="text-ink">Core</span>
+            <span className="text-ink-faint">
+              v{updates.core.local_version || '?'} → v{updates.core.remote_version || '?'}
+            </span>
+            {updates.core.has_update ? (
+              <PrimaryButton disabled={applying} onClick={() => void applyCore()}>
+                {applying ? 'Updating…' : 'Update core'}
+              </PrimaryButton>
+            ) : (
+              <span className="text-status-active">up to date</span>
+            )}
+          </div>
+        )}
+        {(updates?.plugins ?? []).length > 0 && (
+          <div className="mt-2 font-mono text-[11px] text-ink-muted">
+            Plugin updates: {(updates?.plugins ?? []).map((p) => p.name ?? p.id).join(', ')} — use
+            the Update button on each card below.
+          </div>
+        )}
+        {updateMsg && <p className="mt-2 font-mono text-[11px] text-ink-muted">{updateMsg}</p>}
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-white/[0.06] pt-3">
+          <span className="font-mono text-[11px] text-ink-muted">
+            GitHub token {tokenSaved == null ? '' : tokenSaved ? '(saved ✓)' : '(not set)'}
+          </span>
+          <input
+            value={tokenInput}
+            onChange={(e) => setTokenInput(e.target.value)}
+            placeholder="ghp_… (private plugin repos)"
+            type="password"
+            autoComplete="off"
+            className="min-w-0 flex-1 rounded border border-white/10 bg-obsidian-lowest px-2 py-1.5 font-mono text-[11px] outline-none placeholder:text-ink-faint focus:border-primary"
+          />
+          <GhostButton onClick={() => void saveToken()}>Save token</GhostButton>
+          {tokenMsg && <span className="font-mono text-[10px] text-ink-faint">{tokenMsg}</span>}
+        </div>
       </div>
       <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         {shown.map((p) => {

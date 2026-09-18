@@ -722,6 +722,41 @@ def plugin_volumes_save(plugin_id: str):
     return jsonify({"ok": True, "volumes": resolved})
 
 
+@api_v1.post("/plugins/github-token")
+def plugins_github_token():
+    """Save the GitHub token (private plugin repos) to DB + .env."""
+    _, err = _admin_or_401()
+    if err:
+        return err
+    from . import updater as updater_mod
+
+    data = request.get_json(force=True, silent=True) or {}
+    token = (data.get("token") or "").strip()
+    try:
+        row = db.session.get(Setting, "github_token")
+        if row is None:
+            row = Setting(key="github_token", value=token)
+            db.session.add(row)
+        else:
+            row.value = token
+        db.session.commit()
+    except Exception as e:
+        return jsonify({"error": str(e)[:200]}), 500
+    updater_mod.update_env_file({"GITHUB_TOKEN": token})
+    return jsonify({"ok": True, "saved": bool(token)})
+
+
+@api_v1.get("/plugins/github-token")
+def plugins_github_token_status():
+    """Whether a GitHub token is saved (value never leaves the server)."""
+    _, err = _require_user()
+    if err:
+        return err
+    from . import updater as updater_mod
+
+    return jsonify({"saved": bool(updater_mod._github_token())})
+
+
 # ------------------------------------------------- plugin pages ----------
 # Installed plugins ship Stitch-styled static pages (pages/*.html). The React
 # shell embeds them (sidebar nav + settings tabs) — no OldCode templates.
