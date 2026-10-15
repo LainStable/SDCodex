@@ -119,6 +119,7 @@ body {
     translateX(var(--fan-radius, 168px)) rotate(calc(var(--fan-angle) * -1));
 }
 
+/* Hover: lift the item, then restyle the icon + label in light blue. */
 .fan-layer.open .fan-item:hover,
 .fan-layer.open .fan-item:focus-within {
   z-index: 100;
@@ -130,23 +131,28 @@ body {
     translateX(var(--fan-radius, 168px)) rotate(calc(var(--fan-angle) * -1)) scale(1.18);
 }
 
+/* Icon button: design-system light-blue outline (2px, glowing) + tinted fill. */
 .fan-layer.open .fan-item:hover button,
 .fan-layer.open .fan-item:focus-within button {
-  border-color: rgba(192, 193, 255, 0.9) !important;
-  background-color: rgba(255, 255, 255, 0.18) !important;
+  border-color: rgba(76, 215, 246, 0.95) !important;
+  background-color: rgba(6, 182, 212, 0.22) !important;
   box-shadow:
-    0 0 16px rgba(192, 193, 255, 0.45),
+    0 0 14px rgba(6, 182, 212, 0.55),
+    0 0 0 3px rgba(6, 182, 212, 0.18),
     0 8px 20px rgba(0, 0, 0, 0.5) !important;
-  color: #ffffff !important;
+  color: #f0fdff !important;
 }
 
+/* Label: light-blue box + white text. */
 .fan-layer.open .fan-item:hover span,
 .fan-layer.open .fan-item:focus-within span {
-  border-color: rgba(192, 193, 255, 0.5) !important;
-  background-color: #161922 !important;
-  color: #ffffff !important;
+  border-color: rgba(76, 215, 246, 0.7) !important;
+  background-color: rgba(15, 23, 42, 0.92) !important;
+  color: #f0fdff !important;
   font-weight: 600;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6) !important;
+  box-shadow:
+    0 0 12px rgba(6, 182, 212, 0.4),
+    0 4px 12px rgba(0, 0, 0, 0.6) !important;
 }
 
 .fan-avatar {

@@ -37,7 +37,6 @@ export default function App() {
   const [settingsNonce, setSettingsNonce] = useState(0);
   const [appVersion, setAppVersion] = useState('…');
   const [updates, setUpdates] = useState<UpdateState>({ core: false, plugins: false, checking: false });
-  const [updating, setUpdating] = useState(false);
   // Plugin spaces: core views vs one installed plugin (sidebar swaps, fan
   // gains core + per-plugin icons once anything is installed).
   const [space, setSpace] = useState<{ kind: 'core' } | { kind: 'plugin'; id: string }>({
@@ -140,18 +139,6 @@ export default function App() {
     }
   };
 
-  const updateCore = async () => {
-    setUpdating(true);
-    try {
-      const { apiPost } = await import('./lib/backend');
-      await apiPost('/updates/core', {});
-      await checkUpdates();
-    } catch {
-      /* message surfaces on next check */
-    } finally {
-      setUpdating(false);
-    }
-  };
   const [creatorSearch, setCreatorSearch] = useState<{ token: number; text: string }>({
     token: 0,
     text: '',
@@ -371,8 +358,6 @@ export default function App() {
           queueCount={queue.length}
           version={appVersion}
           updates={updates}
-          updating={updating}
-          onUpdateCore={() => void updateCore()}
           onGoPlugins={() => goSettings('plugins')}
           space={space}
           plugins={installed}

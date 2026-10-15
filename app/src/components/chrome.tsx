@@ -25,8 +25,6 @@ export function Sidebar({
   queueCount,
   version,
   updates,
-  updating,
-  onUpdateCore,
   onGoPlugins,
   space,
   plugins,
@@ -38,8 +36,6 @@ export function Sidebar({
   queueCount: number;
   version: string;
   updates: UpdateState;
-  updating: boolean;
-  onUpdateCore: () => void;
   onGoPlugins: () => void;
   /** Active space: core views or one installed plugin (sidebar swaps). */
   space: { kind: 'core' } | { kind: 'plugin'; id: string };
@@ -64,14 +60,10 @@ export function Sidebar({
           <span className="inline-flex items-center gap-1.5">
             <button
               type="button"
-              disabled={updating}
-              onClick={() => {
-                if (updates.core) onUpdateCore();
-                else onGoPlugins();
-              }}
+              onClick={onGoPlugins}
               title={
                 updates.core
-                  ? 'Core update available — click to update'
+                  ? 'Core update available — open Plugin Hub to update'
                   : 'Plugin updates available — open Plugin Hub'
               }
               className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
@@ -80,7 +72,7 @@ export function Sidebar({
                   : 'border-secondary/50 bg-secondary/15 text-[#22d3ee] hover:bg-secondary/25'
               }`}
             >
-              {updates.core ? (updating ? '⟳…' : '⟳') : '⬢'} v{version}
+              {updates.core ? '⟳' : '⬢'} v{version}
             </button>
           </span>
         ) : (

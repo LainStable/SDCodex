@@ -63,7 +63,35 @@ def socket_available() -> bool:
 
 # ------------------------------------------------- compose merge --------
 
-_INTERP_RE = re.compile(r"\$\{([^}:]+)(?::-(.*?))?\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+# Innermost-first pattern: neither the var name nor the default may contain
+# `$`, `{` or `}`. Repeated substitution (see _interp) therefore resolves
+# nested compose defaults inside-out, e.g.
+# `${SDCODEX_PORT:-${PORT:-5000}}` with PORT=8000 -> `${SDCODEX_PORT:-8000}`
+# -> `8000`. (A single-pass outer-first regex mis-parses the nesting and
+# leaves a stray `}`, which previously broke every rebuild port mapping.)
+_INNER_RE = re.compile(r"\$\{([^${}:]+)(?::-([^${}]*))?\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _interp_once(value: str, env: dict) -> str:
+    def sub(m: re.Match) -> str:
+        if m.group(3) is not None:
+            return env.get(m.group(3), "")
+        var, default = m.group(1), m.group(2)
+        if var in env and env[var] != "":
+            return env[var]
+        return default if default is not None else ""
+
+    return _INNER_RE.sub(sub, value)
+
+
+def _interp(value: str, env: dict) -> str:
+    """Compose-style interpolation supporting nested `${VAR:-default}`."""
+    prev, cur = None, value
+    for _ in range(10):
+        if prev == cur:
+            break
+        prev, cur = cur, _interp_once(cur, env)
+    return cur
 
 
 def _load_dotenv(root: str) -> dict:
@@ -82,18 +110,6 @@ def _load_dotenv(root: str) -> dict:
             except Exception:
                 pass
     return vals
-
-
-def _interp(value: str, env: dict) -> str:
-    def sub(m: re.Match) -> str:
-        if m.group(3) is not None:
-            return env.get(m.group(3), "")
-        var, default = m.group(1), m.group(2)
-        if var in env and env[var] != "":
-            return env[var]
-        return default if default is not None else ""
-
-    return _INTERP_RE.sub(sub, value)
 
 
 def _load_service(root: str) -> dict:
@@ -231,6 +247,39 @@ def _wait_healthy(client, name: str, timeout_s: int = 420) -> bool:
     return False
 
 
+def _container_networks(c) -> list:
+    """Non-bridge networks a container is attached to."""
+    try:
+        c.reload()
+        nets = (c.attrs.get("NetworkSettings", {}).get("Networks", {}) or {})
+        return [n for n in nets if n != "bridge"]
+    except Exception:
+        return []
+
+
+def _old_host_port(c, container_port: int = 5000):
+    """Host port currently publishing container_port on c (or None).
+
+    Ground truth for the swap: whatever the old self actually publishes is
+    what the replacement must publish, regardless of how the port was
+    configured (.env edit, shell env, manual `docker run -p`).
+    """
+    try:
+        c.reload()
+        ports = (c.attrs.get("NetworkSettings", {}) or {}).get("Ports", {}) or {}
+        bindings = ports.get(f"{container_port}/tcp") or []
+        if bindings and bindings[0].get("HostPort"):
+            return int(bindings[0]["HostPort"])
+        bindings = ((c.attrs.get("HostConfig", {}) or {}).get("PortBindings", {}) or {}).get(
+            f"{container_port}/tcp"
+        ) or []
+        if bindings and bindings[0].get("HostPort"):
+            return int(bindings[0]["HostPort"])
+    except Exception as e:
+        _rlog(f"old port detect: {e}")
+    return None
+
+
 def _rebuild_container() -> None:
     """Blue-green self-replace. Runs in a thread; progress in .rebuild.log.
 
@@ -251,11 +300,12 @@ def _rebuild_container() -> None:
                     _rlog("BUILD ERROR: " + str(chunk["error"])[:500])
                     return
         cfg = _load_service(root)
+        me_id = socket.gethostname()
         try:
-            me_early = client.containers.get(socket.gethostname())
+            me = client.containers.get(me_id)
         except Exception:
-            me_early = None
-        proj = _host_project_dir(client, me_early) if me_early else root
+            me = None
+        proj = _host_project_dir(client, me) if me else root
         binds = {}
         for spec in cfg.get("volumes", []):
             b = _split_bind(spec, proj)
@@ -268,37 +318,56 @@ def _rebuild_container() -> None:
         if proj in ("", "/app"):
             _rlog("ABORT: could not resolve host project dir for relative binds")
             return
-        # stale sibling from a previous attempt
+        # Swap inputs recorded BEFORE touching anything. The interpolated
+        # compose value is preferred when valid so a .env port change takes
+        # effect; the old self's live binding is the fallback (covers shell
+        # env, manual `docker run -p`, and any interpolation failure).
+        nets = _container_networks(me) if me else []
+        live_port = _old_host_port(me) if me else None
+        cname = cfg.get("container_name", "sdcodex") or "sdcodex"
         try:
-            stale = client.containers.get(new_name)
-            stale.remove(force=True)
-            _rlog("removed stale sibling")
-        except Exception:
-            pass
-        _rlog("creating sibling container (no ports — old self holds 5000)")
-        sibling = client.containers.run(
-            IMAGE_TAG,
-            name=new_name,
-            detach=True,
-            environment=cfg.get("environment", {}),
-            volumes=binds,
-            restart_policy={"Name": "unless-stopped"},
-        )
+            wanted = _port_map(cfg.get("ports", []))
+        except Exception as e:
+            _rlog(f"port map parse failed ({e}) — falling back to live binding")
+            wanted = {}
+        if live_port is not None and wanted.get("5000/tcp") != live_port:
+            if wanted.get("5000/tcp") not in (None, live_port):
+                _rlog(f"port change requested: {wanted.get('5000/tcp')} (compose) over live {live_port}")
+            else:
+                _rlog(f"keeping live host port {live_port} for 5000/tcp")
+            wanted["5000/tcp"] = live_port
+        if "5000/tcp" not in wanted:
+            wanted["5000/tcp"] = live_port if live_port is not None else 5000
+        _rlog(f"ports: {wanted} nets: {nets}")
+        # stale containers from a previous attempt (either name)
+        for stale_name in (new_name, "sdcodex-old"):
+            try:
+                stale = client.containers.get(stale_name)
+                stale.remove(force=True)
+                _rlog(f"removed stale {stale_name}")
+            except Exception:
+                pass
+        _rlog("creating sibling container (no ports — old self holds the port)")
+        try:
+            sibling = client.containers.run(
+                IMAGE_TAG,
+                name=new_name,
+                detach=True,
+                environment=cfg.get("environment", {}),
+                volumes=binds,
+                restart_policy={"Name": "no"},
+            )
+        except Exception as e:
+            _rlog(f"sibling create failed — keeping current container: {e}")
+            return
         # Join the old container's networks (e.g. sdcodex) so the sibling
         # lands on the same fabric before the swap.
-        try:
-            me_nets = client.containers.get(socket.gethostname())
-            me_nets.reload()
-            for net_name in (me_nets.attrs.get("NetworkSettings", {}).get("Networks", {}) or {}):
-                if net_name == "bridge":
-                    continue
-                try:
-                    client.networks.get(net_name).connect(sibling)
-                    _rlog(f"sibling joined network {net_name}")
-                except Exception as e:
-                    _rlog(f"network {net_name}: {e}")
-        except Exception as e:
-            _rlog(f"network copy: {e}")
+        for net_name in nets:
+            try:
+                client.networks.get(net_name).connect(sibling)
+                _rlog(f"sibling joined network {net_name}")
+            except Exception as e:
+                _rlog(f"network {net_name}: {e}")
         _rlog("sibling started, waiting for health")
         if not _wait_healthy(client, new_name):
             _rlog("sibling never healthy — keeping current container")
@@ -308,22 +377,8 @@ def _rebuild_container() -> None:
             except Exception:
                 pass
             return
-        me_id = socket.gethostname()
-        me = client.containers.get(me_id)
-        cname = cfg.get("container_name", "sdcodex")
-        # The sibling starts WITHOUT published ports (5000 is held by us);
-        # health is checked via exec. Only after it proves healthy do we
-        # free the port by stopping ourselves, then start it.
-        _rlog("starting sibling (no published ports yet)")
-        try:
-            new = client.containers.get(new_name)
-            new.start()
-        except Exception as e:
-            _rlog(f"sibling start failed — keeping current container: {e}")
-            return
-        _rlog("sibling started, waiting for health")
-        if not _wait_healthy(client, new_name):
-            _rlog("sibling never healthy — keeping current container")
+        if me is None:
+            _rlog("old self not found — removing unswappable sibling")
             try:
                 bad = client.containers.get(new_name)
                 bad.remove(force=True)
@@ -336,24 +391,48 @@ def _rebuild_container() -> None:
         except Exception as e:
             _rlog(f"stop old self failed: {e}")
             return
-        _rlog("starting sibling with the port")
+        _rlog("recreating sibling with the port mapping")
         try:
-            new.stop(timeout=10)
-            new.remove()
+            tmp = client.containers.get(new_name)
+            tmp.stop(timeout=10)
+            tmp.remove()
         except Exception as e:
             _rlog(f"sibling teardown failed: {e}")
+            try:
+                me.start()
+            except Exception as e2:
+                _rlog(f"old self restart also failed: {e2}")
+            return
         try:
             final = client.containers.run(
                 IMAGE_TAG,
                 name=new_name,
                 detach=True,
                 environment=cfg.get("environment", {}),
-                ports=_port_map(cfg.get("ports", [])),
+                ports=wanted,
                 volumes=binds,
-                restart_policy={"Name": cfg.get("restart", "unless-stopped")},
+                restart_policy={"Name": cfg.get("restart", "unless-stopped") or "unless-stopped"},
             )
         except Exception as e:
             _rlog(f"final start failed — RESTARTING OLD SELF: {e}")
+            try:
+                me.start()
+            except Exception as e2:
+                _rlog(f"old self restart also failed: {e2}")
+            return
+        for net_name in nets:
+            try:
+                client.networks.get(net_name).connect(final)
+            except Exception as e:
+                _rlog(f"final network {net_name}: {e}")
+        _rlog("final started, waiting for health")
+        if not _wait_healthy(client, new_name):
+            _rlog("final never healthy — RESTARTING OLD SELF")
+            try:
+                bad = client.containers.get(new_name)
+                bad.remove(force=True)
+            except Exception:
+                pass
             try:
                 me.start()
             except Exception as e2:
@@ -368,7 +447,8 @@ def _rebuild_container() -> None:
         except Exception as e:
             _rlog(f"rename new failed: {e}")
         try:
-            me.remove()
+            old = client.containers.get("sdcodex-old")
+            old.remove()
         except Exception:
             pass
         clear_rebuild()
@@ -384,12 +464,19 @@ def _rebuild_container() -> None:
 def _port_map(ports: list) -> dict:
     out = {}
     for spec in ports:
-        s = str(spec)
+        s = str(spec).strip()
+        if not s:
+            continue
         if ":" in s:
             host, cont = s.rsplit(":", 1)
+            host, cont = host.strip(), cont.strip().split("/")[0]
+            # Host may carry an interface prefix (127.0.0.1:8000) — the
+            # trailing segment is the host port.
+            if ":" in host:
+                host = host.rsplit(":", 1)[1]
             out[f"{cont}/tcp"] = int(host)
         else:
-            out[f"{s}/tcp"] = None
+            out[f"{s.split('/')[0]}/tcp"] = None
     return out
 
 

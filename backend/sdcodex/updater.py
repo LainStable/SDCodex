@@ -92,11 +92,34 @@ def remote_rev(repo_path_or_url: str) -> str:
 
 
 def is_clean(path: str) -> bool:
+    # Untracked files (runtime downloads, user files) must not block updates;
+    # only tracked modifications do. An upstream file colliding with an
+    # untracked local one still fails the pull with its own clear error.
     try:
-        r = _git(["status", "--porcelain"], cwd=path)
+        r = _git(["status", "--porcelain", "--untracked-files=no"], cwd=path)
         return r.returncode == 0 and not r.stdout.strip()
     except Exception:
         return False
+
+
+def _dirty_files(path: str, limit: int = 5) -> str:
+    try:
+        r = _git(["status", "--porcelain", "--untracked-files=no"], cwd=path)
+        if r.returncode != 0 or not r.stdout.strip():
+            return ""
+        lines = [l.strip() for l in r.stdout.splitlines() if l.strip()][:limit]
+        return ", ".join(lines)
+    except Exception:
+        return ""
+
+
+def _current_branch(path: str) -> str:
+    try:
+        r = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
+        branch = (r.stdout or "").strip()
+        return "" if branch in ("", "HEAD") else branch
+    except Exception:
+        return ""
 
 
 def _parse_version(v: str) -> tuple:
@@ -146,16 +169,32 @@ def update_core() -> tuple[bool, str]:
     if not os.path.isdir(os.path.join(root, ".git")):
         return False, "Not a git checkout — cannot self-update."
     if not is_clean(root):
-        return False, "Working tree has local changes — commit or stash first."
+        dirty = _dirty_files(root)
+        msg = "Working tree has local changes — commit or stash first."
+        if dirty:
+            msg += f" Dirty: {dirty}"
+        return False, msg
     remote = _detect_remote(root)
+    # Pull the checked-out branch explicitly: `git pull --ff-only <remote>`
+    # alone merges the *upstream* ref, which may point elsewhere (or
+    # nowhere), failing or reporting "up to date" while the hub shows newer.
+    branch = _current_branch(root)
+    if not branch:
+        return False, "Detached HEAD — check out a branch (e.g. main) to self-update."
     try:
-        r = _git(["pull", "--ff-only", remote], cwd=root)
+        r = _git(["pull", "--ff-only", remote, branch], cwd=root)
         if r.returncode != 0:
             return False, (r.stderr or r.stdout).strip()[:500]
+        out = (r.stdout or "Already up to date.").strip()[:500]
+        if "already up to date" in out.lower():
+            # Nothing moved — don't raise a spurious rebuild-required badge.
+            # (If the hub still shows a newer version, the git remote is
+            # behind the hub; fetch/mirror lag, not a local problem.)
+            return True, out
         from . import rebuilder as rebuilder_mod
 
         rebuilder_mod.mark_rebuild("core update")
-        return True, (r.stdout or "Already up to date.").strip()[:500]
+        return True, out
     except Exception as e:
         return False, str(e)
 
@@ -280,7 +319,11 @@ def update_plugin(plugin_id: str) -> tuple[bool, str]:
     if not target or not os.path.isdir(os.path.join(target, ".git")):
         return False, "Not a git checkout — reinstall the plugin."
     if not is_clean(target):
-        return False, "Plugin has local changes — reinstall instead."
+        dirty = _dirty_files(target)
+        msg = "Plugin has local changes — reinstall instead."
+        if dirty:
+            msg += f" Dirty: {dirty}"
+        return False, msg
     try:
         r = _git(["pull", "--ff-only"], cwd=target)
         if r.returncode != 0:
