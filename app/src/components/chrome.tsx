@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { hexToRgba } from './ui';
+import { FanIcon } from './fanIcon';
 
 /* Shared chrome matching all four Stitch prototypes:
    sidebar order, topbar, page headers, buttons, stats. */
@@ -250,7 +251,7 @@ export function UserMenu({
     ...plugins.map((p) => ({
       id: `space-${p.id}`,
       label: p.name,
-      icon: p.icon || p.name.slice(0, 1).toUpperCase(),
+      icon: (p.icon ?? '').trim() || p.name.trim().slice(0, 1).toUpperCase(),
       run: () => onSpacePlugin(p.id),
       current: space.kind === 'plugin' && space.id === p.id,
     })),
@@ -307,7 +308,7 @@ export function UserMenu({
                 type="button"
                 role="menuitem"
                 tabIndex={open ? 0 : -1}
-                title={a.label}
+                aria-label={a.label}
                 onClick={() => {
                   if (!a.keep) setOpen(false);
                   a.run();
@@ -316,7 +317,7 @@ export function UserMenu({
                   a.current ? 'border-primary/60 ring-1 ring-primary/50' : ''
                 }`}
               >
-                {a.icon}
+                <FanIcon icon={a.icon} name={a.label} />
               </button>
               <span className="whitespace-nowrap rounded border border-white/10 bg-obsidian-low px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-muted">
                 {a.label}

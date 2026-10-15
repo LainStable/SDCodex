@@ -1204,6 +1204,16 @@ export default function Settings({
   const [tab, setTab] = useState<string>(
     tabs.some((t) => t.id === initialTab) ? (initialTab as string) : 'dirs',
   );
+  // Badge clicks («onGoPlugins») navigate here from any screen via
+  // goSettings('plugins') — which remounts through the key AND changes
+  // initialTab. Sync on prop change too, so the Plugins tab opens even if
+  // the remount key ever collides (e.g. rapid double-click).
+  useEffect(() => {
+    if (initialTab && tabs.some((t) => t.id === initialTab) && initialTab !== tab) {
+      setTab(initialTab as string);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTab]);
   const pluginTab = tab.startsWith('plugin:')
     ? (() => {
         const [, pid, idx] = tab.split(':');
