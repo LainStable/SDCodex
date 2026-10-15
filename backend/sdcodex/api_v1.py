@@ -5,7 +5,7 @@ import os
 from flask import Blueprint, jsonify, make_response, request
 
 from . import auth, db
-from .models import Download, OidcConfig, Setting, User
+from .models import Download, OidcConfig, PluginRepo, Setting, User
 
 api_v1 = Blueprint("api_v1", __name__)
 
