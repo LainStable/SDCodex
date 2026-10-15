@@ -318,26 +318,23 @@ def _rebuild_container() -> None:
         if proj in ("", "/app"):
             _rlog("ABORT: could not resolve host project dir for relative binds")
             return
-        # Swap inputs recorded BEFORE touching anything. The interpolated
-        # compose value is preferred when valid so a .env port change takes
-        # effect; the old self's live binding is the fallback (covers shell
-        # env, manual `docker run -p`, and any interpolation failure).
+        # Swap inputs recorded BEFORE touching anything. Port precedence
+        # lives in _resolve_ports: a post-start .env port change is honored
+        # (compose wins); otherwise the old self's live binding wins (covers
+        # shell env, manual `docker run -p`, interpolation failure); the
+        # interpolated compose value is next; 5000 is the last resort.
         nets = _container_networks(me) if me else []
         live_port = _old_host_port(me) if me else None
+        started_at = _container_started_at(me) if me else None
         cname = cfg.get("container_name", "sdcodex") or "sdcodex"
+        dotenv_path = _dotenv_path(root)
         try:
-            wanted = _port_map(cfg.get("ports", []))
-        except Exception as e:
-            _rlog(f"port map parse failed ({e}) — falling back to live binding")
-            wanted = {}
-        if live_port is not None and wanted.get("5000/tcp") != live_port:
-            if wanted.get("5000/tcp") not in (None, live_port):
-                _rlog(f"port change requested: {wanted.get('5000/tcp')} (compose) over live {live_port}")
-            else:
-                _rlog(f"keeping live host port {live_port} for 5000/tcp")
-            wanted["5000/tcp"] = live_port
-        if "5000/tcp" not in wanted:
-            wanted["5000/tcp"] = live_port if live_port is not None else 5000
+            env_mtime = os.path.getmtime(dotenv_path) if dotenv_path else None
+        except OSError:
+            env_mtime = None
+        wanted = _resolve_ports(cfg.get("ports", []), live_port,
+                                dict(os.environ), _load_dotenv(root),
+                                env_mtime, started_at)
         _rlog(f"ports: {wanted} nets: {nets}")
         # stale containers from a previous attempt (either name)
         for stale_name in (new_name, "sdcodex-old"):
@@ -478,6 +475,101 @@ def _port_map(ports: list) -> dict:
         else:
             out[f"{s.split('/')[0]}/tcp"] = None
     return out
+
+
+def _env_port(d: dict) -> int | None:
+    """Effective host port from an env mapping (SDCODEX_PORT else PORT)."""
+    for key in ("SDCODEX_PORT", "PORT"):
+        v = (d.get(key) or "").strip() if isinstance(d, dict) else ""
+        if v:
+            try:
+                return int(v)
+            except ValueError:
+                return None
+    return None
+
+
+def _dotenv_path(root: str) -> str | None:
+    """Path of the dotenv file _load_dotenv would read, if any."""
+    for name in (".env", "env"):
+        p = os.path.join(root, name)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _parse_docker_ts(ts: str) -> float | None:
+    """Parse a Docker RFC3339 timestamp (e.g. State.StartedAt) to epoch."""
+    try:
+        s = (ts or "").strip().replace("Z", "+00:00")
+        if "." in s:
+            head, rest = s.split(".", 1)
+            frac, tz = rest[:-6], rest[-6:]
+            s = f"{head}.{frac[:6]}{tz}"
+        from datetime import datetime
+
+        return datetime.fromisoformat(s).timestamp()
+    except Exception:
+        return None
+
+
+def _container_started_at(c) -> float | None:
+    """When container c was started (epoch), or None if undeterminable."""
+    try:
+        c.reload()
+        ts = ((c.attrs.get("State", {}) or {}).get("StartedAt")) or ""
+        if ts.startswith("0001-"):
+            return None
+        return _parse_docker_ts(ts)
+    except Exception:
+        return None
+
+
+def _resolve_ports(port_specs: list, live_port: int | None,
+                   startup_env: dict, file_env: dict,
+                   env_mtime: float | None = None,
+                   started_at: float | None = None) -> dict:
+    """Pick the host-port mapping for the replacement container.
+
+    Precedence:
+    1. Compose-derived value, but ONLY on affirmative evidence of a
+       post-start .env port change: the file's effective port differs from
+       the startup effective port AND the dotenv file is newer than the
+       container start. (A stale .env default must never drag a custom
+       live port back to 5000, and a fresh .env edit must not be
+       discarded in favor of the old live binding.)
+    2. The old container's live binding — covers shell-env runs, manual
+       `docker run -p`, and any interpolation failure.
+    3. Compose-derived value, when valid.
+    4. 5000.
+    """
+    try:
+        wanted = _port_map(port_specs or [])
+    except Exception as e:
+        _rlog(f"port map parse failed ({e}) — falling back to live binding")
+        wanted = {}
+    compose_port = wanted.get("5000/tcp")
+    file_port = _env_port(file_env)
+    startup_port = _env_port(startup_env)
+    file_changed = (
+        compose_port is not None
+        and file_port is not None
+        and startup_port is not None
+        and file_port != startup_port
+        and env_mtime is not None
+        and started_at is not None
+        and env_mtime > started_at
+    )
+    if file_changed:
+        _rlog(f"port change requested: {compose_port} (compose) over live {live_port}")
+        return wanted
+    if live_port is not None:
+        if compose_port != live_port:
+            _rlog(f"keeping live host port {live_port} for 5000/tcp")
+        wanted["5000/tcp"] = live_port
+    elif compose_port is None:
+        wanted["5000/tcp"] = 5000
+    return wanted
 
 
 def _restart_process() -> None:
