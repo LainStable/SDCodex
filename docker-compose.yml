@@ -11,9 +11,10 @@ services:
     container_name: sdcodex
     restart: unless-stopped
     ports:
-      - "${SDCODEX_PORT:-5000}:5000"
+      - "${SDCODEX_PORT:-${PORT:-5000}}:5000"
     environment:
       PORT: "5000"
+      SDCODEX_PORT: "${SDCODEX_PORT:-${PORT:-5000}}"
       SECRET_KEY: "${SECRET_KEY:-}"
       DATABASE_URL: "sqlite:////data/db/sdcodex.db"
       PUID: "${PUID:-${UID:-1000}}"

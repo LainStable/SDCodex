@@ -104,6 +104,8 @@ def _load_service(root: str) -> dict:
         return {}
     env = dict(os.environ)
     env.update(_load_dotenv(root))
+    if "PORT" in env and not env.get("SDCODEX_PORT"):
+        env["SDCODEX_PORT"] = env["PORT"]
     # Compose defaults used by our core file.
     env.setdefault("SDCODEX_PORT", "5000")
     merged: dict = {}
