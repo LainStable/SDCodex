@@ -293,6 +293,9 @@ export function UserMenu({
       >
         {actions.map((a, i) => {
           const angle = n <= 1 ? 135 : 180 - (90 * i) / (n - 1);
+          // Stagger: every second item sits one icon-width closer so the
+          // fan doesn't cramp (44px icon + 4px breathing room).
+          const itemRadius = i % 2 === 1 ? radius - 48 : radius;
           return (
             <div
               key={a.id}
@@ -300,6 +303,7 @@ export function UserMenu({
               style={
                 {
                   '--fan-angle': `${angle.toFixed(2)}deg`,
+                  '--fan-radius': `${itemRadius}px`,
                   transitionDelay: open ? `${i * 45}ms` : '0ms',
                 } as React.CSSProperties
               }
