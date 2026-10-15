@@ -16,7 +16,19 @@ live code when in doubt — this is a snapshot, not a substitute for reading the
 
 ## Self-rebuild (`backend/sdcodex/rebuilder.py`)
 - Blue-green: builds image, starts a port-less sibling `sdcodex-new`, waits for health via
-  `exec`, stops old self to free the host port, recreates sibling with the port mapping.
+  `exec`, then a helper container performs the swap (see below).
+- CRITICAL FLAW FOUND 2026-10-15: the rebuild ran in a thread inside the app
+  container, so `me.stop()` killed its own process — all six logged rebuilds
+  died at "stopping old self", the swap never ran, and a stale port-less
+  `sdcodex-new` was left behind. Manual recovery from that state is where a
+  default-port container slips in (the 20:17 run had resolved 5001 correctly).
+- Fix: `backend/sdcodex/swap_helper.py` one-shot helper container
+  (`python -m sdcodex.swap_helper`, auto-removed on exit). App thread hands it
+  a JSON spec (old id, sibling, cname, resolved ports, binds, env, networks,
+  restart, image); helper stops old self, recreates the sibling WITH ports,
+  health-gates, renames old→`sdcodex-old` and final→live name, removes the old,
+  clears `.rebuild-required`, logs `swap done`. Repo bind-mount is reused so
+  the frontend rebuild-log stream keeps working through the swap.
 - `_interp` resolves nested compose defaults innermost-first (`${SDCODEX_PORT:-${PORT:-5000}}`).
   A single-pass outer-first regex left a stray `}` and broke every rebuild port mapping —
   fixed to loop to a fixed point.
@@ -38,6 +50,11 @@ live code when in doubt — this is a snapshot, not a substitute for reading the
   one is removed.
 
 ## Core update flow
+- Single **Update** button (Settings → Plugins → Updates panel; the old
+  separate Update-core / Rebuild-now buttons are gone as of 1.0.37):
+  `POST /updates/core` (git pull, aborts cleanly on dirty tree) → then the
+  rebuild flow (`POST /system/rebuild`, log stream, version-aware reload).
+  The "Rebuild required" banner is status text only and points at Update.
 - `POST /updates/core` → `updater.update_core()` → `git pull --ff-only <remote> <branch>`.
 - Returns 409 on failure. `is_clean()` uses `--untracked-files=no` so untracked files don't
   block updates; dirty files are named in the 409 message.

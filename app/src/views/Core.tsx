@@ -733,19 +733,27 @@ export function Plugins() {
     }
   };
 
-  const applyCore = async () => {
+  /** Single "Update" flow: pull the updated code first, then rebuild.
+      Replaces the old separate Update-core / Rebuild-now buttons. */
+  const updateAll = async () => {
     setApplying(true);
     setUpdateMsg(null);
     try {
       const { apiPost } = await import('../lib/backend');
       const r = await apiPost<{ ok: boolean; message?: string }>('/updates/core', {});
-      setUpdateMsg(r.message ?? (r.ok ? 'Updated.' : 'Update failed.'));
+      if (!r.ok) {
+        setUpdateMsg(r.message ?? 'Update failed.');
+        return;
+      }
+      setUpdateMsg(r.message ?? 'Updated.');
       await check();
     } catch (e) {
       setUpdateMsg(e instanceof Error ? e.message : 'Update failed');
+      return;
     } finally {
       setApplying(false);
     }
+    await rebuild();
   };
 
   const rebuild = async () => {
@@ -972,8 +980,8 @@ export function Plugins() {
                   <ProgressBar />
                 </div>
               ) : (
-                <PrimaryButton disabled={applying} onClick={() => void applyCore()}>
-                  Update core
+                <PrimaryButton disabled={applying || rebuilding} onClick={() => void updateAll()}>
+                  {rebuilding ? 'Rebuilding…' : 'Update'}
                 </PrimaryButton>
               )
             ) : (
@@ -992,17 +1000,11 @@ export function Plugins() {
             <span className="text-[#fcd34d]">Rebuild required</span>
             <span className="text-ink-faint">
               {updates.rebuild?.mode === 'docker'
-                ? 'new image + container replace'
+                ? 'press Update above (pulls latest code, then rebuilds)'
                 : updates.rebuild?.mode === 'baremetal'
-                  ? 'backend restart'
+                  ? 'press Update above (pulls latest code, then restarts)'
                   : 'mount the docker socket to enable self-rebuild'}
             </span>
-            <PrimaryButton
-              disabled={rebuilding || updates.rebuild?.can_rebuild === false}
-              onClick={() => void rebuild()}
-            >
-              {rebuilding ? 'Rebuilding…' : 'Rebuild now'}
-            </PrimaryButton>
           </div>
         )}
         {updateMsg && <p className="mt-2 font-mono text-[11px] text-ink-muted">{updateMsg}</p>}

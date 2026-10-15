@@ -382,74 +382,55 @@ def _rebuild_container() -> None:
             except Exception:
                 pass
             return
-        _rlog("sibling healthy — stopping old self to free the port")
+        # The app thread cannot survive stopping its own container, so the
+        # irreversible swap runs in a short-lived helper container
+        # (sdcodex.swap_helper) that outlives us. Every rebuild used to die
+        # right after "stopping old self" and the swap never ran.
+        import json as _json
+
         try:
-            me.stop(timeout=30)
-        except Exception as e:
-            _rlog(f"stop old self failed: {e}")
-            return
-        _rlog("recreating sibling with the port mapping")
-        try:
-            tmp = client.containers.get(new_name)
-            tmp.stop(timeout=10)
-            tmp.remove()
-        except Exception as e:
-            _rlog(f"sibling teardown failed: {e}")
+            old_id = me.id
+        except Exception:
+            old_id = me_id
+        spec = {
+            "old_id": old_id,
+            "sibling": new_name,
+            "cname": cname,
+            "ports": wanted,
+            "binds": binds,
+            "environment": cfg.get("environment", {}),
+            "networks": nets,
+            "restart": cfg.get("restart", "unless-stopped") or "unless-stopped",
+            "image": IMAGE_TAG,
+        }
+        helper_volumes = dict(binds)
+        helper_volumes["/var/run/docker.sock"] = {"bind": "/var/run/docker.sock", "mode": "rw"}
+        for stale_name in ("sdcodex-swap",):
             try:
-                me.start()
-            except Exception as e2:
-                _rlog(f"old self restart also failed: {e2}")
-            return
-        try:
-            final = client.containers.run(
-                IMAGE_TAG,
-                name=new_name,
-                detach=True,
-                environment=cfg.get("environment", {}),
-                ports=wanted,
-                volumes=binds,
-                restart_policy={"Name": cfg.get("restart", "unless-stopped") or "unless-stopped"},
-            )
-        except Exception as e:
-            _rlog(f"final start failed — RESTARTING OLD SELF: {e}")
-            try:
-                me.start()
-            except Exception as e2:
-                _rlog(f"old self restart also failed: {e2}")
-            return
-        for net_name in nets:
-            try:
-                client.networks.get(net_name).connect(final)
-            except Exception as e:
-                _rlog(f"final network {net_name}: {e}")
-        _rlog("final started, waiting for health")
-        if not _wait_healthy(client, new_name):
-            _rlog("final never healthy — RESTARTING OLD SELF")
-            try:
-                bad = client.containers.get(new_name)
-                bad.remove(force=True)
+                stale = client.containers.get(stale_name)
+                stale.remove(force=True)
+                _rlog(f"removed stale {stale_name}")
             except Exception:
                 pass
-            try:
-                me.start()
-            except Exception as e2:
-                _rlog(f"old self restart also failed: {e2}")
+        try:
+            client.containers.run(
+                IMAGE_TAG,
+                command=["python", "-m", "sdcodex.swap_helper"],
+                name="sdcodex-swap",
+                detach=True,
+                auto_remove=True,
+                environment={
+                    "SWAP_SPEC_JSON": _json.dumps(spec),
+                    "SWAP_LOG": "/app/.rebuild.log",
+                    "PYTHONPATH": "/app/backend",
+                },
+                volumes=helper_volumes,
+                restart_policy={"Name": "no"},
+            )
+        except Exception as e:
+            _rlog(f"swap helper launch failed — keeping current container: {e}")
             return
-        try:
-            me.rename("sdcodex-old")
-        except Exception as e:
-            _rlog(f"rename old failed: {e}")
-        try:
-            final.rename(cname)
-        except Exception as e:
-            _rlog(f"rename new failed: {e}")
-        try:
-            old = client.containers.get("sdcodex-old")
-            old.remove()
-        except Exception:
-            pass
-        clear_rebuild()
-        _rlog("swap done")
+        _rlog("swap delegated to helper sdcodex-swap — old self will go down shortly")
     except Exception:
         logger.error("Rebuild failed", exc_info=True)
         try:
