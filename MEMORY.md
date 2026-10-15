@@ -162,6 +162,9 @@ live code when in doubt — this is a snapshot, not a substitute for reading the
   label as floating black tooltips); `aria-label` kept for accessibility.
 - Hover glow hardened: 2px `#4cd7f6` outline + offset + stronger shadow
   (`app/src/index.css`). Fan spread math (180°→90° arc) unchanged.
+- Stagger (2026-10-15): every second fan item sits 48px (one 44px icon +
+  breathing room) closer to center — per-item `--fan-radius` override in
+  `chrome.tsx`, no CSS change needed.
 - Verified: `tsc --noEmit` clean, `npm run build` succeeds.
 
 ## Sidebar update badge (2026-10-15)
@@ -183,3 +186,12 @@ live code when in doubt — this is a snapshot, not a substitute for reading the
   expected pattern), **ask for clarification** rather than guessing and writing it down.
 - When in doubt about whether something is "critical": if it affects how the app
   runs, how we build/test, or how plugins/updates work — write it down.
+
+## Release workflow (standing instruction, 2026-10-15)
+- When a change is done and everything tests clean: commit + bump + push
+  without asking.
+- Core: commit the fix, bump `VERSION` (patch), push `upstream/main`.
+- Hub (`Plugin-Hub/plugins.json`, own repo): bump `core.version` to match,
+  commit, push `origin/main`. Both must agree or the update badge lies.
+- Verify before pushing: frontend `npx tsc --noEmit` + `npm run build`;
+  backend `python3 -m py_compile` on touched files (no backend suite exists).
