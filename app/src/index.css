@@ -119,6 +119,36 @@ body {
     translateX(var(--fan-radius, 168px)) rotate(calc(var(--fan-angle) * -1));
 }
 
+.fan-layer.open .fan-item:hover,
+.fan-layer.open .fan-item:focus-within {
+  z-index: 100;
+  transition-delay: 0s !important;
+  transition:
+    transform 0.16s cubic-bezier(0.2, 0.9, 0.25, 1.2),
+    opacity 0.15s ease !important;
+  transform: translate(-50%, -50%) rotate(var(--fan-angle))
+    translateX(var(--fan-radius, 168px)) rotate(calc(var(--fan-angle) * -1)) scale(1.18);
+}
+
+.fan-layer.open .fan-item:hover button,
+.fan-layer.open .fan-item:focus-within button {
+  border-color: rgba(192, 193, 255, 0.9) !important;
+  background-color: rgba(255, 255, 255, 0.18) !important;
+  box-shadow:
+    0 0 16px rgba(192, 193, 255, 0.45),
+    0 8px 20px rgba(0, 0, 0, 0.5) !important;
+  color: #ffffff !important;
+}
+
+.fan-layer.open .fan-item:hover span,
+.fan-layer.open .fan-item:focus-within span {
+  border-color: rgba(192, 193, 255, 0.5) !important;
+  background-color: #161922 !important;
+  color: #ffffff !important;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6) !important;
+}
+
 .fan-avatar {
   transition: transform 0.35s cubic-bezier(0.2, 0.9, 0.25, 1.15);
   transform-origin: center;

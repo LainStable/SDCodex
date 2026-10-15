@@ -268,6 +268,7 @@ export function UserMenu({
       : { id: 'signin', label: 'Sign in', icon: '→', run: () => go('settings') },
   ];
   const n = actions.length;
+  const radius = n > 4 ? Math.min(220, 168 + (n - 4) * 12) : 168;
 
   return (
     <div ref={ref} className="relative">
@@ -291,7 +292,12 @@ export function UserMenu({
         </span>
       </button>
 
-      <div className={`fan-layer${open ? ' open' : ''}`} role="menu" aria-hidden={!open}>
+      <div
+        className={`fan-layer${open ? ' open' : ''}`}
+        style={{ '--fan-radius': `${radius}px` } as React.CSSProperties}
+        role="menu"
+        aria-hidden={!open}
+      >
         {actions.map((a, i) => {
           const angle = n <= 1 ? 135 : 180 - (90 * i) / (n - 1);
           return (
