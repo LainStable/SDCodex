@@ -241,7 +241,7 @@ export function UserMenu({
       ? [
           {
             id: 'space-core',
-            label: 'Core',
+            label: 'models',
             icon: '⌂',
             run: onSpaceCore,
             current: space.kind === 'core',
