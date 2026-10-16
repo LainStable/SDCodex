@@ -174,13 +174,21 @@ def _merge_env(a, b) -> dict:
 
 
 def _split_bind(spec: str, project_host_dir: str):
-    """host:container[:opts] (long-form dicts pass through as-is).
+    """Convert a Compose volume entry to (source, Docker SDK bind options).
 
     Relative host paths are compose-project-relative — resolved against the
     HOST project dir (own /app mount source), never the container's /app.
     """
     if isinstance(spec, dict):
-        return spec
+        host = spec.get("source") or spec.get("src")
+        cont = spec.get("target") or spec.get("dst") or spec.get("destination")
+        if not host or not cont:
+            return None
+        host = str(host)
+        if host.startswith("."):
+            host = os.path.abspath(os.path.join(project_host_dir, host))
+        mode = "ro" if spec.get("read_only") else "rw"
+        return (host, {"bind": str(cont), "mode": mode})
     parts = spec.split(":")
     if len(parts) < 2:
         return None
@@ -189,6 +197,32 @@ def _split_bind(spec: str, project_host_dir: str):
     if host.startswith("."):
         host = os.path.abspath(os.path.join(project_host_dir, host))
     return (host, {"bind": cont, "mode": mode})
+
+
+def _resolve_binds(volume_specs: list, project_host_dir: str) -> dict:
+    """Resolve mounts with Compose's uniqueness rule: one mount per target.
+
+    Compose overrides merge volume entries by container target, with later
+    entries replacing earlier ones. Reproduce that behavior before calling
+    Docker directly, which rejects duplicate target paths instead of merging
+    them.
+    """
+    binds = {}
+    source_by_target = {}
+    for spec in volume_specs or []:
+        parsed = _split_bind(spec, project_host_dir)
+        if not isinstance(parsed, tuple):
+            continue
+        source, options = parsed
+        target = options.get("bind")
+        if not target:
+            continue
+        previous = source_by_target.get(target)
+        if previous is not None:
+            binds.pop(previous, None)
+        binds[source] = options
+        source_by_target[target] = source
+    return binds
 
 
 def _host_project_dir(client, me) -> str:
@@ -306,12 +340,8 @@ def _rebuild_container() -> None:
         except Exception:
             me = None
         proj = _host_project_dir(client, me) if me else root
-        binds = {}
-        for spec in cfg.get("volumes", []):
-            b = _split_bind(spec, proj)
-            if isinstance(b, tuple):
-                binds[b[0]] = b[1]
-        _rlog(f"binds: {sorted(binds)}")
+        binds = _resolve_binds(cfg.get("volumes", []), proj)
+        _rlog(f"binds: {sorted((v.get('bind'), k) for k, v in binds.items())}")
         # Fail fast: if project-dir detection fell back to the container's own
         # /app, relative binds would point inside the image and the sibling
         # would boot-loop (run.py missing). Never swap on a bad bind.
