@@ -21,6 +21,17 @@ import { apiPost, backendLogout, backendAvailable } from './lib/backend';
 import { getApiKey, pullSettings, setApiUser } from './lib/settings';
 import { fetchMe } from './lib/civitai';
 
+function versionIsNewer(remote: string, local: string): boolean {
+  const parts = (value: string) => value.split(/[.+-]/, 1)[0].split('.').map((n) => Number(n) || 0);
+  const r = parts(remote);
+  const l = parts(local);
+  for (let i = 0; i < Math.max(r.length, l.length); i++) {
+    const delta = (r[i] ?? 0) - (l[i] ?? 0);
+    if (delta !== 0) return delta > 0;
+  }
+  return false;
+}
+
 export default function App() {
   const [view, setView] = useState<ViewId>('models');
   const [queue, setQueue] = useState(loadQueue);
@@ -100,28 +111,37 @@ export default function App() {
     try {
       const { apiGet, backendAvailable } = await import('./lib/backend');
       if (!(await backendAvailable())) return;
+      let currentVersion = appVersion;
       try {
         const h = await apiGet<{ version?: string }>('/health');
-        if (h.version) setAppVersion(h.version);
+        if (h.version) {
+          currentVersion = h.version;
+          setAppVersion(h.version);
+        }
       } catch {
         /* keep placeholder */
       }
       setUpdates((u) => ({ ...u, checking: true }));
       let core = false;
+      let hub: import('./lib/plugins').HubCatalog | null = null;
+      try {
+        const catalog = await (await import('./lib/plugins')).fetchCatalog();
+        if (catalog.live) hub = catalog.catalog;
+      } catch {
+        /* backend endpoint fallback below */
+      }
+      if (hub?.core?.version && currentVersion && currentVersion !== '…') {
+        core = versionIsNewer(hub.core.version, currentVersion);
+      }
       try {
         const c = await apiGet<{ total?: number; core?: { has_update?: boolean } }>('/updates/check');
-        core = Boolean(c.core?.has_update);
+        core ||= Boolean(c.core?.has_update);
       } catch {
         /* admin-only or offline — plugins still checkable below */
       }
       let plugins = false;
       try {
-        const [hub, inst] = await Promise.all([
-          (await import('./lib/plugins')).fetchCatalog().then((r) => r.catalog).catch(() => null),
-          apiGet<{ installed?: Array<{ id: string; version?: string; has_update?: boolean }> }>('/plugins').catch(
-            () => null,
-          ),
-        ]);
+        const inst = await apiGet<{ installed?: Array<{ id: string; version?: string; has_update?: boolean }> }>('/plugins').catch(() => null);
         if (hub) {
           const installed = new Map((inst?.installed ?? []).map((p) => [p.id, p]));
           plugins = hub.plugins.some((p) => {
