@@ -222,3 +222,9 @@ live code when in doubt — this is a snapshot, not a substitute for reading the
   commit, push `origin/main`. Both must agree or the update badge lies.
 - Verify before pushing: frontend `npx tsc --noEmit` + `npm run build`;
   backend `python3 -m py_compile` on touched files (no backend suite exists).
+
+## GalleryDL task page restoration (2026-10-17)
+- Plugin pages are iframe routes at `/api/plugins/<plugin-id>/page/<page-slug>`. The core sidebar selects the page; plugin HTML should not duplicate this nav. Internal page links must use the full routed URL. Relative links such as `tasks.html` resolve as invalid page slugs and show the missing-page screen.
+- GalleryDL's task page is `plugins/GalleryDL/pages/tasks.html`; the manifest's first `nav_items[].page` is `tasks`. Task data is read from disk through `/gdl/api/tasks`.
+- The 0.1.8 task page uses the new design and includes searchable/status-filtered tasks, create/edit/run controls, terminal/telemetry, and per-task run history/recent downloads via `/gdl/api/tasks/<slug>/history` and `/recent`.
+- Published plugin commit `ef9413c` and Plugin Hub catalog commit `5fe8208`, both pushed to `main`; catalog and plugin manifest now agree on version `0.1.8`.

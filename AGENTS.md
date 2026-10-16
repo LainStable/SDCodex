@@ -27,3 +27,9 @@ Stitch project `projects/4032984165089508769` (SDCodex). Dark-first workstation 
 - Frontend talks same-origin `/api` (Vite proxy in dev, backend serves in prod) via `app/src/lib/backend.ts`. Backend-first with localStorage fallback: startup pulls settings, saves push through, auth bootstrap/login mirrors the User row + cookie, queue POSTs to the real `DownloadManager` worker.
 - Start everything with `./start.sh` (venv + backend :5000, then Vite :5173; Ctrl+C stops both; `--backend-only` / `--frontend-only` / `--no-install` flags).
 - Civitai calls go through the dev `/civitai` proxy (preflight rejects browser Bearer headers cross-origin).
+
+## Plugin pages and publishing
+- Plugin pages are static HTML under `plugins/<PluginName>/pages/`, embedded by the core as an iframe at `/api/plugins/<plugin-id>/page/<page-slug>`. Keep each manifest `nav_items[].page` aligned with its HTML filename and let the core sidebar provide page navigation.
+- Links between plugin pages must use the full route `/api/plugins/<plugin-id>/page/<page-slug>`; relative links to `.html` files do not resolve through the page endpoint.
+- Plugin folders are independent Git repositories. For a published plugin update, bump `plugin.json`, commit and push the plugin repo, then update the matching version in `Plugin-Hub/plugins.json` and commit/push the Plugin Hub repo. The Docker test environment at `/home/naked/games/SDCodex` is read-only and must not be modified.
+- GalleryDL task page: `plugins/GalleryDL/pages/tasks.html`, route slug `tasks`; task APIs are under `/gdl/api`, with per-task history and recent downloads at `/gdl/api/tasks/<slug>/history` and `/recent`.
