@@ -95,6 +95,9 @@ export default function App() {
   // Also kicks off the automatic update check.
   const handleAuthed = async (p: Profile) => {
     setProfile(p);
+    // Restore the user's server-saved Civitai key before mounting Explorer;
+    // otherwise its first request can race this settings fetch and get 401.
+    await pullSettings();
     setAuthed(true);
     try {
       const full = await pullServerProfile();
@@ -228,11 +231,14 @@ export default function App() {
           const adopted = adoptServerUser(s.user);
           if (adopted) setProfile(adopted);
           if (s.authed) {
-            setAuthed(true);
             // Full profile (avatar/email) lives behind /profile — pull it so a
             // refresh never shows stale local rows.
             const full = await pullServerProfile();
             if (full) setProfile(full);
+            // Do this before authReady removes the startup gate and mounts
+            // Explorer, so its first request includes the restored API key.
+            await pullSettings();
+            setAuthed(true);
             void checkUpdates();
             void refreshInstalled();
           } else {
