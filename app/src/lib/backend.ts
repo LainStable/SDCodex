@@ -42,7 +42,7 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {  con
     let detail = `backend ${res.status}`;
     try {
       const j = await res.json();
-      if (j?.error) detail = j.error;
+      if (j?.error || j?.message) detail = j.error ?? j.message;
     } catch {
       /* keep status */
     }

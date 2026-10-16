@@ -76,6 +76,28 @@ def _detect_remote(path: str) -> str:
         return "origin"
 
 
+def _https_github_remote(path: str, remote: str) -> str:
+    """Return an HTTPS equivalent for a GitHub SSH remote, if one exists.
+
+    Minimal production images may not include an SSH client. Retrying public
+    GitHub repositories over HTTPS lets self-update work without changing the
+    checkout's configured remote.
+    """
+    try:
+        r = _git(["remote", "get-url", remote], cwd=path)
+        if r.returncode != 0:
+            return ""
+        url = r.stdout.strip()
+        match = re.match(r"^git@github\.com:([^/]+/[^/]+?)(?:\.git)?$", url)
+        if not match:
+            match = re.match(r"^ssh://git@github\.com/([^/]+/[^/]+?)(?:\.git)?$", url)
+        if not match:
+            return ""
+        return f"https://github.com/{match.group(1)}.git"
+    except Exception:
+        return ""
+
+
 def remote_rev(repo_path_or_url: str) -> str:
     """Remote HEAD sha via the local remote (no API tokens needed)."""
     try:
@@ -183,6 +205,10 @@ def update_core() -> tuple[bool, str]:
         return False, "Detached HEAD — check out a branch (e.g. main) to self-update."
     try:
         r = _git(["pull", "--ff-only", remote, branch], cwd=root)
+        if r.returncode != 0 and "cannot run ssh" in (r.stderr or "").lower():
+            https_remote = _https_github_remote(root, remote)
+            if https_remote:
+                r = _git(["pull", "--ff-only", https_remote, branch], cwd=root)
         if r.returncode != 0:
             return False, (r.stderr or r.stdout).strip()[:500]
         out = (r.stdout or "Already up to date.").strip()[:500]
