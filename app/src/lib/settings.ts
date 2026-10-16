@@ -52,6 +52,7 @@ export function getApiKey(): string {
 
 export function setApiKey(key: string): void {
   write(API_KEY, key.trim());
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('sdcodex:api-key-changed'));
 }
 
 export function clearApiKey(): void {
@@ -61,6 +62,7 @@ export function clearApiKey(): void {
   } catch {
     /* ignore */
   }
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('sdcodex:api-key-changed'));
 }
 
 /** Username confirmed by the last successful key validation. */
@@ -210,9 +212,8 @@ export async function pullSettings(): Promise<boolean> {
     }>('/settings');
     write('sdcodex.dirs.v1', JSON.stringify(s.dirs ?? {}));
     write(COLORS_KEY, JSON.stringify(s.colors ?? {}));
-    if (s.civitaiApiKey) {
-      write('sdcodex.apiKey.v1', s.civitaiApiKey);
-    }
+    if (s.civitaiApiKey) setApiKey(s.civitaiApiKey);
+    else clearApiKey();
     if (s.apiMirror === 'civitai.red' || s.apiMirror === 'civitai.com') {
       write(API_MIRROR, s.apiMirror);
     }

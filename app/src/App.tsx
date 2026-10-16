@@ -18,7 +18,8 @@ import { adoptServerUser, clearProfile, completeOidcCallback, endSession, fetchS
 import type { InstalledPlugin } from './lib/plugins';
 import { deleteScanned } from './lib/library';
 import { apiPost, backendLogout, backendAvailable } from './lib/backend';
-import { pullSettings } from './lib/settings';
+import { getApiKey, pullSettings, setApiUser } from './lib/settings';
+import { fetchMe } from './lib/civitai';
 
 export default function App() {
   const [view, setView] = useState<ViewId>('models');
@@ -229,7 +230,20 @@ export default function App() {
   // pulling pre-auth only spams the console). Runs on login and on refresh
   // with a live session.
   useEffect(() => {
-    if (authed) void pullSettings();
+    if (!authed) return;
+    let live = true;
+    void (async () => {
+      if (!(await pullSettings())) return;
+      const key = getApiKey();
+      if (!key) return;
+      try {
+        const me = await fetchMe(key);
+        if (live) setApiUser(me.username ?? '');
+      } catch {
+        // Preserve the saved key if Civitai is temporarily offline.
+      }
+    })();
+    return () => { live = false; };
   }, [authed]);
 
   // Global "/" focuses the first search field, as placeholders promise.
@@ -351,7 +365,7 @@ export default function App() {
           </div>
         </div>
       )}
-      <div className="mx-auto flex max-w-[1400px]">
+      <div className="mx-auto flex min-h-screen w-full">
         <Sidebar
           view={view}
           go={go}

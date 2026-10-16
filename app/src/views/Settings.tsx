@@ -571,6 +571,9 @@ function ApiKey() {
   const [githubSaved, setGithubSaved] = useState<boolean | null>(null);
   const [githubToken, setGithubToken] = useState('');
   const [githubMessage, setGithubMessage] = useState<string | null>(null);
+  const [hfConfigured, setHfConfigured] = useState<boolean | null>(null);
+  const [hfToken, setHfToken] = useState('');
+  const [hfMessage, setHfMessage] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -581,7 +584,30 @@ function ApiKey() {
         setGithubSaved(Boolean(result.saved));
       } catch { /* standalone preview */ }
     })();
+    void (async () => {
+      try {
+        const response = await fetch('/comfy-caption/models/token-status', { cache: 'no-store' });
+        if (response.ok) setHfConfigured(Boolean((await response.json()).configured));
+      } catch { /* ComfyCaption may not be installed */ }
+    })();
   }, []);
+
+  const saveHfToken = async (token: string) => {
+    setHfMessage('Saving…');
+    try {
+      const response = await fetch('/comfy-caption/models/token', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
+      setHfConfigured(Boolean(result.configured));
+      setHfToken('');
+      setHfMessage(result.configured ? 'Saved. Token is stored securely on the server.' : 'Token cleared.');
+    } catch (e) {
+      setHfMessage(e instanceof Error ? e.message : 'Save failed');
+    }
+  };
 
   const saveGithubToken = async () => {
     setGithubMessage('Saving…');
@@ -692,6 +718,17 @@ function ApiKey() {
           {status.text}
         </p>
       )}
+      <div className="mt-4 border-t border-white/[0.06] pt-3">
+        <h3 className="font-display text-sm font-semibold">HuggingFace token</h3>
+        <p className="mt-1 text-xs text-ink-muted">Used by ComfyCaption to download gated caption models. The saved token is never shown.</p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="font-mono text-[10px] text-ink-faint">{hfConfigured == null ? 'Checking…' : hfConfigured ? 'Saved' : 'Not set'}</span>
+          <input value={hfToken} onChange={(e) => setHfToken(e.target.value)} placeholder="HuggingFace token" type="password" autoComplete="off" className="min-w-[220px] flex-1 rounded border border-white/10 bg-obsidian-lowest px-3 py-2 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary" />
+          <GhostButton onClick={() => void saveHfToken(hfToken)}>Save key</GhostButton>
+          {hfConfigured && <GhostButton onClick={() => void saveHfToken('')}>Clear</GhostButton>}
+          {hfMessage && <span className="font-mono text-[10px] text-ink-faint">{hfMessage}</span>}
+        </div>
+      </div>
       <div className="mt-4 border-t border-white/[0.06] pt-3">
         <h3 className="font-display text-sm font-semibold">GitHub key</h3>
         <p className="mt-1 text-xs text-ink-muted">Used to access private plugin repositories. The saved key is never shown.</p>

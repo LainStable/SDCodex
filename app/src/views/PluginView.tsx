@@ -16,7 +16,7 @@ export default function PluginView({
         key={`${plugin.id}/${current}`}
         title={`${plugin.name} — ${current}`}
         src={`/api/plugins/${plugin.id}/page/${current}`}
-        className="h-[calc(100vh-140px)] min-h-[480px] w-full rounded-lg border border-white/[0.06] bg-obsidian-lowest"
+        className="h-[calc(100dvh-120px)] min-h-[480px] w-full rounded-lg border border-white/[0.06] bg-obsidian-lowest"
       />
     </div>
   );

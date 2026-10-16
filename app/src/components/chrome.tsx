@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { hexToRgba } from './ui';
 import { FanIcon } from './fanIcon';
+import { probeCivitai } from '../lib/civitai';
+import { getApiKey } from '../lib/settings';
 
 /* Shared chrome matching all four Stitch prototypes:
    sidebar order, topbar, page headers, buttons, stats. */
@@ -87,7 +89,7 @@ export function Sidebar({
               {activePlugin.name}
               {activePlugin.version ? ` · v${activePlugin.version}` : ''}
             </div>
-            {activePlugin.nav_items.map((item) => (
+            {activePlugin.nav_items.length > 1 && activePlugin.nav_items.map((item) => (
               <button
                 key={item.page}
                 type="button"
@@ -98,7 +100,7 @@ export function Sidebar({
                     : 'text-ink-muted hover:bg-white/5'
                 }`}
               >
-                {item.icon ? <span aria-hidden="true">{item.icon}</span> : null}
+                {item.icon ? <span aria-hidden="true" className="material-symbols-outlined text-[16px]">{item.icon}</span> : null}
                 <span>{item.label}</span>
               </button>
             ))}
@@ -380,6 +382,7 @@ export function Topbar({
           /
         </kbd>
       </div>
+      <CivitaiStatus signedIn={signedIn} />
       <span
         className={`hidden rounded border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.06em] sm:inline ${
           socket === 'rw'
@@ -410,6 +413,43 @@ export function Topbar({
         onSpacePlugin={onSpacePlugin}
       />
     </div>
+  );
+}
+
+function CivitaiStatus({ signedIn }: { signedIn: boolean }) {
+  const [online, setOnline] = useState<boolean | null>(null);
+  const [hasKey, setHasKey] = useState(() => Boolean(getApiKey()));
+
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      setHasKey(Boolean(getApiKey()));
+      const result = await probeCivitai();
+      if (active) setOnline(result.ok);
+    };
+    const onKeyChange = () => void refresh();
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 60000);
+    window.addEventListener('sdcodex:api-key-changed', onKeyChange);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener('sdcodex:api-key-changed', onKeyChange);
+    };
+  }, [signedIn]);
+
+  const state = online === false ? 'down' : hasKey ? 'key' : 'no-key';
+  const color = state === 'down'
+    ? 'border-status-alert/40 bg-status-alert/10 text-[#f87171]'
+    : state === 'key'
+      ? 'border-status-active/40 bg-status-active/10 text-status-active'
+      : 'border-status-warning/40 bg-status-warning/10 text-[#fcd34d]';
+  const label = state === 'down' ? 'Civitai down' : state === 'key' ? 'Civitai key set' : 'Civitai key missing';
+  return (
+    <span title={label} aria-label={label} className={`inline-flex shrink-0 items-center gap-1.5 rounded border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.06em] ${color}`}>
+      <span className="material-symbols-outlined text-[14px]">{state === 'down' ? 'cloud_off' : 'hub'}</span>
+      <span className="hidden lg:inline">Civitai</span>
+    </span>
   );
 }
 
