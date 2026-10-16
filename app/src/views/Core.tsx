@@ -931,8 +931,8 @@ export function Plugins() {
     <div>
       <PageHeader
         title="Plugin Hub"
-        subtitle="Extensions and system orchestrator. Installer backend pending — manifests below define the install contract."
-        meta={`${list.length} plugins · ${live ? 'live hub catalog' : 'built-in list (hub unreachable)'}${catalog?.core ? ` · core ${catalog.core.version}` : ''}`}
+        subtitle="Install and manage application extensions."
+        meta={`${list.length} plugins · ${live ? 'live hub catalog' : 'hub unavailable'}${catalog?.core ? ` · core ${catalog.core.version}` : ''}`}
       />
       {catalog?.core && (
         <div className="glass-l1 mt-4 flex flex-wrap items-center gap-3 rounded-lg p-4">
