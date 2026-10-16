@@ -392,7 +392,7 @@ export default function App() {
           </div>
         </div>
       )}
-      <div className="mx-auto flex min-h-screen w-full">
+      <div className="flex min-h-dvh w-full max-w-none">
         <Sidebar
           view={view}
           go={go}

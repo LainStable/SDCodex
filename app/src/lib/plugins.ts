@@ -59,6 +59,7 @@ export interface InstalledPlugin {
   version: string;
   description?: string;
   icon?: string;
+  entry_page?: string;
   nav_items: PluginNavItem[];
   settings: PluginSettingTab[];
   has_update?: boolean;

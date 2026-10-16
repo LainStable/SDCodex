@@ -6,6 +6,20 @@
   color-scheme: dark;
 }
 
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+body,
+#root {
+  min-height: 100dvh;
+}
+
 body {
   @apply bg-obsidian-bg text-ink font-body antialiased;
 }

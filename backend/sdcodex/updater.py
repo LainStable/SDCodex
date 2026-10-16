@@ -285,6 +285,7 @@ def list_installed() -> list:
                 "description": mf.get("description", ""),
                 "repository": mf.get("repository", ""),
                 "icon": mf.get("icon", ""),
+                "entry_page": mf.get("entry_page", ""),
                 "nav_items": mf.get("nav_items", []) if isinstance(mf.get("nav_items"), list) else [],
                 "settings": mf.get("settings", []) if isinstance(mf.get("settings"), list) else [],
                 "path": p,
@@ -309,11 +310,23 @@ def load_plugins(app) -> list:
         mod_name, func_name = ep.split(":", 1)
         try:
             import importlib
+            import types
             import sys as _sys
 
             if p["path"] not in _sys.path:
                 _sys.path.insert(0, p["path"])
-            mod = importlib.import_module(mod_name)
+            # Plugin repos commonly name their entrypoint module ``plugin``.
+            # Importing that generic name globally made every plugin after the
+            # first reuse the first plugin's cached module, so its blueprints
+            # were never registered. Give each plugin a private package while
+            # preserving normal relative imports within that repo.
+            package_name = "_sdcodex_plugin_" + re.sub(r"[^A-Za-z0-9_]", "_", p["id"])
+            if package_name not in _sys.modules:
+                package = types.ModuleType(package_name)
+                package.__path__ = [p["path"]]
+                package.__package__ = package_name
+                _sys.modules[package_name] = package
+            mod = importlib.import_module(f"{package_name}.{mod_name}")
             fn = getattr(mod, func_name)
             from . import db as _db
 

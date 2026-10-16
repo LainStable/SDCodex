@@ -9,7 +9,7 @@ export default function PluginView({
   plugin: InstalledPlugin;
   page: string | null;
 }) {
-  const current = page ?? plugin.nav_items[0]?.page ?? '';
+  const current = page ?? plugin.nav_items[0]?.page ?? plugin.entry_page ?? '';
   return (
     <div>
       <iframe
