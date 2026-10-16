@@ -887,7 +887,13 @@ def civitai_proxy(subpath: str):
     if mirror not in ("civitai.com", "civitai.red"):
         mirror = "civitai.com"
     headers = {"User-Agent": "SDCodex/1.0 (+https://github.com/LainStable/SDCodex)"}
-    if user.api_key:
+    # API key validation happens before the key is saved on the user row, so
+    # honor the browser's one-request Bearer token. Once saved, normal calls
+    # can use the account key stored server-side.
+    authorization = (request.headers.get("Authorization") or "").strip()
+    if authorization.lower().startswith("bearer "):
+        headers["Authorization"] = authorization
+    elif user.api_key:
         headers["Authorization"] = f"Bearer {user.api_key}"
     try:
         resp = requests.get(

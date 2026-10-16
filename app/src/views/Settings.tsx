@@ -53,7 +53,7 @@ import { clearScanLog, getScanLog, pushScanLog, subscribeScanLog } from '../lib/
 
 const CORE_TABS: { id: string; label: string }[] = [
   { id: 'dirs', label: 'Model dirs' },
-  { id: 'api', label: 'API key' },
+  { id: 'api', label: 'API keys' },
   { id: 'auth', label: 'Profile' },
 ];
 
@@ -568,6 +568,34 @@ function ApiKey() {
   const [mirror, setMirror] = useState(getApiMirror);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [githubSaved, setGithubSaved] = useState<boolean | null>(null);
+  const [githubToken, setGithubToken] = useState('');
+  const [githubMessage, setGithubMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const { apiGet, backendAvailable } = await import('../lib/backend');
+        if (!(await backendAvailable())) return;
+        const result = await apiGet<{ saved?: boolean }>('/plugins/github-token');
+        setGithubSaved(Boolean(result.saved));
+      } catch { /* standalone preview */ }
+    })();
+  }, []);
+
+  const saveGithubToken = async () => {
+    setGithubMessage('Saving…');
+    try {
+      const { apiPost, backendAvailable } = await import('../lib/backend');
+      if (!(await backendAvailable())) throw new Error('Backend unreachable.');
+      const result = await apiPost<{ saved?: boolean }>('/plugins/github-token', { token: githubToken });
+      setGithubSaved(Boolean(result.saved));
+      setGithubToken('');
+      setGithubMessage(result.saved ? 'Saved.' : 'Cleared.');
+    } catch (e) {
+      setGithubMessage(e instanceof Error ? e.message : 'Save failed');
+    }
+  };
 
   // Save validates first (mirrors OldCode save_api_key → get_user): the key is
   // only stored when Civitai confirms it, and the panel shows who it belongs to.
@@ -604,8 +632,8 @@ function ApiKey() {
         )}
       </div>
       <p className="mt-1 text-xs text-ink-muted">
-        Sent as a Bearer token on every Civitai request (same as OldCode headers). Stored only
-        in this browser until user accounts land. Save validates against the selected host.
+        Sent as a Bearer token on Civitai requests and saved to your account after validation.
+        Save validates against the selected host.
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
@@ -644,6 +672,7 @@ function ApiKey() {
               setKey('');
               setUser('');
               setStatus(null);
+              void pushSettings();
             }}
           >
             Clear
@@ -663,6 +692,16 @@ function ApiKey() {
           {status.text}
         </p>
       )}
+      <div className="mt-4 border-t border-white/[0.06] pt-3">
+        <h3 className="font-display text-sm font-semibold">GitHub key</h3>
+        <p className="mt-1 text-xs text-ink-muted">Used to access private plugin repositories. The saved key is never shown.</p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="font-mono text-[10px] text-ink-faint">{githubSaved == null ? '' : githubSaved ? 'Saved' : 'Not set'}</span>
+          <input value={githubToken} onChange={(e) => setGithubToken(e.target.value)} placeholder="GitHub token" type="password" autoComplete="off" className="min-w-[220px] flex-1 rounded border border-white/10 bg-obsidian-lowest px-3 py-2 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary" />
+          <GhostButton onClick={() => void saveGithubToken()}>Save key</GhostButton>
+          {githubMessage && <span className="font-mono text-[10px] text-ink-faint">{githubMessage}</span>}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1129,8 +1168,8 @@ function System({ isAdmin }: { isAdmin: boolean }) {
         </div>
       </dl>
       <p className="mt-3 font-mono text-[11px] text-ink-faint">
-        Core and plugins update via git pull (bare-metal and Docker alike). Update checks live on the
-        Plugins tab.
+        Core and plugins update via git pull (bare-metal and Docker alike). Core update controls are
+        available from Plugin Hub → Updates.
       </p>
       <div className="mt-4 border-t border-white/[0.06] pt-3">
         <h3 className="font-display text-sm font-semibold">Single sign-on</h3>

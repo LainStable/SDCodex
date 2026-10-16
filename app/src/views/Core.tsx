@@ -712,9 +712,6 @@ export function Plugins() {
   const [rebuildLog, setRebuildLog] = useState<string[]>([]);
   const [showRebuildLog, setShowRebuildLog] = useState(false);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
-  const [tokenSaved, setTokenSaved] = useState<boolean | null>(null);
-  const [tokenInput, setTokenInput] = useState('');
-  const [tokenMsg, setTokenMsg] = useState<string | null>(null);
 
   const check = async () => {
     setChecking(true);
@@ -811,33 +808,6 @@ export function Plugins() {
     }
   };
 
-  const refreshTokenStatus = async () => {
-    try {
-      const { apiGet, backendAvailable } = await import('../lib/backend');
-      if (!(await backendAvailable())) return;
-      const r = await apiGet<{ saved?: boolean }>('/plugins/github-token');
-      setTokenSaved(Boolean(r.saved));
-    } catch {
-      /* standalone */
-    }
-  };
-
-  const saveToken = async () => {
-    setTokenMsg('saving…');
-    try {
-      const { apiPost, backendAvailable } = await import('../lib/backend');
-      if (!(await backendAvailable())) throw new Error('Backend unreachable.');
-      const r = await apiPost<{ ok: boolean; saved?: boolean }>('/plugins/github-token', {
-        token: tokenInput,
-      });
-      setTokenSaved(Boolean(r.saved));
-      setTokenInput('');
-      setTokenMsg(r.saved ? 'saved to DB + .env' : 'cleared');
-    } catch (e) {
-      setTokenMsg(e instanceof Error ? e.message : 'Save failed');
-    }
-  };
-
   const refreshInstalled = async () => {
     try {
       const { apiGet, backendAvailable } = await import('../lib/backend');
@@ -863,7 +833,6 @@ export function Plugins() {
       }
     })();
     void refreshInstalled();
-    void refreshTokenStatus();
     void check();
     return () => {
       on = false;
@@ -974,19 +943,22 @@ export function Plugins() {
             <span className="text-ink-faint">
               v{updates.core.local_version || '?'} → v{updates.core.remote_version || '?'}
             </span>
-            {updates.core.has_update ? (
-              applying ? (
-                <div className="min-w-40 flex-1">
-                  <ProgressBar />
-                </div>
-              ) : (
-                <PrimaryButton disabled={applying || rebuilding} onClick={() => void updateAll()}>
-                  {rebuilding ? 'Rebuilding…' : 'Update'}
-                </PrimaryButton>
-              )
+            {!updates.core.has_update && <span className="text-status-active">up to date</span>}
+            {applying ? (
+              <div className="min-w-40 flex-1"><ProgressBar /></div>
             ) : (
-              <span className="text-status-active">up to date</span>
+              <PrimaryButton disabled={applying || rebuilding} onClick={() => void updateAll()}>
+                {rebuilding ? 'Rebuilding…' : 'Update'}
+              </PrimaryButton>
             )}
+          </div>
+        )}
+        {!updates?.core && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-white/[0.06] px-2 py-1.5 font-mono text-[11px]">
+            <span className="flex-1 text-ink-muted">Core update</span>
+            <PrimaryButton disabled={checking || applying || rebuilding} onClick={() => void updateAll()}>
+              {applying || rebuilding ? 'Updating…' : 'Update'}
+            </PrimaryButton>
           </div>
         )}
         {(updates?.plugins ?? []).length > 0 && (
@@ -1008,21 +980,6 @@ export function Plugins() {
           </div>
         )}
         {updateMsg && <p className="mt-2 font-mono text-[11px] text-ink-muted">{updateMsg}</p>}
-        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-white/[0.06] pt-3">
-          <span className="font-mono text-[11px] text-ink-muted">
-            GitHub token {tokenSaved == null ? '' : tokenSaved ? '(saved ✓)' : '(not set)'}
-          </span>
-          <input
-            value={tokenInput}
-            onChange={(e) => setTokenInput(e.target.value)}
-            placeholder="ghp_… (private plugin repos)"
-            type="password"
-            autoComplete="off"
-            className="min-w-0 flex-1 rounded border border-white/10 bg-obsidian-lowest px-2 py-1.5 font-mono text-[11px] outline-none placeholder:text-ink-faint focus:border-primary"
-          />
-          <GhostButton onClick={() => void saveToken()}>Save token</GhostButton>
-          {tokenMsg && <span className="font-mono text-[10px] text-ink-faint">{tokenMsg}</span>}
-        </div>
       </div>
       {showRebuildLog && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
