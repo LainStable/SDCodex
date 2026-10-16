@@ -761,6 +761,7 @@ export function Plugins() {
     // Version-aware reload: the OLD container keeps answering health until
     // the swap, so only reload once a DIFFERENT version responds.
     let preVersion = '';
+    let backendWentDown = false;
     try {
       const { apiGet } = await import('../lib/backend');
       try {
@@ -778,16 +779,23 @@ export function Plugins() {
         await new Promise((res) => setTimeout(res, 10000));
         try {
           const lj = await apiGet<{ lines?: string[] }>('/system/rebuild/log');
-          if (lj.lines) setRebuildLog(lj.lines);
+          if (lj.lines) {
+            setRebuildLog(lj.lines);
+            if (lj.lines.some((line) => line.includes('swap done'))) {
+              window.location.reload();
+              return;
+            }
+          }
         } catch {
           /* backend going down — keep last lines */
         }
         try {
           resetBackendProbe();
           const h = await fetch('/api/health', { cache: 'no-store' });
+          if (!h.ok) backendWentDown = true;
           if (h.ok) {
             const j = (await h.json().catch(() => ({}))) as { version?: string };
-            if (j.version && preVersion && j.version !== preVersion) {
+            if ((j.version && preVersion && j.version !== preVersion) || backendWentDown) {
               window.location.reload();
               return;
             }

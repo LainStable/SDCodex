@@ -233,14 +233,15 @@ export default function App() {
     if (!authed) return;
     let live = true;
     void (async () => {
-      if (!(await pullSettings())) return;
+      await pullSettings();
       const key = getApiKey();
       if (!key) return;
       try {
         const me = await fetchMe(key);
         if (live) setApiUser(me.username ?? '');
       } catch {
-        // Preserve the saved key if Civitai is temporarily offline.
+        // Keep the key during outages, but don't report an unverified session.
+        if (live) setApiUser('');
       }
     })();
     return () => { live = false; };

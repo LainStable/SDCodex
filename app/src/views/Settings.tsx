@@ -576,6 +576,19 @@ function ApiKey() {
   const [hfMessage, setHfMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    const refreshApiIdentity = () => {
+      setKey(getApiKey());
+      setUser(getApiUser());
+    };
+    window.addEventListener('sdcodex:api-key-changed', refreshApiIdentity);
+    window.addEventListener('sdcodex:api-user-changed', refreshApiIdentity);
+    return () => {
+      window.removeEventListener('sdcodex:api-key-changed', refreshApiIdentity);
+      window.removeEventListener('sdcodex:api-user-changed', refreshApiIdentity);
+    };
+  }, []);
+
+  useEffect(() => {
     void (async () => {
       try {
         const { apiGet, backendAvailable } = await import('../lib/backend');

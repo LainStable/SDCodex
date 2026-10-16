@@ -72,6 +72,7 @@ export function getApiUser(): string {
 
 export function setApiUser(username: string): void {
   write(API_USER, username);
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('sdcodex:api-user-changed'));
 }
 
 /** API host: civitai.com (default) or civitai.red mirror. */
@@ -212,8 +213,9 @@ export async function pullSettings(): Promise<boolean> {
     }>('/settings');
     write('sdcodex.dirs.v1', JSON.stringify(s.dirs ?? {}));
     write(COLORS_KEY, JSON.stringify(s.colors ?? {}));
+    // A server row may be empty when an older build saved the key only in
+    // localStorage. Preserve that key so startup validation can still run.
     if (s.civitaiApiKey) setApiKey(s.civitaiApiKey);
-    else clearApiKey();
     if (s.apiMirror === 'civitai.red' || s.apiMirror === 'civitai.com') {
       write(API_MIRROR, s.apiMirror);
     }

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { hexToRgba } from './ui';
 import { FanIcon } from './fanIcon';
 import { probeCivitai } from '../lib/civitai';
-import { getApiKey } from '../lib/settings';
+import { getApiKey, getApiUser } from '../lib/settings';
 
 /* Shared chrome matching all four Stitch prototypes:
    sidebar order, topbar, page headers, buttons, stats. */
@@ -419,11 +419,13 @@ export function Topbar({
 function CivitaiStatus({ signedIn }: { signedIn: boolean }) {
   const [online, setOnline] = useState<boolean | null>(null);
   const [hasKey, setHasKey] = useState(() => Boolean(getApiKey()));
+  const [apiUser, setApiUser] = useState(getApiUser);
 
   useEffect(() => {
     let active = true;
     const refresh = async () => {
       setHasKey(Boolean(getApiKey()));
+      setApiUser(getApiUser());
       const result = await probeCivitai();
       if (active) setOnline(result.ok);
     };
@@ -431,24 +433,27 @@ function CivitaiStatus({ signedIn }: { signedIn: boolean }) {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 60000);
     window.addEventListener('sdcodex:api-key-changed', onKeyChange);
+    window.addEventListener('sdcodex:api-user-changed', onKeyChange);
     return () => {
       active = false;
       window.clearInterval(timer);
       window.removeEventListener('sdcodex:api-key-changed', onKeyChange);
+      window.removeEventListener('sdcodex:api-user-changed', onKeyChange);
     };
   }, [signedIn]);
 
-  const state = online === false ? 'down' : hasKey ? 'key' : 'no-key';
+  const state = online === false ? 'down' : apiUser ? 'key' : 'no-key';
   const color = state === 'down'
     ? 'border-status-alert/40 bg-status-alert/10 text-[#f87171]'
     : state === 'key'
       ? 'border-status-active/40 bg-status-active/10 text-status-active'
       : 'border-status-warning/40 bg-status-warning/10 text-[#fcd34d]';
-  const label = state === 'down' ? 'Civitai down' : state === 'key' ? 'Civitai key set' : 'Civitai key missing';
+  const label = state === 'down' ? 'Civitai down' : state === 'key' ? `Logged in as @${apiUser}` : hasKey ? 'Civitai key not validated' : 'Civitai key missing';
   return (
     <span title={label} aria-label={label} className={`inline-flex shrink-0 items-center gap-1.5 rounded border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.06em] ${color}`}>
       <span className="material-symbols-outlined text-[14px]">{state === 'down' ? 'cloud_off' : 'hub'}</span>
       <span className="hidden lg:inline">Civitai</span>
+      {apiUser && <span className="hidden font-mono normal-case lg:inline">@{apiUser}</span>}
     </span>
   );
 }
