@@ -137,6 +137,13 @@ live code when in doubt — this is a snapshot, not a substitute for reading the
 - Use as reference / starting point for plugin rewrites
 - **Plugin rewrites must keep the current site design** (DESIGN.md tokens, Obsidian Codex dark-first)
 - Many plugins are currently broken due to changes not being pushed correctly
+- GalleryDL plugin (0.1.6, 2026-10-15): new batch btn routes to create form,
+  schedule column shown, config save writes plain `.conf`, task list pulls
+  from disk (`/data/tasks`). Plugin manifest names shortened to match fan
+  labels (`gallery`, `gallerydl`, `rembg`, `caption`).
+- Rebuild / port fix (rebuilder 2026-10-15): `_resolve_ports()` uses `.env`
+  mtime vs container `StartedAt` (evidence-based); `swap_helper.py` survives
+  the container stop (delegates swap, clears `.rebuild-required`).
 
 ## Testing setup
 - Pull + build the Docker image, run the app in a **separate directory**
