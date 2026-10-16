@@ -563,8 +563,7 @@ def updates_check():
             "rebuild_required": rebuild_required,
             "rebuild": rebuilder_mod.rebuild_capability(),
             "total": (1 if core.get("has_update") else 0)
-            + len(plugin_updates)
-            + (1 if rebuild_required else 0),
+            + len(plugin_updates),
         }
     )
 
