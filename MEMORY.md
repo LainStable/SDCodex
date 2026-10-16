@@ -164,7 +164,10 @@ live code when in doubt — this is a snapshot, not a substitute for reading the
 - Frontend shows "Rebuild required" banner with "Rebuild now" button
 - Rebuild log: `.rebuild.log`, streamed to frontend via `GET /system/rebuild/log`
 
-## Radial fan menu (2026-10-15 fix)
+## GalleryDL plugin (2026-10-15 fix by user direction)
+- Tasks design: old `artillery.py` (new-task form with schedule mode [manual/on-demand vs recurring/cron], command, URLs [textarea/file], OAuth site, cookies file, start checkbox; `load_tasks()` reads disk folders with `cron.txt` + `status.json` + `stdout.log`). Current backend (`plugin_backend.py`) keeps this (new `schedule` field added to `_task_info()` 2026-10-15).
+- Tasks HTML (`pages/tasks.html`) fixed: "New Batch Scraping Job" button links to `#new-task-form` (was `one-time.html`); empty-state text fixed ("create one above"); table header has Schedule column; `row()` shows `scheduleDisplay` (cron pill or "manual"); `createTask()` form submits `POST /gdl/api/tasks` with name/urls/command/start/schedule/oauth_site/cookie_path; refresh polls `/gdl/api/tasks`.
+- Note: installed `plugins/GalleryDL/*` is git-ignored at core (`plugins/*`); plugin code lives in its own worktree (`plugins/GalleryDL/.git`). Changes saved there persist in the workspace but are not in `upstream/main`.
 - Plugin `plugin.json` `icon` fields hold Material names (`photo_library`,
   `auto_fix_high`, `fas fa-tags`) — rendering them raw inside the 44px fan
   button produced floating text (screenshots 2026-10-15).
