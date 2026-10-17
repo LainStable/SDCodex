@@ -384,7 +384,7 @@ export function UserMenu({
 }
 
 export function Topbar({
-  runtimeMode = 'local',
+  installMode = 'local',
   go,
   onToggleSidebar,
   sidebarCollapsed,
@@ -399,7 +399,7 @@ export function Topbar({
   onSpaceCore,
   onSpacePlugin,
 }: {
-  runtimeMode?: 'docker' | 'local';
+  installMode?: 'docker' | 'local';
   go: (v: ViewId) => void;
   onToggleSidebar: () => void;
   sidebarCollapsed: boolean;
@@ -442,14 +442,14 @@ export function Topbar({
         </kbd>
       </div>
       <span
-        title="Current runtime mode"
+        title="Selected install mode"
         className={`hidden rounded border px-2 py-1 font-mono text-[10px] tracking-[0.06em] sm:inline ${
-          runtimeMode === 'local'
+          installMode === 'local'
             ? 'border-status-active/30 bg-status-active/10 text-status-active'
             : 'border-primary/30 bg-primary/10 text-[#a5b4fc]'
         }`}
       >
-        {runtimeMode}
+        {installMode}
       </span>
       <button
         type="button"

@@ -84,7 +84,7 @@ export default function App() {
   // remounts the tab (re-running its check) even when already there.
   const [settingsNonce, setSettingsNonce] = useState(0);
   const [appVersion, setAppVersion] = useState('…');
-  const [runtimeMode, setRuntimeMode] = useState<'docker' | 'local'>('local');
+  const [installMode, setInstallMode] = useState<'docker' | 'local'>('local');
   const [updates, setUpdates] = useState<UpdateState>({
     core: false,
     plugins: false,
@@ -342,19 +342,19 @@ export default function App() {
   useEffect(() => {
     if (!authed) return;
     let live = true;
-    const refreshRuntimeMode = async () => {
+    const refreshInstallMode = async () => {
       try {
         const { apiGet } = await import('./lib/backend');
-        const status = await apiGet<{ runtime_mode?: 'docker' | 'local' }>('/system/install-mode');
-        if (live && (status.runtime_mode === 'docker' || status.runtime_mode === 'local')) {
-          setRuntimeMode(status.runtime_mode);
+        const status = await apiGet<{ mode?: 'docker' | 'local' }>('/system/install-mode');
+        if (live && (status.mode === 'docker' || status.mode === 'local')) {
+          setInstallMode(status.mode);
         }
       } catch {
         // Keep the local fallback when the backend mode endpoint is unavailable.
       }
     };
-    const onInstallModeChanged = () => void refreshRuntimeMode();
-    void refreshRuntimeMode();
+    const onInstallModeChanged = () => void refreshInstallMode();
+    void refreshInstallMode();
     window.addEventListener('sdcodex:install-mode-changed', onInstallModeChanged);
     return () => {
       live = false;
@@ -520,7 +520,7 @@ export default function App() {
         <main className="min-w-0 flex-1 p-4 md:p-5">
           <MobileNav view={view} go={go} />
           <Topbar
-            runtimeMode={runtimeMode}
+            installMode={installMode}
             go={go}
             onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
             sidebarCollapsed={sidebarCollapsed}

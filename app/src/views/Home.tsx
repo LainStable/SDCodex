@@ -202,13 +202,13 @@ export default function Home({ goModels, onOpen, onQueue, queuedIds, ownedIds }:
           </button>
         </div>
         {!rail && !error && (
-          <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+          <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="glass-l1 h-56 animate-pulse rounded-lg" />
             ))}
           </div>
         )}
-        <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+        <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
           {(rail?.featured ?? []).map((m) => {
             const v = m.modelVersions[0];
             const queued = v ? queuedIds.has(`civitai-${m.id}-${v.id}`) : false;

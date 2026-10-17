@@ -350,7 +350,7 @@ export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchT
         </div>
       )}
 
-      <section className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+      <section className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
         {loadingInitial &&
           Array.from({ length: 6 }).map((_, i) => (
             <div key={`sk-${i}`} className="glass-l1 h-64 animate-pulse rounded-lg" />
