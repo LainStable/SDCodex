@@ -189,6 +189,7 @@ function authHeaders(signal?: AbortSignal): {
 }
 
 export async function fetchModels(query: ExplorerQuery, signal?: AbortSignal): Promise<CivitaiPage> {
+  const searchTerm = query.q.trim();
   const params = new URLSearchParams({
     limit: '24',
     sort: query.sort,
@@ -197,10 +198,10 @@ export async function fetchModels(query: ExplorerQuery, signal?: AbortSignal): P
   });
   if (query.cursor !== undefined && query.cursor !== null && query.cursor !== '') {
     params.set('cursor', String(query.cursor));
-  } else if (query.page !== undefined && query.page !== null) {
+  } else if (!searchTerm && query.page !== undefined && query.page !== null) {
     params.set('page', String(query.page));
   }
-  if (query.q.trim()) params.set('query', query.q.trim());
+  if (searchTerm) params.set('query', searchTerm);
   if (query.type !== 'All') params.set('types', query.type);
   for (const b of query.baseModels) params.append('baseModels', b);
 

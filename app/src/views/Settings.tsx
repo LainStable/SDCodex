@@ -562,7 +562,7 @@ function Dirs() {
   );
 }
 
-function ApiKey() {
+function ApiKey({ installed }: { installed?: Array<{ id: string }> }) {
   const [key, setKey] = useState(getApiKey);
   const [user, setUser] = useState(getApiUser);
   const [mirror, setMirror] = useState(getApiMirror);
@@ -574,6 +574,7 @@ function ApiKey() {
   const [hfConfigured, setHfConfigured] = useState<boolean | null>(null);
   const [hfToken, setHfToken] = useState('');
   const [hfMessage, setHfMessage] = useState<string | null>(null);
+  const comfyCaptionInstalled = installed?.some((plugin) => plugin.id === 'comfy-caption') ?? false;
 
   useEffect(() => {
     const refreshApiIdentity = () => {
@@ -597,13 +598,13 @@ function ApiKey() {
         setGithubSaved(Boolean(result.saved));
       } catch { /* standalone preview */ }
     })();
-    void (async () => {
+    if (comfyCaptionInstalled) void (async () => {
       try {
         const response = await fetch('/comfy-caption/models/token-status', { cache: 'no-store' });
         if (response.ok) setHfConfigured(Boolean((await response.json()).configured));
       } catch { /* ComfyCaption may not be installed */ }
     })();
-  }, []);
+  }, [comfyCaptionInstalled]);
 
   const saveHfToken = async (token: string) => {
     setHfMessage('Saving…');
@@ -731,17 +732,19 @@ function ApiKey() {
           {status.text}
         </p>
       )}
-      <div className="mt-4 border-t border-white/[0.06] pt-3">
-        <h3 className="font-display text-sm font-semibold">HuggingFace token</h3>
-        <p className="mt-1 text-xs text-ink-muted">Used by ComfyCaption to download gated caption models. The saved token is never shown.</p>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <span className="font-mono text-[10px] text-ink-faint">{hfConfigured == null ? 'Checking…' : hfConfigured ? 'Saved' : 'Not set'}</span>
-          <input value={hfToken} onChange={(e) => setHfToken(e.target.value)} placeholder="HuggingFace token" type="password" autoComplete="off" className="min-w-[220px] flex-1 rounded border border-white/10 bg-obsidian-lowest px-3 py-2 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary" />
-          <GhostButton onClick={() => void saveHfToken(hfToken)}>Save key</GhostButton>
-          {hfConfigured && <GhostButton onClick={() => void saveHfToken('')}>Clear</GhostButton>}
-          {hfMessage && <span className="font-mono text-[10px] text-ink-faint">{hfMessage}</span>}
+      {comfyCaptionInstalled && (
+        <div className="mt-4 border-t border-white/[0.06] pt-3">
+          <h3 className="font-display text-sm font-semibold">HuggingFace token</h3>
+          <p className="mt-1 text-xs text-ink-muted">Used by ComfyCaption to download gated caption models. The saved token is never shown.</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className="font-mono text-[10px] text-ink-faint">{hfConfigured == null ? 'Checking…' : hfConfigured ? 'Saved' : 'Not set'}</span>
+            <input value={hfToken} onChange={(e) => setHfToken(e.target.value)} placeholder="HuggingFace token" type="password" autoComplete="off" className="min-w-[220px] flex-1 rounded border border-white/10 bg-obsidian-lowest px-3 py-2 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary" />
+            <GhostButton onClick={() => void saveHfToken(hfToken)}>Save key</GhostButton>
+            {hfConfigured && <GhostButton onClick={() => void saveHfToken('')}>Clear</GhostButton>}
+            {hfMessage && <span className="font-mono text-[10px] text-ink-faint">{hfMessage}</span>}
+          </div>
         </div>
-      </div>
+      )}
       <div className="mt-4 border-t border-white/[0.06] pt-3">
         <h3 className="font-display text-sm font-semibold">GitHub key</h3>
         <p className="mt-1 text-xs text-ink-muted">Used to access private plugin repositories. The saved key is never shown.</p>
@@ -1397,7 +1400,7 @@ export default function Settings({
       </div>
       <div className="mt-3">
         {tab === 'dirs' && <Dirs />}
-        {tab === 'api' && <ApiKey />}
+        {tab === 'api' && <ApiKey installed={installed} />}
         {tab === 'auth' && <Auth profile={profile} onProfile={onProfile} onSignOut={onSignOut} />}
         {tab === 'plugins' && <Plugins />}
         {tab === 'system' && (

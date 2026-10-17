@@ -84,7 +84,12 @@ export default function App() {
   // remounts the tab (re-running its check) even when already there.
   const [settingsNonce, setSettingsNonce] = useState(0);
   const [appVersion, setAppVersion] = useState('…');
-  const [updates, setUpdates] = useState<UpdateState>({ core: false, plugins: false, checking: false });
+  const [updates, setUpdates] = useState<UpdateState>({
+    core: false,
+    plugins: false,
+    newPluginAvailable: false,
+    checking: false,
+  });
   // Plugin spaces: core views vs one installed plugin (sidebar swaps, fan
   // gains core + per-plugin icons once anything is installed).
   const [space, setSpace] = useState<AppRoute['space']>(() => readRoute().space);
@@ -146,7 +151,6 @@ export default function App() {
     } catch {
       /* standalone — local stands */
     }
-    void checkUpdates();
     void refreshInstalled();
   };
 
@@ -184,21 +188,21 @@ export default function App() {
         /* admin-only or offline — plugins still checkable below */
       }
       let plugins = false;
+      let newPluginAvailable = false;
       try {
-        const inst = await apiGet<{ installed?: Array<{ id: string; version?: string; has_update?: boolean }> }>('/plugins').catch(() => null);
-        if (hub) {
-          const installed = new Map((inst?.installed ?? []).map((p) => [p.id, p]));
+        const inst = await apiGet<{ installed?: Array<{ id: string; version?: string; has_update?: boolean }> }>('/plugins');
+        if (hub && Array.isArray(inst.installed)) {
+          const installed = new Map(inst.installed.map((p) => [p.id, p]));
+          newPluginAvailable = hub.plugins.some((p) => !installed.has(p.id));
           plugins = hub.plugins.some((p) => {
             const cur = installed.get(p.id);
-            if (!cur) return true; // brand-new plugin in the hub
-            if (cur.has_update) return true;
-            return (cur.version ?? '') !== p.version;
+            return Boolean(cur && (cur.has_update || (cur.version ?? '') !== p.version));
           });
         }
       } catch {
         /* ignore */
       }
-      setUpdates({ core, plugins, checking: false });
+      setUpdates({ core, plugins, newPluginAvailable, checking: false });
     } catch {
       setUpdates((u) => ({ ...u, checking: false }));
     }
@@ -301,7 +305,6 @@ export default function App() {
             // Explorer, so its first request includes the restored API key.
             await pullSettings();
             setAuthed(true);
-            void checkUpdates();
             void refreshInstalled();
           } else {
             setAuthed(hasSession() && loadProfile() !== null);
@@ -403,6 +406,7 @@ export default function App() {
     const { fetchInstalled } = await import('./lib/plugins');
     const list = await fetchInstalled();
     setInstalled(list);
+    void checkUpdates();
     // Drop the space if its plugin went away.
     setSpace((s) => (s.kind === 'plugin' && !list.some((p) => p.id === s.id) ? { kind: 'core' } : s));
   };

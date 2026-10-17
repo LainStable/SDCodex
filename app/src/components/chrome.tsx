@@ -26,6 +26,7 @@ const NAV_ICONS: Record<ViewId, string> = {
 export interface UpdateState {
   core: boolean;
   plugins: boolean;
+  newPluginAvailable: boolean;
   checking: boolean;
 }
 
@@ -69,9 +70,9 @@ export function Sidebar({
       <div className={`font-display text-lg font-bold tracking-tight ${collapsed ? 'text-center' : ''}`} title={collapsed ? 'SDCodex' : undefined}>
         {collapsed ? 'SD' : 'SDCodex'}
       </div>
-      {!collapsed && <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
-        {hasUpdate ? (
-          <span className="inline-flex items-center gap-1.5">
+      {(hasUpdate || updates.newPluginAvailable || !collapsed) && (
+        <div className={`mt-1 flex flex-wrap items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint ${collapsed ? 'justify-center' : ''}`}>
+          {!collapsed && (hasUpdate ? (
             <button
               type="button"
               onClick={onGoPlugins}
@@ -88,11 +89,21 @@ export function Sidebar({
             >
               {updates.core ? '⟳' : '⬢'} v{version}
             </button>
-          </span>
-        ) : (
-          <span>v{version}</span>
-        )}
-      </div>}
+          ) : (
+            <span>v{version}</span>
+          ))}
+          {updates.newPluginAvailable && (
+            <button
+              type="button"
+              onClick={onGoPlugins}
+              title="A new plugin is available to install — open Plugin Hub"
+              className="rounded border border-status-warning/50 bg-status-warning/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-[#fcd34d] hover:bg-status-warning/25"
+            >
+              NEW
+            </button>
+          )}
+        </div>
+      )}
       <nav className="mt-6 space-y-1 text-sm">
         {activePlugin ? (
           <>
@@ -483,7 +494,6 @@ export function CivitaiAccountStatus() {
       aria-label={userLabel}
       className={`inline-flex h-6 shrink-0 items-center gap-1.5 rounded border px-2 font-mono text-[11px] ${userColor}`}
     >
-      <span className="material-symbols-outlined text-[14px]">account_circle</span>
       {apiUser ? `@${apiUser}` : hasKey ? 'Unverified' : 'Signed out'}
     </span>
   );
