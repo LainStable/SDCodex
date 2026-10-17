@@ -176,10 +176,11 @@ body {
   transform-origin: center;
 }
 
-/* Material Symbols glyph inside the 44px fan buttons. */
+/* Inline SVG glyphs used throughout the sidebar and fan menu. */
 .fan-glyph {
-  font-size: 22px;
-  line-height: 1;
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
   user-select: none;
 }
 

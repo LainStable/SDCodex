@@ -67,10 +67,12 @@ export function Sidebar({
   const currentPage = pluginPage ?? activePlugin?.nav_items[0]?.page ?? null;
   return (
     <aside className={`hidden shrink-0 border-r border-white/[0.06] transition-[width] duration-200 md:block ${collapsed ? 'w-16 p-2' : 'w-60 p-4'}`}>
-      <div className={`font-display text-lg font-bold tracking-tight ${collapsed ? 'flex justify-center' : ''}`} title={collapsed ? 'SDCodex' : undefined}>
-        {collapsed
-          ? <FanIcon icon="fa-solid fa-cubes" name="SDCodex" className="!text-[22px]" />
-          : 'SDCodex'}
+      <div
+        className={`flex items-center gap-2 font-display text-lg font-bold tracking-tight ${collapsed ? 'justify-center' : ''}`}
+        title={collapsed ? 'SDCodex' : undefined}
+      >
+        <img src="/sdcodex.svg" alt="" className="h-7 w-7 shrink-0 object-contain" />
+        {!collapsed && <span>SDCodex</span>}
       </div>
       {(hasUpdate || updates.newPluginAvailable || !collapsed) && (
         <div className={`mt-1 flex flex-wrap items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint ${collapsed ? 'justify-center' : ''}`}>
