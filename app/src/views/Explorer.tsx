@@ -13,6 +13,7 @@ import { targetDirFor } from '../lib/settings';
 import { Stars, TypeBadge } from '../components/ui';
 import {
   BaseCloud,
+  CivitaiAccountStatus,
   GhostButton,
   PageHeader,
   PrimaryButton,
@@ -237,17 +238,20 @@ export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchT
         subtitle="Browse Civitai weights by base model, architecture, and tags."
         meta={
           <>
-            <span
-              className={`mr-2 inline-flex items-center gap-1.5 rounded border px-2 py-0.5 ${
-                apiLive === false
-                  ? 'border-status-alert/30 bg-status-alert/10 text-[#f87171]'
-                  : 'border-status-active/30 bg-status-active/10 text-status-active'
-              }`}
-            >
+            <span className="mr-2 inline-flex items-center gap-2">
               <span
-                className={`h-1.5 w-1.5 rounded-full ${apiLive === false ? 'bg-status-alert' : 'bg-status-active'}`}
-              />
-              {apiLive === false ? 'Civitai API unreachable' : 'Civitai API'}
+                className={`inline-flex h-6 items-center gap-1.5 rounded border px-2 font-mono text-[11px] ${
+                  apiLive === false
+                    ? 'border-status-alert/30 bg-status-alert/10 text-[#f87171]'
+                    : 'border-status-active/30 bg-status-active/10 text-status-active'
+                }`}
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${apiLive === false ? 'bg-status-alert' : 'bg-status-active'}`}
+                />
+                {apiLive === false ? 'Civitai API unreachable' : 'Civitai API'}
+              </span>
+              <CivitaiAccountStatus />
             </span>
             {loadingInitial ? (
               'Searching…'

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { hexToRgba } from './ui';
 import { FanIcon } from './fanIcon';
-import { probeCivitai } from '../lib/civitai';
 import { getApiKey, getApiUser } from '../lib/settings';
 
 /* Shared chrome matching all four Stitch prototypes:
@@ -16,6 +15,14 @@ export const NAV: { id: ViewId; label: string; soon?: boolean }[] = [
   { id: 'queue', label: 'Download Queue' },
 ];
 
+const NAV_ICONS: Record<ViewId, string> = {
+  home: 'home',
+  models: 'travel_explore',
+  library: 'folder_open',
+  queue: 'download',
+  settings: 'settings',
+};
+
 export interface UpdateState {
   core: boolean;
   plugins: boolean;
@@ -25,6 +32,7 @@ export interface UpdateState {
 export function Sidebar({
   view,
   go,
+  collapsed,
   queueCount,
   version,
   updates,
@@ -36,6 +44,7 @@ export function Sidebar({
 }: {
   view: ViewId;
   go: (v: ViewId) => void;
+  collapsed: boolean;
   queueCount: number;
   version: string;
   updates: UpdateState;
@@ -56,9 +65,11 @@ export function Sidebar({
     space.kind === 'plugin' ? plugins.find((p) => p.id === space.id) : undefined;
   const currentPage = pluginPage ?? activePlugin?.nav_items[0]?.page ?? null;
   return (
-    <aside className="hidden w-60 shrink-0 border-r border-white/[0.06] p-4 md:block">
-      <div className="font-display text-lg font-bold tracking-tight">SDCodex</div>
-      <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+    <aside className={`hidden shrink-0 border-r border-white/[0.06] transition-[width] duration-200 md:block ${collapsed ? 'w-16 p-2' : 'w-60 p-4'}`}>
+      <div className={`font-display text-lg font-bold tracking-tight ${collapsed ? 'text-center' : ''}`} title={collapsed ? 'SDCodex' : undefined}>
+        {collapsed ? 'SD' : 'SDCodex'}
+      </div>
+      {!collapsed && <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
         {hasUpdate ? (
           <span className="inline-flex items-center gap-1.5">
             <button
@@ -81,27 +92,31 @@ export function Sidebar({
         ) : (
           <span>v{version}</span>
         )}
-      </div>
+      </div>}
       <nav className="mt-6 space-y-1 text-sm">
         {activePlugin ? (
           <>
-            <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+            {!collapsed && <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
               {activePlugin.name}
               {activePlugin.version ? ` · v${activePlugin.version}` : ''}
-            </div>
-            {activePlugin.nav_items.length > 1 && activePlugin.nav_items.map((item) => (
+            </div>}
+            {activePlugin.nav_items.length > (collapsed ? 0 : 1) && activePlugin.nav_items.map((item) => (
               <button
                 key={item.page}
                 type="button"
                 onClick={() => onPluginPage(item.page)}
-                className={`flex w-full items-center gap-2 rounded px-3 py-2 text-left ${
+                title={collapsed ? item.label : undefined}
+                aria-label={collapsed ? item.label : undefined}
+                className={`flex w-full items-center ${collapsed ? 'justify-center px-1' : 'gap-2 px-3'} rounded py-2 text-left ${
                   currentPage === item.page
                     ? 'bg-primary/15 text-white ring-1 ring-inset ring-primary/40'
                     : 'text-ink-muted hover:bg-white/5'
                 }`}
               >
-                {item.icon ? <span aria-hidden="true" className="material-symbols-outlined text-[16px]">{item.icon}</span> : null}
-                <span>{item.label}</span>
+                {item.icon && !collapsed ? <span aria-hidden="true" className="material-symbols-outlined text-[16px]">{item.icon}</span> : null}
+                {collapsed
+                  ? <span aria-hidden="true" className="font-mono text-xs font-bold">{item.label.slice(0, 2).toUpperCase()}</span>
+                  : <span>{item.label}</span>}
               </button>
             ))}
           </>
@@ -111,20 +126,23 @@ export function Sidebar({
             key={item.id}
             type="button"
             onClick={() => go(item.id)}
-            className={`flex w-full items-center justify-between rounded px-3 py-2 text-left ${
+            title={collapsed ? item.label : undefined}
+            aria-label={collapsed ? item.label : undefined}
+            className={`flex w-full items-center ${collapsed ? 'justify-center px-1' : 'justify-between px-3'} rounded py-2 text-left ${
               view === item.id
                 ? 'bg-primary/15 text-white ring-1 ring-inset ring-primary/40'
                 : 'text-ink-muted hover:bg-white/5'
             }`}
           >
-            <span>
-              {item.label}
+            {collapsed
+              ? <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{NAV_ICONS[item.id]}</span>
+              : <span>{item.label}
               {item.soon && (
                 <span className="ml-2 rounded border border-white/15 px-1.5 font-mono text-[9px] uppercase text-ink-faint">
                   soon
                 </span>
               )}
-            </span>
+              </span>}
             {item.id === 'queue' && queueCount > 0 && (
               <span className="rounded bg-primary/30 px-1.5 font-mono text-[10px]">
                 {queueCount}
@@ -134,13 +152,13 @@ export function Sidebar({
           )))
         }
       </nav>
-      <div className="mt-6 border-t border-white/[0.06] pt-3 font-mono text-[10px] leading-relaxed text-ink-faint">
+      {!collapsed && <div className="mt-6 border-t border-white/[0.06] pt-3 font-mono text-[10px] leading-relaxed text-ink-faint">
         Storage
         <div className="mt-1 h-1.5 overflow-hidden rounded-sm bg-white/10">
           <div className="h-full w-[37%] rounded-sm bg-gradient-to-r from-primary to-secondary" />
         </div>
         <div className="mt-1">742 GB of 2 TB</div>
-      </div>
+      </div>}
     </aside>
   );
 }
@@ -345,6 +363,8 @@ export function UserMenu({
 export function Topbar({
   socket = 'rw',
   go,
+  onToggleSidebar,
+  sidebarCollapsed,
   theme,
   setTheme,
   profileLabel,
@@ -358,6 +378,8 @@ export function Topbar({
 }: {
   socket?: 'rw' | 'ro';
   go: (v: ViewId) => void;
+  onToggleSidebar: () => void;
+  sidebarCollapsed: boolean;
   theme: Theme;
   setTheme: (t: Theme) => void;
   profileLabel: string;
@@ -371,6 +393,18 @@ export function Topbar({
 }) {
   return (
     <div className="mb-4 flex items-center gap-2">
+      <button
+        type="button"
+        onClick={onToggleSidebar}
+        className="glass-l1 hidden shrink-0 rounded-lg px-2.5 py-2 text-ink-muted hover:text-white md:block"
+        title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        aria-pressed={sidebarCollapsed}
+      >
+        <span className="material-symbols-outlined block text-[18px]">
+          {sidebarCollapsed ? 'left_panel_open' : 'left_panel_close'}
+        </span>
+      </button>
       <div className="glass-l1 flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2">
         <span className="text-ink-faint">⌕</span>
         <input
@@ -382,7 +416,6 @@ export function Topbar({
           /
         </kbd>
       </div>
-      <CivitaiStatus signedIn={signedIn} />
       <span
         className={`hidden rounded border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.06em] sm:inline ${
           socket === 'rw'
@@ -416,44 +449,41 @@ export function Topbar({
   );
 }
 
-function CivitaiStatus({ signedIn }: { signedIn: boolean }) {
-  const [online, setOnline] = useState<boolean | null>(null);
+export function CivitaiAccountStatus() {
   const [hasKey, setHasKey] = useState(() => Boolean(getApiKey()));
   const [apiUser, setApiUser] = useState(getApiUser);
 
   useEffect(() => {
-    let active = true;
-    const refresh = async () => {
+    const refresh = () => {
       setHasKey(Boolean(getApiKey()));
       setApiUser(getApiUser());
-      const result = await probeCivitai();
-      if (active) setOnline(result.ok);
     };
     const onKeyChange = () => void refresh();
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 60000);
     window.addEventListener('sdcodex:api-key-changed', onKeyChange);
     window.addEventListener('sdcodex:api-user-changed', onKeyChange);
     return () => {
-      active = false;
-      window.clearInterval(timer);
       window.removeEventListener('sdcodex:api-key-changed', onKeyChange);
       window.removeEventListener('sdcodex:api-user-changed', onKeyChange);
     };
-  }, [signedIn]);
+  }, []);
 
-  const state = online === false ? 'down' : apiUser ? 'key' : 'no-key';
-  const color = state === 'down'
-    ? 'border-status-alert/40 bg-status-alert/10 text-[#f87171]'
-    : state === 'key'
-      ? 'border-status-active/40 bg-status-active/10 text-status-active'
-      : 'border-status-warning/40 bg-status-warning/10 text-[#fcd34d]';
-  const label = state === 'down' ? 'Civitai down' : state === 'key' ? `Logged in as @${apiUser}` : hasKey ? 'Civitai key not validated' : 'Civitai key missing';
+  const userLabel = apiUser
+    ? `Civitai account @${apiUser}`
+    : hasKey
+      ? 'Civitai account not verified'
+      : 'Civitai account not signed in';
+  const userColor = apiUser
+    ? 'border-status-active/40 bg-status-active/10 text-status-active'
+    : 'border-status-warning/40 bg-status-warning/10 text-[#fcd34d]';
   return (
-    <span title={label} aria-label={label} className={`inline-flex shrink-0 items-center gap-1.5 rounded border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.06em] ${color}`}>
-      <span className="material-symbols-outlined text-[14px]">{state === 'down' ? 'cloud_off' : 'hub'}</span>
-      <span className="hidden lg:inline">Civitai</span>
-      {apiUser && <span className="hidden font-mono normal-case lg:inline">@{apiUser}</span>}
+    <span
+      title={userLabel}
+      aria-label={userLabel}
+      className={`inline-flex h-6 shrink-0 items-center gap-1.5 rounded border px-2 font-mono text-[11px] ${userColor}`}
+    >
+      <span className="material-symbols-outlined text-[14px]">account_circle</span>
+      {apiUser ? `@${apiUser}` : hasKey ? 'Unverified' : 'Signed out'}
     </span>
   );
 }

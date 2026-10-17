@@ -21,6 +21,42 @@ import { apiPost, backendLogout, backendAvailable } from './lib/backend';
 import { getApiKey, pullSettings, setApiUser } from './lib/settings';
 import { fetchMe } from './lib/civitai';
 
+type AppRoute = {
+  view: ViewId;
+  space: { kind: 'core' } | { kind: 'plugin'; id: string };
+  pluginPage: string | null;
+  settingsTab: string;
+};
+
+const viewIds: ViewId[] = ['home', 'models', 'library', 'queue', 'settings'];
+
+function readRoute(): AppRoute {
+  const params = new URLSearchParams(window.location.search);
+  const requestedView = params.get('view') as ViewId | null;
+  const pluginId = params.get('plugin');
+  return {
+    view: requestedView && viewIds.includes(requestedView) ? requestedView : 'models',
+    space: pluginId ? { kind: 'plugin', id: pluginId } : { kind: 'core' },
+    pluginPage: params.get('page'),
+    settingsTab: params.get('tab') || 'dirs',
+  };
+}
+
+function writeRoute(route: AppRoute, replace = false) {
+  const params = new URLSearchParams();
+  params.set('view', route.view);
+  if (route.space.kind === 'plugin') {
+    params.set('plugin', route.space.id);
+    const page = route.pluginPage;
+    if (page) params.set('page', page);
+  } else if (route.view === 'settings' && route.settingsTab !== 'dirs') {
+    params.set('tab', route.settingsTab);
+  }
+  const url = `${window.location.pathname}?${params.toString()}`;
+  if (replace) window.history.replaceState(null, '', url);
+  else window.history.pushState(null, '', url);
+}
+
 function versionIsNewer(remote: string, local: string): boolean {
   const parts = (value: string) => value.split(/[.+-]/, 1)[0].split('.').map((n) => Number(n) || 0);
   const r = parts(remote);
@@ -33,7 +69,7 @@ function versionIsNewer(remote: string, local: string): boolean {
 }
 
 export default function App() {
-  const [view, setView] = useState<ViewId>('models');
+  const [view, setView] = useState<ViewId>(() => readRoute().view);
   const [queue, setQueue] = useState(loadQueue);
   const [profile, setProfile] = useState<Profile | null>(loadProfile);
   // Blocking auth gate (mirrors OldCode: no session → no app).
@@ -43,7 +79,7 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [modal, setModal] = useState<ModalTarget | null>(null);
   const [libKey, setLibKey] = useState(0);
-  const [settingsTab, setSettingsTab] = useState('dirs');
+  const [settingsTab, setSettingsTab] = useState(() => readRoute().settingsTab);
   // Bumped on every programmatic nav to Settings so the badge re-click
   // remounts the tab (re-running its check) even when already there.
   const [settingsNonce, setSettingsNonce] = useState(0);
@@ -51,11 +87,16 @@ export default function App() {
   const [updates, setUpdates] = useState<UpdateState>({ core: false, plugins: false, checking: false });
   // Plugin spaces: core views vs one installed plugin (sidebar swaps, fan
   // gains core + per-plugin icons once anything is installed).
-  const [space, setSpace] = useState<{ kind: 'core' } | { kind: 'plugin'; id: string }>({
-    kind: 'core',
-  });
+  const [space, setSpace] = useState<AppRoute['space']>(() => readRoute().space);
   const [installed, setInstalled] = useState<InstalledPlugin[]>([]);
-  const [pluginPage, setPluginPage] = useState<string | null>(null);
+  const [pluginPage, setPluginPage] = useState<string | null>(() => readRoute().pluginPage);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('sdcodex.sidebar-collapsed.v1') === 'true';
+    } catch {
+      return false;
+    }
+  });
   // Models already on disk (backend library + local scan records).
   const [ownedIds, setOwnedIds] = useState<Set<string>>(new Set());
 
@@ -185,6 +226,27 @@ export default function App() {
     }
   }, [theme]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('sdcodex.sidebar-collapsed.v1', String(sidebarCollapsed));
+    } catch {
+      /* ignore */
+    }
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const route = readRoute();
+      setView(route.view);
+      setSpace(route.space);
+      setPluginPage(route.pluginPage);
+      setSettingsTab(route.settingsTab);
+      setModal(null);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
   // If the backend is up, its SQLite rows win over the local cache.
   // Server settings pull only once authenticated (/api/settings is 401 anon).
   const [callbackMsg, setCallbackMsg] = useState<string | null>(null);
@@ -299,7 +361,9 @@ export default function App() {
   const go = (v: ViewId) => {
     setModal(null);
     setSpace({ kind: 'core' });
+    setPluginPage(null);
     setView(v);
+    writeRoute({ view: v, space: { kind: 'core' }, pluginPage: null, settingsTab });
   };
 
   const goSettings = (tab: string) => {
@@ -307,13 +371,31 @@ export default function App() {
     setSettingsNonce((n) => n + 1);
     setModal(null);
     setSpace({ kind: 'core' });
+    setPluginPage(null);
     setView('settings');
+    writeRoute({ view: 'settings', space: { kind: 'core' }, pluginPage: null, settingsTab: tab });
   };
 
   const openPluginSpace = (id: string) => {
     setModal(null);
-    setPluginPage(null);
+    const plugin = installed.find((item) => item.id === id);
+    const page = plugin?.nav_items[0]?.page ?? plugin?.entry_page ?? null;
+    setPluginPage(page);
     setSpace({ kind: 'plugin', id });
+    writeRoute({ view, space: { kind: 'plugin', id }, pluginPage: page, settingsTab });
+  };
+
+  const openCoreSpace = () => {
+    setSpace({ kind: 'core' });
+    setPluginPage(null);
+    writeRoute({ view, space: { kind: 'core' }, pluginPage: null, settingsTab });
+  };
+
+  const navigatePluginPage = (page: string) => {
+    setPluginPage(page);
+    if (space.kind === 'plugin') {
+      writeRoute({ view, space, pluginPage: page, settingsTab });
+    }
   };
 
   /** Installed plugin spaces (fan icons, sidebar, settings tabs). */
@@ -396,6 +478,7 @@ export default function App() {
         <Sidebar
           view={view}
           go={go}
+          collapsed={sidebarCollapsed}
           queueCount={queue.length}
           version={appVersion}
           updates={updates}
@@ -403,13 +486,15 @@ export default function App() {
           space={space}
           plugins={installed}
           pluginPage={pluginPage}
-          onPluginPage={setPluginPage}
+          onPluginPage={navigatePluginPage}
         />
 
         <main className="min-w-0 flex-1 p-4 md:p-5">
           <MobileNav view={view} go={go} />
           <Topbar
             go={go}
+            onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
+            sidebarCollapsed={sidebarCollapsed}
             theme={theme}
             setTheme={setTheme}
             profileLabel={initials(profile)}
@@ -422,7 +507,7 @@ export default function App() {
             }}
             space={space}
             plugins={installed}
-            onSpaceCore={() => setSpace({ kind: 'core' })}
+            onSpaceCore={openCoreSpace}
             onSpacePlugin={openPluginSpace}
           />
 
@@ -486,7 +571,7 @@ export default function App() {
           onQueue={enqueue}
           onSearchCreator={(username) => {
             setModal(null);
-            setView('models');
+            go('models');
             setCreatorSearch((s) => ({ token: s.token + 1, text: username }));
           }}
           onForgetLocal={(modelId, versionId) => {
