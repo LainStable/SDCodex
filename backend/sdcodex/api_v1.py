@@ -341,6 +341,31 @@ def library_identify(row_id: int):
     )
 
 
+@api_v1.put("/library/<int:row_id>/cover")
+def library_set_cover(row_id: int):
+    """Save a selected remote preview as the local library card image."""
+    from urllib.parse import urlparse
+
+    _, err = _require_user()
+    if err:
+        return err
+    row = db.session.get(Download, row_id)
+    if row is None:
+        return jsonify({"error": "not found"}), 404
+    data = request.get_json(force=True, silent=True) or {}
+    image_url = data.get("imageUrl")
+    if not isinstance(image_url, str) or len(image_url) > 2048:
+        return jsonify({"error": "valid imageUrl required"}), 400
+    parsed = urlparse(image_url)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        return jsonify({"error": "imageUrl must be an HTTPS URL"}), 400
+    files = row.get_files()
+    files["imageUrl"] = image_url
+    row.set_files(files)
+    db.session.commit()
+    return jsonify({"ok": True, "imageUrl": image_url})
+
+
 @api_v1.get("/files")
 def serve_file():
     """Serve a model/preview file from disk (mirrors OldCode /files/<path>).

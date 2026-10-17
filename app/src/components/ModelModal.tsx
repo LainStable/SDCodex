@@ -29,6 +29,8 @@ export type ModalTarget =
       record?: { modelId: number; versionId: number };
       /** Server library row id — enables Update-metadata write-back. */
       rowId?: number;
+      /** Previously selected Civitai image used as the local library cover. */
+      coverImageUrl?: string;
     };
 
 interface QueueArg {
@@ -42,14 +44,21 @@ interface QueueArg {
 }
 
 function htmlToText(html: string): string {
-  return html
-    .replace(/<(br|p|li|h[1-6]|div)[^>]*>/gi, '\n')
-    .replace(/<\/[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('script, style, iframe, img, video, audio, svg, object, embed, form').forEach((el) => el.remove());
+  const blocks = new Set(['ADDRESS', 'ARTICLE', 'BLOCKQUOTE', 'DIV', 'LI', 'P', 'SECTION', 'TR', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
+  const textOf = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    const el = node as Element;
+    if (el.tagName === 'BR') return '\n';
+    const content = [...el.childNodes].map(textOf).join('');
+    return blocks.has(el.tagName) ? `\n${content}\n` : content;
+  };
+  return textOf(doc.body)
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t]*\n[ \t]*/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -124,6 +133,20 @@ export interface AdoptedMatch {
   baseModel: string;
 }
 
+function parseCivitaiReference(value: string): { modelId: number; versionId?: number } | null {
+  try {
+    const url = new URL(value);
+    if (!['civitai.com', 'civitai.red'].includes(url.hostname.toLowerCase())) return null;
+    const match = url.pathname.match(/^\/models\/(\d+)(?:\/|$)/);
+    if (!match) return null;
+    const modelId = Number(match[1]);
+    const versionId = Number(url.searchParams.get('modelVersionId')) || undefined;
+    return modelId > 0 ? { modelId, versionId } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Write a user-confirmed match back to whichever store owns the row. */
 export async function adoptMatch(
   t: Extract<ModalTarget, { kind: 'local' }>,
@@ -144,6 +167,23 @@ export async function adoptMatch(
   onLibraryChanged();
 }
 
+async function saveLibraryCover(
+  target: Extract<ModalTarget, { kind: 'local' }>,
+  imageUrl: string,
+): Promise<void> {
+  if (target.rowId != null) {
+    const { apiPut, backendAvailable } = await import('../lib/backend');
+    if (!(await backendAvailable())) throw new Error('Backend unreachable');
+    await apiPut(`/library/${target.rowId}/cover`, { imageUrl });
+    return;
+  }
+  if (target.path) {
+    const { setScannedCover } = await import('../lib/library');
+    if (setScannedCover(target.path, imageUrl)) return;
+  }
+  throw new Error('Could not find this model in the local library.');
+}
+
 function UpdateMetadata({
   defaultQuery,
   onAdopt,
@@ -158,19 +198,36 @@ function UpdateMetadata({
   const [cands, setCands] = useState<CivitaiModel[]>([]);
   const [searched, setSearched] = useState(false);
   const [adopting, setAdopting] = useState<number | null>(null);
+  const [preferredVersionId, setPreferredVersionId] = useState<number | null>(null);
 
   const search = async () => {
     if (!q.trim()) return;
     setBusy(true);
     setError(null);
     setDone(null);
+    setCands([]);
     try {
-      const page = await fetchModels(
-        { q: q.trim(), type: 'All', baseModels: [], sort: 'Most Downloaded', page: 1, nsfw: false },
-      );
-      setCands(page.items.slice(0, 6));
-      setSearched(true);
-      if (page.items.length === 0) setError('No Civitai models match that name.');
+      const reference = parseCivitaiReference(q.trim());
+      if (/^https?:\/\//i.test(q.trim()) && !reference) {
+        throw new Error('Use a Civitai model URL such as https://civitai.com/models/12345.');
+      }
+      if (reference) {
+        const model = await fetchModel(reference.modelId);
+        if (reference.versionId && !model.modelVersions.some((v) => v.id === reference.versionId)) {
+          throw new Error('That version is not part of the Civitai model.');
+        }
+        setPreferredVersionId(reference.versionId ?? null);
+        setCands([model]);
+        setSearched(true);
+      } else {
+        const page = await fetchModels(
+          { q: q.trim(), type: 'All', baseModels: [], sort: 'Most Downloaded', page: 1, nsfw: false },
+        );
+        setPreferredVersionId(null);
+        setCands(page.items.slice(0, 6));
+        setSearched(true);
+        if (page.items.length === 0) setError('No Civitai models match that name.');
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Search failed');
     } finally {
@@ -183,7 +240,9 @@ function UpdateMetadata({
     setError(null);
     try {
       const full = await fetchModel(id);
-      const v0 = full.modelVersions[0];
+      const v0 =
+        full.modelVersions.find((version) => version.id === preferredVersionId) ??
+        full.modelVersions[0];
       if (!v0) throw new Error('Model has no versions');
       await onAdopt({
         modelId: full.id,
@@ -204,7 +263,7 @@ function UpdateMetadata({
     <div className="glass-l1 mt-3 rounded-lg p-3">
       <h3 className="font-display text-sm font-semibold">Update metadata</h3>
       <p className="mt-1 font-mono text-[10px] text-ink-faint">
-        Not hosted on Civitai under its hash? Search by filename and pick the match.
+        Search by filename or paste a Civitai model URL, then select the matching model.
       </p>
       <div className="mt-2 flex gap-2">
         <input
@@ -213,7 +272,7 @@ function UpdateMetadata({
           onKeyDown={(e) => {
             if (e.key === 'Enter') void search();
           }}
-          placeholder="Model name from filename…"
+          placeholder="Model filename or Civitai model URL…"
           className="min-w-0 flex-1 rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
         />
         <GhostButton disabled={busy || !q.trim()} onClick={() => void search()}>
@@ -279,6 +338,11 @@ export default function ModelModal({
   const [imgIdx, setImgIdx] = useState(0);
   const [lightbox, setLightbox] = useState(false);
   const [embedded, setEmbedded] = useState<Record<string, string> | null>(null);
+  const [savedCover, setSavedCover] = useState(
+    target.kind === 'local' ? target.coverImageUrl : undefined,
+  );
+  const [savingCover, setSavingCover] = useState(false);
+  const [coverMessage, setCoverMessage] = useState<string | null>(null);
   const mainRef = useRef<HTMLDivElement>(null);
 
   const baseModelId = target.kind === 'civitai' ? target.modelId : (target.modelId ?? 0);
@@ -376,6 +440,23 @@ export default function ModelModal({
 
   const closeLightbox = useCallback(() => setLightbox(false), []);
 
+  const setCurrentImageAsCover = async () => {
+    if (target.kind !== 'local' || !images[imgIdx]) return;
+    setSavingCover(true);
+    setCoverMessage(null);
+    try {
+      const imageUrl = images[imgIdx].url;
+      await saveLibraryCover(target, imageUrl);
+      setSavedCover(imageUrl);
+      setCoverMessage('Saved as local library cover.');
+      onLibraryChanged?.();
+    } catch (e) {
+      setCoverMessage(e instanceof Error ? e.message : 'Could not save library cover.');
+    } finally {
+      setSavingCover(false);
+    }
+  };
+
   // Local-only entries (no Civitai id yet): known fields + metadata matcher.
   if (target.kind === 'local' && !modelId) {
     const t = target;
@@ -465,7 +546,7 @@ export default function ModelModal({
                   <TypeBadge type={model.type} />
                 </div>
 
-                <div ref={mainRef} className="mt-3 flex h-[320px] items-center justify-center overflow-hidden rounded-lg bg-black/40 md:h-[440px]">
+                <div ref={mainRef} className="relative mt-3 flex h-[320px] items-center justify-center overflow-hidden rounded-lg bg-black/40 md:h-[440px]">
                   {images[imgIdx] ? (
                     <img
                       src={images[imgIdx].url}
@@ -477,7 +558,26 @@ export default function ModelModal({
                   ) : (
                     <div className="font-mono text-xs text-ink-faint">no preview</div>
                   )}
+                  {target.kind === 'local' && images[imgIdx] && (
+                    <button
+                      type="button"
+                      onClick={() => void setCurrentImageAsCover()}
+                      disabled={savingCover || savedCover === images[imgIdx].url}
+                      className="absolute left-2 top-2 rounded border border-white/20 bg-black/75 px-2 py-1 font-mono text-[10px] text-white backdrop-blur hover:border-primary/70 disabled:cursor-default disabled:opacity-80"
+                    >
+                      {savingCover
+                        ? 'Saving…'
+                        : savedCover === images[imgIdx].url
+                          ? 'Library cover'
+                          : 'Set as library cover'}
+                    </button>
+                  )}
                 </div>
+                {coverMessage && (
+                  <p className={`mt-1 font-mono text-[10px] ${coverMessage.startsWith('Saved') ? 'text-status-active' : 'text-[#f87171]'}`}>
+                    {coverMessage}
+                  </p>
+                )}
                 {images.length > 1 && (
                   <div className="noscroll mt-2 flex gap-1.5 overflow-x-auto pb-1">
                     {images.map((img, i) => (
@@ -532,9 +632,6 @@ export default function ModelModal({
                         </pre>
                       </details>
                     )}
-                    <p className="mt-1 font-mono text-[10px] text-ink-faint">
-                      Full workflow tooling arrives with the ComfyCaption plugin.
-                    </p>
                   </div>
                 )}
               </div>
