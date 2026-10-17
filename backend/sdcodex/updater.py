@@ -11,13 +11,16 @@ Slim port of OldCode plugin_manager.py flows, adapted to the new layout:
   (both git-ignored, so pulls never clobber them).
 """
 
+import codecs
 import json
 import logging
 import os
+import queue
 import re
 import shutil
 import subprocess
 import threading
+import time
 
 import requests
 
@@ -163,6 +166,69 @@ def local_core_version() -> str:
         return "0.0.0"
 
 
+def _update_log(message: str, *, reset: bool = False) -> None:
+    """Append update progress to the log polled by the Plugin Hub UI."""
+    line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}"
+    try:
+        with open(os.path.join(root_dir(), ".rebuild.log"), "w" if reset else "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+            f.flush()
+    except OSError:
+        logger.exception("Could not write core update progress log")
+
+
+def _git_pull_with_progress(args: list[str], cwd: str, timeout: int = 300) -> subprocess.CompletedProcess:
+    """Run git pull while writing each output line for the progress UI."""
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    proc = subprocess.Popen(
+        ["git", "-c", "safe.directory=*", *args],
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=env,
+    )
+    output: queue.Queue[str | None] = queue.Queue()
+
+    def read_output() -> None:
+        assert proc.stdout is not None
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        pending = ""
+        while chunk := proc.stdout.read1(4096):
+            pending += decoder.decode(chunk)
+            lines = re.split(r"[\r\n]", pending)
+            for line in lines[:-1]:
+                output.put(line)
+            pending = lines[-1]
+        pending += decoder.decode(b"", final=True)
+        if pending:
+            output.put(pending)
+        output.put(None)
+
+    reader = threading.Thread(target=read_output, daemon=True)
+    reader.start()
+    captured = []
+    started = time.monotonic()
+    finished_reading = False
+    while not finished_reading or proc.poll() is None:
+        if time.monotonic() - started > timeout:
+            proc.kill()
+            proc.wait()
+            _update_log("git pull timed out")
+            raise subprocess.TimeoutExpired(["git", *args], timeout)
+        try:
+            line = output.get(timeout=0.1)
+        except queue.Empty:
+            continue
+        if line is None:
+            finished_reading = True
+        elif line:
+            captured.append(line)
+            _update_log(f"git: {line[:500]}")
+    reader.join(timeout=1)
+    return subprocess.CompletedProcess(args, proc.returncode or 0, "\n".join(captured), "")
+
+
 # ------------------------------------------------------------------ core ---
 
 def check_core() -> dict:
@@ -188,13 +254,16 @@ def check_core() -> dict:
 
 def update_core() -> tuple[bool, str]:
     root = root_dir()
+    _update_log("Core update requested", reset=True)
     if not os.path.isdir(os.path.join(root, ".git")):
+        _update_log("Update failed: not a git checkout")
         return False, "Not a git checkout — cannot self-update."
     if not is_clean(root):
         dirty = _dirty_files(root)
         msg = "Working tree has local changes — commit or stash first."
         if dirty:
             msg += f" Dirty: {dirty}"
+        _update_log(f"Update failed: {msg}")
         return False, msg
     remote = _detect_remote(root)
     # Pull the checked-out branch explicitly: `git pull --ff-only <remote>`
@@ -202,26 +271,35 @@ def update_core() -> tuple[bool, str]:
     # nowhere), failing or reporting "up to date" while the hub shows newer.
     branch = _current_branch(root)
     if not branch:
+        _update_log("Update failed: detached HEAD")
         return False, "Detached HEAD — check out a branch (e.g. main) to self-update."
     try:
-        r = _git(["pull", "--ff-only", remote, branch], cwd=root)
-        if r.returncode != 0 and "cannot run ssh" in (r.stderr or "").lower():
+        pull_args = ["pull", "--ff-only", remote, branch]
+        _update_log(f"Running git pull --ff-only {remote} {branch}")
+        r = _git_pull_with_progress(pull_args, cwd=root)
+        if r.returncode != 0 and "cannot run ssh" in (r.stderr or r.stdout or "").lower():
             https_remote = _https_github_remote(root, remote)
             if https_remote:
-                r = _git(["pull", "--ff-only", https_remote, branch], cwd=root)
+                _update_log("SSH unavailable; retrying git pull over HTTPS")
+                r = _git_pull_with_progress(["pull", "--ff-only", https_remote, branch], cwd=root)
         if r.returncode != 0:
-            return False, (r.stderr or r.stdout).strip()[:500]
+            error = (r.stderr or r.stdout).strip()[:500]
+            _update_log(f"Git pull failed: {error}")
+            return False, error
         out = (r.stdout or "Already up to date.").strip()[:500]
         if "already up to date" in out.lower():
             # Nothing moved — don't raise a spurious rebuild-required badge.
             # (If the hub still shows a newer version, the git remote is
             # behind the hub; fetch/mirror lag, not a local problem.)
+            _update_log("Git pull complete: already up to date")
             return True, out
         from . import rebuilder as rebuilder_mod
 
         rebuilder_mod.mark_rebuild("core update")
+        _update_log("Git pull complete; preparing application rebuild/restart")
         return True, out
     except Exception as e:
+        _update_log(f"Core update failed: {e}")
         return False, str(e)
 
 

@@ -640,6 +640,7 @@ def _resolve_ports(port_specs: list, live_port: int | None,
 
 def _restart_process() -> None:
     """Bare metal: re-exec the backend (code runs live from disk)."""
+    _rlog("local restart started; no Docker image build is required")
     time.sleep(2)
     clear_rebuild()
     run_py = os.path.join(root_dir(), "backend", "run.py")

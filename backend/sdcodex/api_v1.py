@@ -654,7 +654,7 @@ def system_rebuild():
 
 @api_v1.get("/system/rebuild/log")
 def system_rebuild_log():
-    """Tail the rebuild log for the floating progress window."""
+    """Tail core update, image-build, and restart progress for the UI."""
     _, err = _admin_or_401()
     if err:
         return err

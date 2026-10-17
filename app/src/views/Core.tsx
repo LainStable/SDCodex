@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   DangerButton,
   FilterPills,
@@ -713,7 +713,12 @@ export function Plugins() {
   const [rebuildLog, setRebuildLog] = useState<string[]>([]);
   const [showRebuildLog, setShowRebuildLog] = useState(false);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
+  const rebuildLogEndRef = useRef<HTMLDivElement>(null);
   const updateUnavailable = updates?.rebuild?.can_rebuild === false;
+
+  useEffect(() => {
+    if (showRebuildLog) rebuildLogEndRef.current?.scrollIntoView({ block: 'end' });
+  }, [rebuildLog, showRebuildLog]);
 
   const check = async () => {
     setChecking(true);
@@ -737,6 +742,22 @@ export function Plugins() {
   const updateAll = async () => {
     setApplying(true);
     setUpdateMsg(null);
+    setRebuildLog([]);
+    setShowRebuildLog(true);
+    let polling = true;
+    const pollLogs = async () => {
+      while (polling) {
+        try {
+          const { apiGet } = await import('../lib/backend');
+          const result = await apiGet<{ lines?: string[] }>('/system/rebuild/log');
+          if (result.lines) setRebuildLog(result.lines);
+        } catch {
+          /* A transient poll failure should not interrupt the update request. */
+        }
+        await new Promise((resolve) => setTimeout(resolve, 750));
+      }
+    };
+    const logPolling = pollLogs();
     try {
       const { apiPost } = await import('../lib/backend');
       const r = await apiPost<{ ok: boolean; message?: string }>('/updates/core', {});
@@ -750,6 +771,8 @@ export function Plugins() {
       setUpdateMsg(e instanceof Error ? e.message : 'Update failed');
       return;
     } finally {
+      polling = false;
+      await logPolling;
       setApplying(false);
     }
     await rebuild();
@@ -757,7 +780,6 @@ export function Plugins() {
 
   const rebuild = async () => {
     setRebuilding(true);
-    setRebuildLog([]);
     setShowRebuildLog(true);
     setUpdateMsg(null);
     // Docker keeps the old app answering health until replacement; local
@@ -779,19 +801,17 @@ export function Plugins() {
       setUpdateMsg(r.message ?? (isLocal ? 'Restarting…' : 'Rebuilding…'));
       for (let i = 0; i < 180; i++) {
         await new Promise((res) => setTimeout(res, isLocal ? 2000 : 10000));
-        if (!isLocal) {
-          try {
-            const lj = await apiGet<{ lines?: string[] }>('/system/rebuild/log');
-            if (lj.lines) {
-              setRebuildLog(lj.lines);
-              if (lj.lines.some((line) => line.includes('swap done'))) {
-                window.location.reload();
-                return;
-              }
+        try {
+          const lj = await apiGet<{ lines?: string[] }>('/system/rebuild/log');
+          if (lj.lines) {
+            setRebuildLog(lj.lines);
+            if (!isLocal && lj.lines.some((line) => line.includes('swap done'))) {
+              window.location.reload();
+              return;
             }
-          } catch {
-            /* backend going down — keep last lines */
           }
+        } catch {
+          /* backend going down — keep last lines */
         }
         try {
           resetBackendProbe();
@@ -1012,8 +1032,12 @@ export function Plugins() {
           <div className="glass-l2 edge-shimmer w-full max-w-2xl rounded-lg p-4">
             <div className="flex items-center justify-between">
               <h3 className="font-display text-sm font-semibold">
-                {updates?.rebuild?.mode === 'local' ? 'Restarting local app' : 'Rebuilding container'}{' '}
-                {rebuilding ? '…' : '(done)'}
+                {applying
+                  ? 'Pulling core update'
+                  : updates?.rebuild?.mode === 'local'
+                    ? 'Restarting local app'
+                    : 'Rebuilding container'}{' '}
+                {applying || rebuilding ? '…' : '(done)'}
               </h3>
               <button
                 type="button"
@@ -1026,15 +1050,20 @@ export function Plugins() {
             <div className="mt-3 h-72 overflow-y-auto rounded-lg bg-[#070a10] p-3 font-mono text-[11px] leading-relaxed">
               {rebuildLog.length === 0 ? (
                 <p className="text-ink-faint">
-                  {updates?.rebuild?.mode === 'local' ? 'waiting for the app to restart…' : 'waiting for build output…'}
+                  {applying
+                    ? 'waiting for git pull output…'
+                    : updates?.rebuild?.mode === 'local'
+                      ? 'waiting for the app to restart…'
+                      : 'waiting for build output…'}
                 </p>
               ) : (
                 rebuildLog.map((l, i) => (
-                  <div key={i} className="text-ink-muted">
+                  <div key={i} className="break-words text-ink-muted">
                     {l}
                   </div>
                 ))
               )}
+              <div ref={rebuildLogEndRef} />
             </div>
             <p className="mt-2 font-mono text-[10px] text-ink-faint">
               The page reloads automatically once the app answers health checks.
