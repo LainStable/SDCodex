@@ -229,6 +229,14 @@ function UpdateMetadata({
               key={c.id}
               className="flex items-center gap-2 rounded border border-white/[0.06] px-2 py-1.5"
             >
+              {c.modelVersions?.[0]?.images?.[0]?.url && (
+                <img
+                  src={c.modelVersions[0].images[0].url}
+                  alt={`${c.name} preview`}
+                  loading="lazy"
+                  className="h-11 w-11 shrink-0 rounded border border-white/10 object-cover"
+                />
+              )}
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold">{c.name}</div>
                 <div className="truncate font-mono text-[10px] text-ink-faint">
