@@ -84,6 +84,7 @@ export default function App() {
   // remounts the tab (re-running its check) even when already there.
   const [settingsNonce, setSettingsNonce] = useState(0);
   const [appVersion, setAppVersion] = useState('…');
+  const [runtimeMode, setRuntimeMode] = useState<'docker' | 'local'>('local');
   const [updates, setUpdates] = useState<UpdateState>({
     core: false,
     plugins: false,
@@ -338,6 +339,29 @@ export default function App() {
     return () => { live = false; };
   }, [authed]);
 
+  useEffect(() => {
+    if (!authed) return;
+    let live = true;
+    const refreshRuntimeMode = async () => {
+      try {
+        const { apiGet } = await import('./lib/backend');
+        const status = await apiGet<{ runtime_mode?: 'docker' | 'local' }>('/system/install-mode');
+        if (live && (status.runtime_mode === 'docker' || status.runtime_mode === 'local')) {
+          setRuntimeMode(status.runtime_mode);
+        }
+      } catch {
+        // Keep the local fallback when the backend mode endpoint is unavailable.
+      }
+    };
+    const onInstallModeChanged = () => void refreshRuntimeMode();
+    void refreshRuntimeMode();
+    window.addEventListener('sdcodex:install-mode-changed', onInstallModeChanged);
+    return () => {
+      live = false;
+      window.removeEventListener('sdcodex:install-mode-changed', onInstallModeChanged);
+    };
+  }, [authed]);
+
   // Global "/" focuses the first search field, as placeholders promise.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -496,6 +520,7 @@ export default function App() {
         <main className="min-w-0 flex-1 p-4 md:p-5">
           <MobileNav view={view} go={go} />
           <Topbar
+            runtimeMode={runtimeMode}
             go={go}
             onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
             sidebarCollapsed={sidebarCollapsed}

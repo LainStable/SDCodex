@@ -371,7 +371,7 @@ export function UserMenu({
 }
 
 export function Topbar({
-  socket = 'rw',
+  runtimeMode = 'local',
   go,
   onToggleSidebar,
   sidebarCollapsed,
@@ -386,7 +386,7 @@ export function Topbar({
   onSpaceCore,
   onSpacePlugin,
 }: {
-  socket?: 'rw' | 'ro';
+  runtimeMode?: 'docker' | 'local';
   go: (v: ViewId) => void;
   onToggleSidebar: () => void;
   sidebarCollapsed: boolean;
@@ -429,13 +429,14 @@ export function Topbar({
         </kbd>
       </div>
       <span
-        className={`hidden rounded border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.06em] sm:inline ${
-          socket === 'rw'
+        title="Current runtime mode"
+        className={`hidden rounded border px-2 py-1 font-mono text-[10px] tracking-[0.06em] sm:inline ${
+          runtimeMode === 'local'
             ? 'border-status-active/30 bg-status-active/10 text-status-active'
-            : 'border-status-warning/30 bg-status-warning/10 text-[#fcd34d]'
+            : 'border-primary/30 bg-primary/10 text-[#a5b4fc]'
         }`}
       >
-        socket: {socket}
+        {runtimeMode}
       </span>
       <button
         type="button"
