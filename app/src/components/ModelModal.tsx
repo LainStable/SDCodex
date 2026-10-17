@@ -131,9 +131,9 @@ export async function adoptMatch(
   onLibraryChanged: () => void,
 ): Promise<void> {
   if (t.rowId != null) {
-    const { apiPost, backendAvailable } = await import('../lib/backend');
+    const { apiPut, backendAvailable } = await import('../lib/backend');
     if (!(await backendAvailable())) throw new Error('Backend unreachable');
-    await apiPost(`/library/${t.rowId}/identify`, {
+    await apiPut(`/library/${t.rowId}/identify`, {
       modelId: m.modelId,
       versionId: m.versionId,
     });
