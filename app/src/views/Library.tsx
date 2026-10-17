@@ -19,7 +19,7 @@ interface ServerRow {
   versionId: number;
   name: string;
   type: string;
-  files?: { image?: string; imageUrl?: string; model?: string; metadata?: string };
+  files?: { image?: string; model?: string; metadata?: string };
 }
 
 async function fetchServerRows(): Promise<ServerRow[]> {
@@ -188,21 +188,15 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                           modelId: r.modelId || undefined,
                           versionId: r.versionId || undefined,
                           rowId: r.id,
-                          coverImageUrl: r.files?.imageUrl,
                         })
                       }
                       className="block w-full text-left"
                       title="Open details"
                     >
                       <div className="relative aspect-[4/3] bg-obsidian-lowest">
-                        {r.files?.imageUrl || r.files?.image ? (
+                        {r.files?.image ? (
                           <img
-                            src={
-                              r.files.imageUrl ??
-                              (r.files.image?.startsWith('https://')
-                                ? r.files.image
-                                : fileUrl(r.files.image!))
-                            }
+                            src={fileUrl(r.files.image)}
                             alt=""
                             loading="lazy"
                             className="h-full w-full object-cover"
@@ -252,16 +246,18 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                             s.modelId && s.versionId
                               ? { modelId: s.modelId, versionId: s.versionId }
                               : undefined,
-                          coverImageUrl: s.coverImageUrl,
+                          dirKey: s.dirKey,
+                          imageName: s.imageName ?? undefined,
+                          relativePath: s.filename,
                         })
                       }
                       className="block w-full text-left"
                       title="Open details"
                     >
                       <div className="relative aspect-[4/3] bg-obsidian-lowest">
-                        {s.coverImageUrl || localPreviews[`${s.dirKey}/${s.filename}`] ? (
+                        {localPreviews[`${s.dirKey}/${s.filename}`] ? (
                           <img
-                            src={s.coverImageUrl ?? localPreviews[`${s.dirKey}/${s.filename}`]}
+                            src={localPreviews[`${s.dirKey}/${s.filename}`]}
                             alt=""
                             loading="lazy"
                             className="h-full w-full object-cover"

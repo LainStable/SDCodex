@@ -29,8 +29,10 @@ export type ModalTarget =
       record?: { modelId: number; versionId: number };
       /** Server library row id — enables Update-metadata write-back. */
       rowId?: number;
-      /** Previously selected Civitai image used as the local library cover. */
-      coverImageUrl?: string;
+      /** Browser-scanned folder key, used to replace its on-disk preview. */
+      dirKey?: string;
+      imageName?: string;
+      relativePath?: string;
     };
 
 interface QueueArg {
@@ -177,11 +179,35 @@ async function saveLibraryCover(
     await apiPut(`/library/${target.rowId}/cover`, { imageUrl });
     return;
   }
-  if (target.path) {
-    const { setScannedCover } = await import('../lib/library');
-    if (setScannedCover(target.path, imageUrl)) return;
+  if (!target.dirKey || !target.relativePath) throw new Error('Could not find this model in the local library.');
+  const { getHandle, ensurePermission } = await import('../lib/idb');
+  let dir = await getHandle(target.dirKey);
+  if (!dir || !(await ensurePermission(dir, 'readwrite'))) {
+    throw new Error('Reconnect the model folder in Settings before replacing its image.');
   }
-  throw new Error('Could not find this model in the local library.');
+  const segments = target.relativePath.split('/').filter(Boolean);
+  const modelFilename = segments.pop();
+  if (!modelFilename) throw new Error('Invalid scanned model path.');
+  for (const segment of segments) dir = await dir.getDirectoryHandle(segment);
+  const response = await fetch(imageUrl);
+  if (!response.ok) throw new Error(`Image download failed (${response.status}).`);
+  const blob = await response.blob();
+  if (!blob.type.startsWith('image/')) throw new Error('Civitai did not return an image.');
+  const extension =
+    blob.type === 'image/png' ? '.png' :
+    blob.type === 'image/jpeg' ? '.jpg' :
+    blob.type === 'image/webp' ? '.webp' : null;
+  const filename =
+    target.imageName ??
+    `${modelFilename.replace(/\.[^.]+$/, '')}${extension ?? '.webp'}`;
+  const image = await dir.getFileHandle(filename, { create: true });
+  const writable = await image.createWritable();
+  await writable.write(blob);
+  await writable.close();
+  const { setScannedImageName } = await import('../lib/library');
+  if (!setScannedImageName(target.dirKey, target.relativePath, filename)) {
+    throw new Error('Image was saved, but the scanned library record could not be updated.');
+  }
 }
 
 function UpdateMetadata({
@@ -338,9 +364,6 @@ export default function ModelModal({
   const [imgIdx, setImgIdx] = useState(0);
   const [lightbox, setLightbox] = useState(false);
   const [embedded, setEmbedded] = useState<Record<string, string> | null>(null);
-  const [savedCover, setSavedCover] = useState(
-    target.kind === 'local' ? target.coverImageUrl : undefined,
-  );
   const [savingCover, setSavingCover] = useState(false);
   const [coverMessage, setCoverMessage] = useState<string | null>(null);
   const mainRef = useRef<HTMLDivElement>(null);
@@ -447,8 +470,7 @@ export default function ModelModal({
     try {
       const imageUrl = images[imgIdx].url;
       await saveLibraryCover(target, imageUrl);
-      setSavedCover(imageUrl);
-      setCoverMessage('Saved as local library cover.');
+      setCoverMessage('Replaced the local library image on disk.');
       onLibraryChanged?.();
     } catch (e) {
       setCoverMessage(e instanceof Error ? e.message : 'Could not save library cover.');
@@ -562,19 +584,15 @@ export default function ModelModal({
                     <button
                       type="button"
                       onClick={() => void setCurrentImageAsCover()}
-                      disabled={savingCover || savedCover === images[imgIdx].url}
+                      disabled={savingCover}
                       className="absolute left-2 top-2 rounded border border-white/20 bg-black/75 px-2 py-1 font-mono text-[10px] text-white backdrop-blur hover:border-primary/70 disabled:cursor-default disabled:opacity-80"
                     >
-                      {savingCover
-                        ? 'Saving…'
-                        : savedCover === images[imgIdx].url
-                          ? 'Library cover'
-                          : 'Set as library cover'}
+                      {savingCover ? 'Saving…' : 'Replace library image'}
                     </button>
                   )}
                 </div>
                 {coverMessage && (
-                  <p className={`mt-1 font-mono text-[10px] ${coverMessage.startsWith('Saved') ? 'text-status-active' : 'text-[#f87171]'}`}>
+                  <p className={`mt-1 font-mono text-[10px] ${coverMessage.startsWith('Replaced') ? 'text-status-active' : 'text-[#f87171]'}`}>
                     {coverMessage}
                   </p>
                 )}

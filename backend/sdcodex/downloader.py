@@ -2,6 +2,9 @@ import os
 import requests
 import json
 import re
+import hashlib
+import stat
+import tempfile
 from sdcodex import db
 from sdcodex.models import Setting, Download
 from sdcodex import api
@@ -54,6 +57,7 @@ def download_model(model_id, version_id, api_key=None, progress_callback=None, i
     """
     Download a model version, its preview image, and metadata.
     """
+    temp_model_path = None
     try:
         # 1. Fetch model details
         model = api.get_model(model_id, api_key=api_key)
@@ -118,7 +122,41 @@ def download_model(model_id, version_id, api_key=None, progress_callback=None, i
         # 4. Download files
         # Model File
         print(f"Downloading model to {model_path}...")
-        download_file(primary_file['downloadUrl'], model_path, api_key, progress_callback, is_cancelled)
+        with tempfile.NamedTemporaryFile(
+            prefix=f".{safe_base_name}.", suffix=".part", dir=base_dir, delete=False
+        ) as temp_model:
+            temp_model_path = temp_model.name
+        download_file(
+            primary_file['downloadUrl'], temp_model_path, api_key, progress_callback, is_cancelled
+        )
+
+        expected_hash = (primary_file.get('hashes') or {}).get('SHA256')
+        if expected_hash:
+            if progress_callback:
+                progress_callback(99, "Verifying SHA256...")
+            digest = hashlib.sha256()
+            with open(temp_model_path, "rb") as model_file:
+                for chunk in iter(lambda: model_file.read(1024 * 1024), b""):
+                    if is_cancelled and is_cancelled():
+                        raise CancelledError()
+                    digest.update(chunk)
+            actual_hash = digest.hexdigest()
+            if actual_hash.lower() != str(expected_hash).lower():
+                raise ValueError(
+                    f"SHA256 mismatch: expected {expected_hash}, got {actual_hash}"
+                )
+            if progress_callback:
+                progress_callback(100, "SHA256 verified.")
+        elif progress_callback:
+            progress_callback(100, "Download complete; no SHA256 checksum was provided.")
+
+        try:
+            model_mode = stat.S_IMODE(os.stat(model_path).st_mode)
+        except FileNotFoundError:
+            model_mode = 0o644
+        os.chmod(temp_model_path, model_mode)
+        os.replace(temp_model_path, model_path)
+        temp_model_path = None
         downloaded_files['model'] = model_path
 
         # Preview Image
@@ -165,4 +203,9 @@ def download_model(model_id, version_id, api_key=None, progress_callback=None, i
         return True, f"Successfully downloaded {model_name}"
 
     except Exception as e:
+        if temp_model_path:
+            try:
+                os.remove(temp_model_path)
+            except OSError:
+                pass
         return False, str(e)

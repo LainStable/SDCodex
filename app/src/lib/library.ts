@@ -13,7 +13,6 @@ export interface ScannedModel {
   hash: string;
   size: number;
   imageName: string | null;
-  coverImageUrl?: string;
   /** False when Civitai had no match — shown with a placeholder. */
   identified: boolean;
   scannedAt: number;
@@ -45,12 +44,6 @@ function persist(list: ScannedModel[]): void {
 }
 
 export function upsertScanned(entry: ScannedModel): ScannedModel[] {
-  const previous = loadScanned().find(
-    (e) => e.dirKey === entry.dirKey && e.filename === entry.filename,
-  );
-  if (previous?.coverImageUrl && !entry.coverImageUrl) {
-    entry = { ...entry, coverImageUrl: previous.coverImageUrl };
-  }
   const list = loadScanned().filter(
     (e) => !(e.modelId === entry.modelId && e.versionId === entry.versionId),
   );
@@ -59,11 +52,11 @@ export function upsertScanned(entry: ScannedModel): ScannedModel[] {
   return next;
 }
 
-export function setScannedCover(path: string, coverImageUrl: string): boolean {
+export function setScannedImageName(dirKey: string, filename: string, imageName: string): boolean {
   const list = loadScanned();
-  const index = list.findIndex((e) => `${e.dirPath}/${e.filename}` === path);
+  const index = list.findIndex((e) => e.dirKey === dirKey && e.filename === filename);
   if (index < 0) return false;
-  list[index] = { ...list[index], coverImageUrl };
+  list[index] = { ...list[index], imageName };
   persist(list);
   return true;
 }

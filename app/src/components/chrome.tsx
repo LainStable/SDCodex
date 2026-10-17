@@ -66,7 +66,7 @@ export function Sidebar({
     space.kind === 'plugin' ? plugins.find((p) => p.id === space.id) : undefined;
   const currentPage = pluginPage ?? activePlugin?.nav_items[0]?.page ?? null;
   return (
-    <aside className={`hidden shrink-0 border-r border-white/[0.06] transition-[width] duration-200 md:block ${collapsed ? 'w-16 p-2' : 'w-60 p-4'}`}>
+    <aside className={`sticky top-0 hidden h-dvh shrink-0 self-start overflow-y-auto border-r border-white/[0.06] transition-[width] duration-200 md:block ${collapsed ? 'w-16 p-2' : 'w-60 p-4'}`}>
       <div
         className={`flex items-center gap-2 font-display text-lg font-bold tracking-tight ${collapsed ? 'justify-center' : ''}`}
         title={collapsed ? 'SDCodex' : undefined}

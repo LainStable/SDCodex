@@ -343,7 +343,8 @@ def library_identify(row_id: int):
 
 @api_v1.put("/library/<int:row_id>/cover")
 def library_set_cover(row_id: int):
-    """Save a selected remote preview as the local library card image."""
+    """Replace the local library's on-disk preview with a selected image."""
+    import tempfile
     from urllib.parse import urlparse
 
     _, err = _require_user()
@@ -357,13 +358,76 @@ def library_set_cover(row_id: int):
     if not isinstance(image_url, str) or len(image_url) > 2048:
         return jsonify({"error": "valid imageUrl required"}), 400
     parsed = urlparse(image_url)
-    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
-        return jsonify({"error": "imageUrl must be an HTTPS URL"}), 400
+    host = (parsed.hostname or "").lower()
+    if (
+        parsed.scheme != "https"
+        or not (host.endswith(".civitai.com") or host.endswith(".civitai.red"))
+        or parsed.username
+        or parsed.password
+    ):
+        return jsonify({"error": "imageUrl must be an HTTPS Civitai image URL"}), 400
     files = row.get_files()
-    files["imageUrl"] = image_url
+    model_path = files.get("model")
+    if not isinstance(model_path, str) or not model_path:
+        return jsonify({"error": "model file path is missing"}), 400
+    model_path = os.path.realpath(model_path)
+    allowed = [
+        os.path.realpath(s.value or "")
+        for s in Setting.query.all()
+        if s.key.startswith("dir_") and (s.value or "").strip()
+    ]
+    if not any(model_path.startswith(root + os.sep) for root in allowed):
+        return jsonify({"error": "model file is outside configured model directories"}), 403
+    if not os.path.isfile(model_path):
+        return jsonify({"error": "model file not found"}), 404
+
+    image_path = files.get("image")
+    image_path = os.path.realpath(image_path) if isinstance(image_path, str) and image_path else ""
+    model_dir = os.path.dirname(model_path)
+    if image_path and os.path.dirname(image_path) != model_dir:
+        return jsonify({"error": "preview image must be beside the model file"}), 400
+
+    import requests
+
+    temporary_path = None
+    try:
+        with requests.get(image_url, stream=True, timeout=(5, 30)) as response:
+            response.raise_for_status()
+            final_host = (urlparse(response.url).hostname or "").lower()
+            if not (final_host.endswith(".civitai.com") or final_host.endswith(".civitai.red")):
+                return jsonify({"error": "Civitai image redirected to an unsupported host"}), 400
+            if not (response.headers.get("Content-Type") or "").lower().startswith("image/"):
+                return jsonify({"error": "Civitai did not return an image"}), 502
+            existing_image = bool(image_path and os.path.isfile(image_path))
+            if not image_path or not existing_image:
+                content_type = response.headers.get("Content-Type", "").lower()
+                ext = ".png" if "png" in content_type else ".jpg" if "jpeg" in content_type else ".webp"
+                image_path = os.path.join(model_dir, os.path.splitext(os.path.basename(model_path))[0] + ext)
+            fd, temporary_path = tempfile.mkstemp(prefix=".sdcodex-preview-", dir=model_dir)
+            total = 0
+            with os.fdopen(fd, "wb") as output:
+                for chunk in response.iter_content(chunk_size=64 * 1024):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > 20 * 1024 * 1024:
+                        return jsonify({"error": "preview image exceeds 20 MB"}), 413
+                    output.write(chunk)
+        os.replace(temporary_path, image_path)
+        temporary_path = None
+    except requests.RequestException as exc:
+        return jsonify({"error": f"image download failed: {exc}"}), 502
+    except OSError as exc:
+        return jsonify({"error": f"could not save preview image: {exc}"}), 500
+    finally:
+        if temporary_path and os.path.exists(temporary_path):
+            os.remove(temporary_path)
+
+    files.pop("imageUrl", None)
+    files["image"] = image_path
     row.set_files(files)
     db.session.commit()
-    return jsonify({"ok": True, "imageUrl": image_url})
+    return jsonify({"ok": True, "image": image_path})
 
 
 @api_v1.get("/files")

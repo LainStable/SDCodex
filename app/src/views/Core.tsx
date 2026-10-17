@@ -314,10 +314,12 @@ export function Home({ go }: { go: (v: 'models' | 'library' | 'queue' | 'setting
   );
 }
 
-const STATUS_STYLE: Record<QueueItem['status'], string> = {
+const STATUS_STYLE: Record<string, string> = {
   queued: 'border-white/15 bg-white/5 text-ink-muted',
   downloading: 'border-secondary/40 bg-secondary/10 text-[#22d3ee]',
   done: 'border-status-active/40 bg-status-active/10 text-status-active',
+  failed: 'border-status-alert/40 bg-status-alert/10 text-[#f87171]',
+  cancelled: 'border-white/15 bg-white/5 text-ink-faint',
 };
 
 export function Queue({
@@ -336,10 +338,11 @@ export function Queue({
   const [maxParallel, setMaxParallel] = useState(1);
   const [server, setServer] = useState<{
     active: Array<{ type?: string; model_id?: number; version_id?: number; status?: string; progress?: number; message?: string }>;
+    history: Array<{ model_id?: number; version_id?: number; status?: string; progress?: number; message?: string }>;
     queued: number;
     max: number;
     reachable: boolean;
-  }>({ active: [], queued: 0, max: 1, reachable: false });
+  }>({ active: [], history: [], queued: 0, max: 1, reachable: false });
   const active = items.filter((i) => i.status !== 'done');
 
   const togglePaused = () => {
@@ -367,12 +370,14 @@ export function Queue({
         try {
           const st = await apiGet<{
             active_tasks?: Array<{ type?: string; model_id?: number; version_id?: number; status?: string; progress?: number; message?: string }>;
+            recent_history?: Array<{ model_id?: number; version_id?: number; status?: string; progress?: number; message?: string }>;
             queue_length?: number;
             max_parallel?: number;
           }>('/downloads/status');
           if (!live) return;
           setServer({
             active: st.active_tasks ?? [],
+            history: st.recent_history ?? [],
             queued: st.queue_length ?? 0,
             max: st.max_parallel ?? 1,
             reachable: true,
@@ -524,43 +529,59 @@ export function Queue({
         </p>
       ) : (
         <ul className="mt-3 space-y-2">
-          {items.map((i) => (
-            <li key={i.id} className="glass-l1 rounded-lg p-3">
-              <div className="flex items-center gap-3 text-sm">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-semibold">{i.name}</div>
-                  <div className="truncate font-mono text-[11px] text-ink-muted">
-                    {i.detail}
+          {items.map((i) => {
+            const task = [...server.active, ...server.history].find(
+              (entry) => entry.model_id === i.modelId && entry.version_id === i.versionId,
+            );
+            const status =
+              {
+                completed: 'done',
+                running: 'downloading',
+                failed: 'failed',
+                cancelled: 'cancelled',
+                queued: 'queued',
+              }[task?.status ?? ''] ?? i.status;
+            return (
+              <li key={i.id} className="glass-l1 rounded-lg p-3">
+                <div className="flex items-center gap-3 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-semibold">{i.name}</div>
+                    <div className="truncate font-mono text-[11px] text-ink-muted">
+                      {i.detail}
+                    </div>
                   </div>
+                  <span
+                    className={`rounded border px-2 py-0.5 font-mono text-[10px] uppercase ${STATUS_STYLE[status]}`}
+                  >
+                    {paused && status !== 'done' ? 'paused' : status}
+                  </span>
+                  <span className="font-mono text-[11px] text-ink">
+                    {task?.progress != null ? `${task.progress}%` : i.progress != null ? `${i.progress}%` : 'staged'}
+                  </span>
+                  <button
+                    type="button"
+                    title="Remove from queue"
+                    onClick={() => onRemove(i.id)}
+                    className="rounded border border-white/15 px-2 py-0.5 font-mono text-xs text-ink-faint hover:border-status-alert/50 hover:text-[#f87171]"
+                  >
+                    ✕
+                  </button>
                 </div>
-                <span
-                  className={`rounded border px-2 py-0.5 font-mono text-[10px] uppercase ${STATUS_STYLE[i.status]}`}
-                >
-                  {paused && i.status !== 'done' ? 'paused' : i.status}
-                </span>
-                <span className="font-mono text-[11px] text-ink">
-                  {i.progress != null ? `${i.progress}%` : 'staged'}
-                </span>
-                <button
-                  type="button"
-                  title="Remove from queue"
-                  onClick={() => onRemove(i.id)}
-                  className="rounded border border-white/15 px-2 py-0.5 font-mono text-xs text-ink-faint hover:border-status-alert/50 hover:text-[#f87171]"
-                >
-                  ✕
-                </button>
-              </div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-sm bg-white/10">
-                <div
-                  className="h-full rounded-sm bg-gradient-to-r from-primary to-secondary transition-all"
-                  style={{ width: `${i.progress ?? 0}%` }}
-                />
-              </div>
-              <div className="mt-1 truncate font-mono text-[10px] text-ink-faint">
-                hash: pending verify · {i.downloadUrl || 'no direct URL'}
-              </div>
-            </li>
-          ))}
+                <div className="mt-2 h-1.5 overflow-hidden rounded-sm bg-white/10">
+                  <div
+                    className="h-full rounded-sm bg-gradient-to-r from-primary to-secondary transition-all"
+                    style={{ width: `${task?.progress ?? i.progress ?? 0}%` }}
+                  />
+                </div>
+                <div className="mt-1 truncate font-mono text-[10px] text-ink-faint">
+                  {task?.message ||
+                    (server.reachable
+                      ? 'Waiting for worker status.'
+                      : 'Hash status unavailable while the backend is offline.')}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

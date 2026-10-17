@@ -218,8 +218,16 @@ class DownloadManager:
     def get_status(self):
         with self.lock:
             active = list(self.active_tasks)
+            recent_history = list(self.history[-5:])
+            current = dict(self.current_task) if self.current_task else None
         status = {
-            'current_task': self.current_task,
+            'current_task': (
+                {
+                    key: current.get(key)
+                    for key in ('type', 'model_id', 'version_id', 'status', 'progress', 'message')
+                }
+                if current else None
+            ),
             'active_tasks': [
                 {
                     'type': t.get('type'),
@@ -234,7 +242,17 @@ class DownloadManager:
             'max_parallel': self.max_workers(),
             'queue_length': self.queue.qsize(),
             'scan_queued': self.scan_queue.qsize(),
-            'recent_history': self.history[-5:] if self.history else []
+            'recent_history': [
+                {
+                    'type': t.get('type'),
+                    'model_id': t.get('model_id'),
+                    'version_id': t.get('version_id'),
+                    'status': t.get('status'),
+                    'progress': t.get('progress', 0),
+                    'message': t.get('message', ''),
+                }
+                for t in recent_history
+            ],
         }
         return status
 
