@@ -113,10 +113,9 @@ export function Sidebar({
                     : 'text-ink-muted hover:bg-white/5'
                 }`}
               >
-                {item.icon && !collapsed ? <span aria-hidden="true" className="material-symbols-outlined text-[16px]">{item.icon}</span> : null}
                 {collapsed
-                  ? <span aria-hidden="true" className="font-mono text-xs font-bold">{item.label.slice(0, 2).toUpperCase()}</span>
-                  : <span>{item.label}</span>}
+                  ? <FanIcon icon={item.icon ?? 'extension'} name={item.label} className="!text-[18px]" />
+                  : <>{item.icon ? <FanIcon icon={item.icon} name={item.label} className="!text-[16px]" /> : null}<span>{item.label}</span></>}
               </button>
             ))}
           </>
@@ -401,9 +400,11 @@ export function Topbar({
         aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         aria-pressed={sidebarCollapsed}
       >
-        <span className="material-symbols-outlined block text-[18px]">
-          {sidebarCollapsed ? 'left_panel_open' : 'left_panel_close'}
-        </span>
+        <FanIcon
+          icon={sidebarCollapsed ? 'fa-solid fa-angles-right' : 'fa-solid fa-angles-left'}
+          name={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className="!text-[18px]"
+        />
       </button>
       <div className="glass-l1 flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2">
         <span className="text-ink-faint">⌕</span>

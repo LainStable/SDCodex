@@ -7,6 +7,8 @@
     floating text inside the 44px fan button. */
 
 const FA_TO_MATERIAL: Record<string, string> = {
+  'fa-solid fa-angles-left': 'keyboard_double_arrow_left',
+  'fa-solid fa-angles-right': 'keyboard_double_arrow_right',
   'fas fa-tags': 'sell',
   'fas fa-headphones-alt': 'headphones',
   'fas fa-download': 'download',
@@ -27,16 +29,24 @@ const FA_TO_MATERIAL: Record<string, string> = {
 
 const MATERIAL_RE = /^[a-z0-9]+(_[a-z0-9]+)*$/;
 
-export function FanIcon({ icon, name }: { icon?: string; name: string }) {
+export function FanIcon({
+  icon,
+  name,
+  className,
+}: {
+  icon?: string;
+  name: string;
+  className?: string;
+}) {
   const raw = (icon ?? '').trim();
-  if ([...raw].length === 1) return <>{raw}</>;
+  if ([...raw].length === 1) return <span className={className}>{raw}</span>;
   const mapped = FA_TO_MATERIAL[raw] ?? (MATERIAL_RE.test(raw) ? raw : null);
   if (mapped) {
     return (
-      <span className="material-symbols-rounded fan-glyph" aria-hidden="true">
+      <span className={`material-symbols-rounded fan-glyph ${className ?? ''}`} aria-hidden="true">
         {mapped}
       </span>
     );
   }
-  return <>{(name.trim()[0] ?? '?').toUpperCase()}</>;
+  return <span className={className}>{(name.trim()[0] ?? '?').toUpperCase()}</span>;
 }
