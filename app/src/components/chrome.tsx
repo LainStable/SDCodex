@@ -16,11 +16,11 @@ export const NAV: { id: ViewId; label: string; soon?: boolean }[] = [
 ];
 
 const NAV_ICONS: Record<ViewId, string> = {
-  home: 'home',
-  models: 'travel_explore',
-  library: 'folder_open',
-  queue: 'download',
-  settings: 'settings',
+  home: 'fa-solid fa-house',
+  models: 'fa-solid fa-compass',
+  library: 'fa-solid fa-folder-open',
+  queue: 'fa-solid fa-download',
+  settings: 'fa-solid fa-gear',
 };
 
 export interface UpdateState {
@@ -144,17 +144,28 @@ export function Sidebar({
                 : 'text-ink-muted hover:bg-white/5'
             }`}
           >
-            {collapsed
-              ? <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{NAV_ICONS[item.id]}</span>
-              : <span>{item.label}
-              {item.soon && (
-                <span className="ml-2 rounded border border-white/15 px-1.5 font-mono text-[9px] uppercase text-ink-faint">
-                  soon
-                </span>
-              )}
-              </span>}
+            {collapsed ? (
+              <span className="relative flex h-10 w-10 items-center justify-center">
+                <FanIcon icon={NAV_ICONS[item.id]} name={item.label} className="!text-[20px]" />
+                {item.id === 'queue' && queueCount > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-primary px-1 text-center font-mono text-[9px] leading-4 text-obsidian">
+                    {queueCount > 99 ? '99+' : queueCount}
+                  </span>
+                )}
+              </span>
+            ) : (
+              <span className="flex items-center gap-2">
+                <FanIcon icon={NAV_ICONS[item.id]} name={item.label} className="!text-[16px]" />
+                {item.label}
+                {item.soon && (
+                  <span className="ml-1 rounded border border-white/15 px-1.5 font-mono text-[9px] uppercase text-ink-faint">
+                    soon
+                  </span>
+                )}
+              </span>
+            )}
             {item.id === 'queue' && queueCount > 0 && (
-              <span className="rounded bg-primary/30 px-1.5 font-mono text-[10px]">
+              <span className={`rounded bg-primary/30 px-1.5 font-mono text-[10px] ${collapsed ? 'hidden' : ''}`}>
                 {queueCount}
               </span>
             )}

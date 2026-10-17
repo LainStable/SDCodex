@@ -9,6 +9,11 @@
 const FA_TO_MATERIAL: Record<string, string> = {
   'fa-solid fa-angles-left': 'keyboard_double_arrow_left',
   'fa-solid fa-angles-right': 'keyboard_double_arrow_right',
+  'fa-solid fa-house': 'home',
+  'fa-solid fa-compass': 'explore',
+  'fa-solid fa-folder-open': 'folder_open',
+  'fa-solid fa-download': 'download',
+  'fa-solid fa-gear': 'settings',
   'fas fa-tags': 'sell',
   'fas fa-headphones-alt': 'headphones',
   'fas fa-download': 'download',
