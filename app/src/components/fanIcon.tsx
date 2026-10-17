@@ -14,6 +14,7 @@ const FA_TO_MATERIAL: Record<string, string> = {
   'fa-solid fa-folder-open': 'folder_open',
   'fa-solid fa-download': 'download',
   'fa-solid fa-gear': 'settings',
+  'fa-solid fa-cubes': 'deployed_code',
   'fas fa-tags': 'sell',
   'fas fa-headphones-alt': 'headphones',
   'fas fa-download': 'download',
