@@ -1,12 +1,13 @@
-"""Rebuild-required flag + self-rebuild.
+"""Rebuild-required flag + mode-aware application restart.
 
 Plugin installs/uninstalls/volume changes (and core updates, which bake a new
-frontend into the image) need a container rebuild to take effect. This module:
+frontend into the image) need a Docker rebuild or Local backend restart to take
+effect. This module:
 
 * tracks the need in a ``.rebuild-required`` marker file (git-ignored),
 * rebuilds via the Docker SDK over the mounted socket: image build from the
   mounted repo, then self-replace with compose-merged mounts/env,
-* restarts the backend process on bare metal (repo runs live from disk).
+* restarts the backend process in Local mode (repo runs live from disk).
 """
 
 import logging
@@ -59,6 +60,60 @@ def in_docker() -> bool:
 
 def socket_available() -> bool:
     return os.path.exists("/var/run/docker.sock")
+
+
+def runtime_mode() -> str:
+    return "docker" if in_docker() else "local"
+
+
+def configured_install_mode() -> str:
+    from . import db
+    from .models import Setting
+
+    row = db.session.get(Setting, "install_mode")
+    if row and row.value in {"docker", "local"}:
+        return row.value
+    return runtime_mode()
+
+
+def install_mode_status() -> dict:
+    configured = configured_install_mode()
+    runtime = runtime_mode()
+    return {
+        "mode": configured,
+        "runtime_mode": runtime,
+        "matches_runtime": configured == runtime,
+    }
+
+
+def _rebuild_capability(configured: str, runtime: str) -> dict:
+    if configured != runtime:
+        return {
+            "can_rebuild": False,
+            "mode": "mismatch",
+            "install_mode": configured,
+            "runtime_mode": runtime,
+        }
+    if configured == "docker":
+        if socket_available():
+            return {
+                "can_rebuild": True,
+                "mode": "docker",
+                "install_mode": configured,
+                "runtime_mode": runtime,
+            }
+        return {
+            "can_rebuild": False,
+            "mode": "docker-nosocket",
+            "install_mode": configured,
+            "runtime_mode": runtime,
+        }
+    return {
+        "can_rebuild": True,
+        "mode": "local",
+        "install_mode": configured,
+        "runtime_mode": runtime,
+    }
 
 
 # ------------------------------------------------- compose merge --------
@@ -594,20 +649,23 @@ def _restart_process() -> None:
 
 def start_rebuild() -> tuple[bool, str]:
     """Kick off a rebuild/restart in the background. Returns ack immediately."""
-    if in_docker() and socket_available():
+    capability = rebuild_capability()
+    if not capability["can_rebuild"]:
+        if capability["mode"] == "mismatch":
+            return False, (
+                f"Configured {capability['install_mode']} mode does not match the "
+                f"running {capability['runtime_mode']} process. Restart the app in "
+                "the selected mode; this setting does not migrate installations."
+            )
+        return False, "Docker self-rebuild is unavailable; update or restart it from the host."
+    if capability["mode"] == "docker":
         t = threading.Thread(target=_rebuild_container, daemon=True)
         t.start()
         return True, "Rebuild started — image build takes several minutes. The app will come back on its own."
-    if in_docker():
-        return False, "Docker socket not mounted — cannot rebuild from inside. Recreate the container on the host."
     t = threading.Thread(target=_restart_process, daemon=True)
     t.start()
-    return True, "Backend restarting…"
+    return True, "Local backend restarting…"
 
 
 def rebuild_capability() -> dict:
-    if in_docker() and socket_available():
-        return {"can_rebuild": True, "mode": "docker"}
-    if in_docker():
-        return {"can_rebuild": False, "mode": "docker-nosocket"}
-    return {"can_rebuild": True, "mode": "baremetal"}
+    return _rebuild_capability(configured_install_mode(), runtime_mode())

@@ -1198,28 +1198,103 @@ function Auth({
 }
 
 function System({ isAdmin }: { isAdmin: boolean }) {
+  type InstallModeStatus = {
+    mode: 'docker' | 'local';
+    runtime_mode: 'docker' | 'local';
+    matches_runtime: boolean;
+  };
+  const [installMode, setInstallMode] = useState<InstallModeStatus | null>(null);
+  const [modeBusy, setModeBusy] = useState(false);
+  const [modeMessage, setModeMessage] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    void import('../lib/backend')
+      .then(({ apiGet }) => apiGet<InstallModeStatus>('/system/install-mode'))
+      .then((status) => {
+        if (active) setInstallMode(status);
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setModeMessage(error instanceof Error ? error.message : 'Unable to load install mode.');
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const saveInstallMode = async (mode: 'docker' | 'local') => {
+    setModeBusy(true);
+    setModeMessage('');
+    try {
+      const { apiPut } = await import('../lib/backend');
+      setInstallMode(await apiPut<InstallModeStatus>('/system/install-mode', { mode }));
+      setModeMessage('Install mode saved.');
+      window.dispatchEvent(new Event('sdcodex:install-mode-changed'));
+    } catch (error) {
+      setModeMessage(error instanceof Error ? error.message : 'Unable to save install mode.');
+    } finally {
+      setModeBusy(false);
+    }
+  };
+
   return (
     <div className="glass-l1 rounded-lg p-4">
       <h2 className="font-display text-base font-semibold">System</h2>
-      <dl className="mt-3 space-y-1 font-mono text-[11px] text-ink-muted">
-        <div className="flex justify-between gap-2">
-          <dt>app</dt>
-          <dd className="text-ink">SDCodex v2.4.0 (frontend slice)</dd>
+      <div className="mt-3 rounded-lg border border-white/[0.06] bg-obsidian-lowest/60 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="font-display text-sm font-semibold">Installation mode</h3>
+            <p className="mt-1 font-mono text-[11px] text-ink-faint">
+              Select how this instance is deployed. This describes the current launch mode; it does not
+              migrate or restart the app.
+            </p>
+          </div>
+          {installMode && (
+            <span className="font-mono text-[10px] uppercase text-ink-muted">
+              Running: {installMode.runtime_mode}
+            </span>
+          )}
         </div>
-        <div className="flex justify-between gap-2">
-          <dt>health</dt>
-          <dd>
-            backend pending · <span className="font-mono">/healthz</span> unwired
-          </dd>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {(['docker', 'local'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              disabled={!isAdmin || modeBusy || !installMode}
+              aria-pressed={installMode?.mode === mode}
+              onClick={() => void saveInstallMode(mode)}
+              className={`rounded border px-3 py-1.5 font-mono text-[11px] uppercase transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                installMode?.mode === mode
+                  ? 'border-primary/60 bg-primary/15 text-white'
+                  : 'border-white/10 bg-white/[0.03] text-ink-muted hover:border-white/20 hover:text-ink'
+              }`}
+            >
+              {mode}
+            </button>
+          ))}
         </div>
-        <div className="flex justify-between gap-2">
-          <dt>self-update</dt>
-          <dd>Docker sidecar (OldCode docker_api) — backend only</dd>
-        </div>
-      </dl>
+        {installMode && !installMode.matches_runtime && (
+          <p role="alert" className="mt-2 font-mono text-[11px] text-[#fcd34d]">
+            The selected mode does not match the running app. Restart it externally in {installMode.mode}
+            {' '}mode before using the self-update/restart flow.
+          </p>
+        )}
+        {modeMessage && (
+          <p className="mt-2 font-mono text-[11px] text-ink-muted" role="status">
+            {modeMessage}
+          </p>
+        )}
+        {!isAdmin && (
+          <p className="mt-2 font-mono text-[11px] text-ink-faint">
+            Only administrators can change installation mode.
+          </p>
+        )}
+      </div>
       <p className="mt-3 font-mono text-[11px] text-ink-faint">
-        Core and plugins update via git pull (bare-metal and Docker alike). Core update controls are
-        available from Plugin Hub → Updates.
+        Updates are available from Plugin Hub. Local mode restarts the backend process; Docker mode
+        uses the existing container update flow.
       </p>
       <div className="mt-4 border-t border-white/[0.06] pt-3">
         <h3 className="font-display text-sm font-semibold">Single sign-on</h3>

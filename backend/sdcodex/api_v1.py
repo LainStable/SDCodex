@@ -545,6 +545,51 @@ def _admin_or_401():
     return user, None
 
 
+def _mode_mismatch(rebuilder_mod):
+    status = rebuilder_mod.install_mode_status()
+    if status["matches_runtime"]:
+        return None
+    return (
+        jsonify({
+            "error": (
+                f"Selected {status['mode']} mode does not match the running "
+                f"{status['runtime_mode']} app. Restart externally in the selected mode first."
+            )
+        }),
+        409,
+    )
+
+
+@api_v1.get("/system/install-mode")
+def system_install_mode_get():
+    _, err = _require_user()
+    if err:
+        return err
+    from . import rebuilder as rebuilder_mod
+
+    return jsonify(rebuilder_mod.install_mode_status())
+
+
+@api_v1.put("/system/install-mode")
+def system_install_mode_save():
+    _, err = _admin_or_401()
+    if err:
+        return err
+    data = request.get_json(force=True, silent=True) or {}
+    mode = data.get("mode")
+    if not isinstance(mode, str) or mode not in {"docker", "local"}:
+        return jsonify({"error": "mode must be 'docker' or 'local'"}), 400
+    row = db.session.get(Setting, "install_mode")
+    if row is None:
+        row = Setting(key="install_mode")
+        db.session.add(row)
+    row.value = mode
+    db.session.commit()
+    from . import rebuilder as rebuilder_mod
+
+    return jsonify(rebuilder_mod.install_mode_status())
+
+
 @api_v1.get("/updates/check")
 def updates_check():
     _, err = _admin_or_401()
@@ -562,6 +607,7 @@ def updates_check():
             "plugins": plugin_updates,
             "rebuild_required": rebuild_required,
             "rebuild": rebuilder_mod.rebuild_capability(),
+            "install_mode": rebuilder_mod.install_mode_status(),
             "total": (1 if core.get("has_update") else 0)
             + len(plugin_updates),
         }
@@ -574,6 +620,19 @@ def updates_core_apply():
     if err:
         return err
     from . import updater as updater_mod
+    from . import rebuilder as rebuilder_mod
+
+    capability = rebuilder_mod.rebuild_capability()
+    if not capability["can_rebuild"]:
+        if capability["mode"] == "mismatch":
+            return jsonify({
+                "ok": False,
+                "message": "Configured install mode does not match the running app. Restart it in the selected mode before updating.",
+            }), 409
+        return jsonify({
+            "ok": False,
+            "message": "Core self-update is unavailable in this Docker setup; update it from the host.",
+        }), 409
 
     ok, msg = updater_mod.update_core()
     return jsonify({"ok": ok, "message": msg}), (200 if ok else 409)
@@ -582,7 +641,7 @@ def updates_core_apply():
 @api_v1.post("/system/rebuild")
 def system_rebuild():
     """Pull-triggered rebuild: image build + container replace (Docker) or
-    backend restart (bare metal). Runs in the background; the frontend polls
+    backend restart (Local). Runs in the background; the frontend polls
     health and reloads."""
     _, err = _admin_or_401()
     if err:
@@ -646,12 +705,22 @@ def plugins_install():
     if err:
         return err
     from . import updater as updater_mod
+    from . import rebuilder as rebuilder_mod
 
     data = request.get_json(force=True, silent=True) or {}
     repo_url = (data.get("repo_url") or "").strip()
     if not repo_url:
         return jsonify({"error": "repo_url required"}), 400
-    ok, result = updater_mod.install_plugin(repo_url, data.get("volumes") or {})
+    mode_error = _mode_mismatch(rebuilder_mod)
+    if mode_error:
+        return mode_error
+
+    install_mode = rebuilder_mod.configured_install_mode()
+    ok, result = updater_mod.install_plugin(
+        repo_url,
+        data.get("volumes") or {},
+        install_mode=install_mode,
+    )
     if not ok:
         return jsonify({"error": result}), 502
     # Record the repo + wire volumes/env.
@@ -665,10 +734,11 @@ def plugins_install():
         )
         db.session.add(repo)
         db.session.commit()
-    updater_mod.apply_volume_config(
-        {"id": result["id"], "volumes": result.get("volumes", [])},
-        data.get("volumes") or {},
-    )
+    if install_mode == "docker":
+        updater_mod.apply_volume_config(
+            {"id": result["id"], "volumes": result.get("volumes", [])},
+            data.get("volumes") or {},
+        )
     return jsonify({"ok": True, "plugin": result})
 
 
@@ -678,6 +748,11 @@ def plugins_update(plugin_id: str):
     if err:
         return err
     from . import updater as updater_mod
+    from . import rebuilder as rebuilder_mod
+
+    mode_error = _mode_mismatch(rebuilder_mod)
+    if mode_error:
+        return mode_error
 
     ok, msg = updater_mod.update_plugin(plugin_id)
     return jsonify({"ok": ok, "message": msg}), (200 if ok else 409)
@@ -689,8 +764,16 @@ def plugins_uninstall(plugin_id: str):
     if err:
         return err
     from . import updater as updater_mod
+    from . import rebuilder as rebuilder_mod
 
-    ok, msg = updater_mod.uninstall_plugin(plugin_id)
+    mode_error = _mode_mismatch(rebuilder_mod)
+    if mode_error:
+        return mode_error
+
+    ok, msg = updater_mod.uninstall_plugin(
+        plugin_id,
+        install_mode=rebuilder_mod.configured_install_mode(),
+    )
     if ok:
         row = PluginRepo.query.filter(
             (PluginRepo.name == plugin_id) | (PluginRepo.repo_url.contains(plugin_id))
@@ -708,10 +791,17 @@ def plugin_volumes(plugin_id: str):
     if err:
         return err
     from . import updater as updater_mod
+    from . import rebuilder as rebuilder_mod
 
     base = updater_mod.plugin_path(plugin_id)
     if not base:
         return jsonify({"error": "Not installed."}), 404
+    mode_error = _mode_mismatch(rebuilder_mod)
+    if mode_error:
+        return mode_error
+    if rebuilder_mod.configured_install_mode() != "docker":
+        return jsonify({"id": plugin_id, "volumes": []})
+
     mf = updater_mod.read_manifest(base) or {}
     env_vals: dict = {}
     env_path = os.path.join(updater_mod.root_dir(), ".env")
@@ -739,10 +829,16 @@ def plugin_volumes_save(plugin_id: str):
     if err:
         return err
     from . import updater as updater_mod
+    from . import rebuilder as rebuilder_mod
 
     base = updater_mod.plugin_path(plugin_id)
     if not base:
         return jsonify({"error": "Not installed."}), 404
+    mode_error = _mode_mismatch(rebuilder_mod)
+    if mode_error:
+        return mode_error
+    if rebuilder_mod.configured_install_mode() != "docker":
+        return jsonify({"error": "Plugin volume mounts can only be configured in Docker mode."}), 409
     mf = updater_mod.read_manifest(base) or {"id": plugin_id}
     data = request.get_json(force=True, silent=True) or {}
     values = data.get("volumes") or {}
@@ -754,8 +850,6 @@ def plugin_volumes_save(plugin_id: str):
         if val:
             resolved[v["env_var"]] = val
     updater_mod.apply_volume_config({"id": mf.get("id", plugin_id), "volumes": mf.get("volumes", [])}, resolved)
-    from . import rebuilder as rebuilder_mod
-
     rebuilder_mod.mark_rebuild(f"volumes {mf.get('id', plugin_id)}")
     return jsonify({"ok": True, "volumes": resolved})
 

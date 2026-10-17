@@ -703,7 +703,8 @@ export function Plugins() {
     core?: { has_update?: boolean; local_version?: string; remote_version?: string };
     plugins?: Array<{ id: string; name: string }>;
     rebuild_required?: boolean;
-    rebuild?: { can_rebuild?: boolean; mode?: string };
+    rebuild?: { can_rebuild?: boolean; mode?: string; install_mode?: string; runtime_mode?: string };
+    install_mode?: { mode: 'docker' | 'local'; runtime_mode: 'docker' | 'local'; matches_runtime: boolean };
     total?: number;
   } | null>(null);
   const [checking, setChecking] = useState(false);
@@ -712,6 +713,7 @@ export function Plugins() {
   const [rebuildLog, setRebuildLog] = useState<string[]>([]);
   const [showRebuildLog, setShowRebuildLog] = useState(false);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
+  const updateUnavailable = updates?.rebuild?.can_rebuild === false;
 
   const check = async () => {
     setChecking(true);
@@ -758,8 +760,9 @@ export function Plugins() {
     setRebuildLog([]);
     setShowRebuildLog(true);
     setUpdateMsg(null);
-    // Version-aware reload: the OLD container keeps answering health until
-    // the swap, so only reload once a DIFFERENT version responds.
+    // Docker keeps the old app answering health until replacement; local
+    // mode restarts the backend process in place.
+    const isLocal = updates?.rebuild?.mode === 'local';
     let preVersion = '';
     let backendWentDown = false;
     try {
@@ -773,21 +776,22 @@ export function Plugins() {
       const { apiPost, resetBackendProbe } = await import('../lib/backend');
       const r = await apiPost<{ ok: boolean; message?: string }>('/system/rebuild', {});
       if (!r.ok) throw new Error(r.message ?? 'Rebuild refused.');
-      setUpdateMsg(r.message ?? 'Rebuilding…');
-      // Stream the rebuild log into the floating window while polling health.
+      setUpdateMsg(r.message ?? (isLocal ? 'Restarting…' : 'Rebuilding…'));
       for (let i = 0; i < 180; i++) {
-        await new Promise((res) => setTimeout(res, 10000));
-        try {
-          const lj = await apiGet<{ lines?: string[] }>('/system/rebuild/log');
-          if (lj.lines) {
-            setRebuildLog(lj.lines);
-            if (lj.lines.some((line) => line.includes('swap done'))) {
-              window.location.reload();
-              return;
+        await new Promise((res) => setTimeout(res, isLocal ? 2000 : 10000));
+        if (!isLocal) {
+          try {
+            const lj = await apiGet<{ lines?: string[] }>('/system/rebuild/log');
+            if (lj.lines) {
+              setRebuildLog(lj.lines);
+              if (lj.lines.some((line) => line.includes('swap done'))) {
+                window.location.reload();
+                return;
+              }
             }
+          } catch {
+            /* backend going down — keep last lines */
           }
-        } catch {
-          /* backend going down — keep last lines */
         }
         try {
           resetBackendProbe();
@@ -808,7 +812,7 @@ export function Plugins() {
           /* still down */
         }
       }
-      setUpdateMsg('Still waiting — reload manually once the container is back.');
+      setUpdateMsg('Still waiting — reload manually once the app is back.');
     } catch (e) {
       setUpdateMsg(e instanceof Error ? e.message : 'Rebuild failed');
     } finally {
@@ -833,6 +837,8 @@ export function Plugins() {
 
   useEffect(() => {
     let on = true;
+    const refreshUpdates = () => void check();
+    window.addEventListener('sdcodex:install-mode-changed', refreshUpdates);
     void (async () => {
       const { catalog: c, live: ok } = await fetchCatalog();
       if (on) {
@@ -844,6 +850,7 @@ export function Plugins() {
     void check();
     return () => {
       on = false;
+      window.removeEventListener('sdcodex:install-mode-changed', refreshUpdates);
     };
   }, []);
 
@@ -945,6 +952,17 @@ export function Plugins() {
             {checking ? 'Checking…' : 'Check now'}
           </GhostButton>
         </div>
+        {updates?.rebuild?.mode === 'mismatch' && (
+          <p role="alert" className="mt-2 font-mono text-[11px] text-[#fcd34d]">
+            Selected install mode ({updates.rebuild.install_mode}) differs from the running app
+            ({updates.rebuild.runtime_mode}). Restart it externally in the selected mode before updating.
+          </p>
+        )}
+        {updates?.rebuild?.mode === 'docker-nosocket' && (
+          <p role="status" className="mt-2 font-mono text-[11px] text-ink-faint">
+            Docker self-update is unavailable in this setup. Update or restart the app from the host.
+          </p>
+        )}
         {updates?.core && (
           <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-white/[0.06] px-2 py-1.5 font-mono text-[11px]">
             <span className="text-ink">Core</span>
@@ -955,7 +973,7 @@ export function Plugins() {
             {applying ? (
               <div className="min-w-40 flex-1"><ProgressBar /></div>
             ) : (
-              <PrimaryButton disabled={applying || rebuilding} onClick={() => void updateAll()}>
+              <PrimaryButton disabled={checking || applying || rebuilding || updateUnavailable} onClick={() => void updateAll()}>
                 {rebuilding ? 'Rebuilding…' : 'Update'}
               </PrimaryButton>
             )}
@@ -964,7 +982,7 @@ export function Plugins() {
         {!updates?.core && (
           <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-white/[0.06] px-2 py-1.5 font-mono text-[11px]">
             <span className="flex-1 text-ink-muted">Core update</span>
-            <PrimaryButton disabled={checking || applying || rebuilding} onClick={() => void updateAll()}>
+            <PrimaryButton disabled={checking || applying || rebuilding || updateUnavailable} onClick={() => void updateAll()}>
               {applying || rebuilding ? 'Updating…' : 'Update'}
             </PrimaryButton>
           </div>
@@ -977,13 +995,13 @@ export function Plugins() {
         )}
         {updates?.rebuild_required && (
           <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-status-warning/30 bg-status-warning/[0.07] px-2 py-1.5 font-mono text-[11px]">
-            <span className="text-[#fcd34d]">Rebuild required</span>
+            <span className="text-[#fcd34d]">Restart required</span>
             <span className="text-ink-faint">
               {updates.rebuild?.mode === 'docker'
                 ? 'press Update above (pulls latest code, then rebuilds)'
-                : updates.rebuild?.mode === 'baremetal'
+                : updates.rebuild?.mode === 'local'
                   ? 'press Update above (pulls latest code, then restarts)'
-                  : 'mount the docker socket to enable self-rebuild'}
+                  : 'see the deployment notice above'}
             </span>
           </div>
         )}
@@ -994,7 +1012,8 @@ export function Plugins() {
           <div className="glass-l2 edge-shimmer w-full max-w-2xl rounded-lg p-4">
             <div className="flex items-center justify-between">
               <h3 className="font-display text-sm font-semibold">
-                Rebuilding container {rebuilding ? '…' : '(done)'}
+                {updates?.rebuild?.mode === 'local' ? 'Restarting local app' : 'Rebuilding container'}{' '}
+                {rebuilding ? '…' : '(done)'}
               </h3>
               <button
                 type="button"
@@ -1006,7 +1025,9 @@ export function Plugins() {
             </div>
             <div className="mt-3 h-72 overflow-y-auto rounded-lg bg-[#070a10] p-3 font-mono text-[11px] leading-relaxed">
               {rebuildLog.length === 0 ? (
-                <p className="text-ink-faint">waiting for build output…</p>
+                <p className="text-ink-faint">
+                  {updates?.rebuild?.mode === 'local' ? 'waiting for the app to restart…' : 'waiting for build output…'}
+                </p>
               ) : (
                 rebuildLog.map((l, i) => (
                   <div key={i} className="text-ink-muted">
@@ -1016,7 +1037,7 @@ export function Plugins() {
               )}
             </div>
             <p className="mt-2 font-mono text-[10px] text-ink-faint">
-              The page reloads automatically once the new container answers health checks.
+              The page reloads automatically once the app answers health checks.
             </p>
           </div>
         </div>
@@ -1070,7 +1091,11 @@ export function Plugins() {
                           '/plugins/install',
                           { repo_url: p.repository },
                         );
-                        return `installed ${r.plugin?.name ?? p.id} — set volumes below, then restart/rebuild to mount`;
+                        return `installed ${r.plugin?.name ?? p.id} — ${
+                          updates?.install_mode?.mode === 'local'
+                            ? 'restart the local app to load it'
+                            : 'configure volumes, then restart/rebuild to mount them'
+                        }`;
                       })
                     }
                   >
@@ -1078,9 +1103,11 @@ export function Plugins() {
                   </GhostButton>
                 ) : (
                   <>
-                    <GhostButton disabled={busy !== null} onClick={() => void openVolumes(p.id)}>
-                      {volOpen === p.id ? 'Hide volumes' : 'Volumes'}
-                    </GhostButton>
+                    {updates?.install_mode?.mode === 'docker' && (
+                      <GhostButton disabled={busy !== null} onClick={() => void openVolumes(p.id)}>
+                        {volOpen === p.id ? 'Hide volumes' : 'Volumes'}
+                      </GhostButton>
+                    )}
                     {inst.has_update && (
                       <GhostButton
                         disabled={busy !== null}
@@ -1114,7 +1141,7 @@ export function Plugins() {
                   </>
                 )}
               </div>
-              {volOpen === p.id && inst && (
+              {volOpen === p.id && inst && updates?.install_mode?.mode === 'docker' && (
                 <div className="mt-3 rounded-lg border border-white/[0.06] bg-obsidian-lowest/60 p-3">
                   <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
                     Volumes → .env + compose override

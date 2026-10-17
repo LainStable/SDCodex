@@ -2,12 +2,12 @@
 
 Slim port of OldCode plugin_manager.py flows, adapted to the new layout:
 
-* core updates: ``git pull`` the repo (works bare-metal and in Docker, where
+* core updates: ``git pull`` the repo (works locally and in Docker, where
   the repo is mounted rw at /app).
 * plugin updates/installs: git clone/pull into the plugins dir.
 * plugin ``requirements.txt`` files merge into ``plugin-requirements.txt``
   (tracked-ignored), separate from core ``requirements.txt``.
-* plugin volumes/env land in ``.env`` + ``docker-compose.override.yml``
+* Docker plugin volumes/env land in ``.env`` + ``docker-compose.override.yml``
   (both git-ignored, so pulls never clobber them).
 """
 
@@ -429,7 +429,11 @@ def _merge_requirements(root: str, plugin_id: str, plugin_req: str) -> None:
         logger.error("Writing plugin-requirements.txt: %s", e)
 
 
-def install_plugin(repo_url: str, volume_paths: dict | None = None) -> tuple[bool, str | dict]:
+def install_plugin(
+    repo_url: str,
+    volume_paths: dict | None = None,
+    install_mode: str | None = None,
+) -> tuple[bool, str | dict]:
     """Clone a plugin, merge requirements, configure volumes. Returns manifest."""
     short, canonical = normalize_github_url(repo_url)
     repo_name = short.split("/")[-1] if "/" in short else short
@@ -470,7 +474,12 @@ def install_plugin(repo_url: str, volume_paths: dict | None = None) -> tuple[boo
         var = v["env_var"]
         if not (volume_values.get(var) or "").strip():
             volume_values[var] = (v.get("host_path") or "").strip()
-    apply_volume_config({"id": plugin_id, "volumes": manifest.get("volumes", [])}, volume_values)
+    if install_mode is None:
+        from . import rebuilder as rebuilder_mod
+
+        install_mode = rebuilder_mod.configured_install_mode()
+    if install_mode == "docker":
+        apply_volume_config({"id": plugin_id, "volumes": manifest.get("volumes", [])}, volume_values)
 
     req_path = os.path.join(target, "requirements.txt")
     if os.path.exists(req_path):
@@ -489,7 +498,7 @@ def install_plugin(repo_url: str, volume_paths: dict | None = None) -> tuple[boo
 
         threading.Thread(target=_bg_install, daemon=True).start()
 
-    volumes = manifest.get("volumes", [])
+    volumes = manifest.get("volumes", []) if install_mode == "docker" else []
     needed = []
     for v in volumes:
         if not isinstance(v, dict) or not v.get("env_var"):
@@ -503,16 +512,21 @@ def install_plugin(repo_url: str, volume_paths: dict | None = None) -> tuple[boo
     return True, {"id": plugin_id, "name": manifest.get("name", plugin_id), "volumes": needed}
 
 
-def uninstall_plugin(plugin_id: str) -> tuple[bool, str]:
+def uninstall_plugin(plugin_id: str, install_mode: str | None = None) -> tuple[bool, str]:
     target = plugin_path(plugin_id)
     if not target or not os.path.isdir(target):
         return False, "Not installed."
     manifest = read_manifest(target) or {}
+    if install_mode is None:
+        from . import rebuilder as rebuilder_mod
+
+        install_mode = rebuilder_mod.configured_install_mode()
     try:
-        remove_volume_config(plugin_id)
-        remove_env_keys(
-            [v.get("env_var") for v in manifest.get("volumes", []) if isinstance(v, dict) and v.get("env_var")]
-        )
+        if install_mode == "docker":
+            remove_volume_config(plugin_id)
+            remove_env_keys(
+                [v.get("env_var") for v in manifest.get("volumes", []) if isinstance(v, dict) and v.get("env_var")]
+            )
         shutil.rmtree(target)
         from . import rebuilder as rebuilder_mod
 
@@ -530,7 +544,7 @@ def uninstall_plugin(plugin_id: str) -> tuple[bool, str]:
                 f.write(pattern.sub("", content))
         except Exception as e:
             logger.error("Removing plugin requirements: %s", e)
-    return True, f"Plugin '{plugin_id}' removed. Restart/rebuild to drop its mounts."
+    return True, f"Plugin '{plugin_id}' removed. Restart/rebuild to apply the change."
 
 
 # ------------------------------------------------- .env + override I/O ---
