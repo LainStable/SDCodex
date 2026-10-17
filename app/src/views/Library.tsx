@@ -172,7 +172,7 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                   Empty — run Scan in Settings → Model dirs.
                 </p>
               ) : (
-                <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
                 {remote.map((r) => (
                   <article
                     key={`srv-${r.modelId}-${r.versionId}`}
