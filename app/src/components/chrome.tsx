@@ -66,14 +66,24 @@ export function Sidebar({
     space.kind === 'plugin' ? plugins.find((p) => p.id === space.id) : undefined;
   const currentPage = pluginPage ?? activePlugin?.nav_items[0]?.page ?? null;
   return (
-    <aside className={`sticky top-0 hidden h-dvh shrink-0 self-start overflow-y-auto border-r border-white/[0.06] transition-[width] duration-200 md:block ${collapsed ? 'w-16 p-2' : 'w-60 p-4'}`}>
+    <>
+      {/* Fixed menu + spacer: the nav floats over the page, the spacer keeps
+          its column width so content never slides underneath it. */}
       <div
-        className={`flex items-center gap-2 font-display text-lg font-bold tracking-tight ${collapsed ? 'justify-center' : ''}`}
-        title={collapsed ? 'SDCodex' : undefined}
+        aria-hidden="true"
+        className={`hidden shrink-0 transition-[width] duration-200 md:block ${collapsed ? 'w-16' : 'w-60'}`}
+      />
+      <aside
+        className={`fixed inset-y-0 left-0 z-30 hidden h-dvh flex-col border-r border-white/[0.06] bg-obsidian-bg/95 backdrop-blur transition-[width] duration-200 md:flex ${collapsed ? 'w-16' : 'w-60'}`}
       >
-        <img src="/sdcodex.svg" alt="" className="h-7 w-7 shrink-0 object-contain" />
-        {!collapsed && <span>SDCodex</span>}
-      </div>
+        <div className={`shrink-0 ${collapsed ? 'p-2 pb-0' : 'p-4 pb-0'}`}>
+          <div
+            className={`flex items-center gap-2 font-display text-lg font-bold tracking-tight ${collapsed ? 'justify-center' : ''}`}
+            title={collapsed ? 'SDCodex' : undefined}
+          >
+            <img src="/sdcodex.svg" alt="" className="h-7 w-7 shrink-0 object-contain" />
+            {!collapsed && <span>SDCodex</span>}
+          </div>
       {(hasUpdate || updates.newPluginAvailable || !collapsed) && (
         <div className={`mt-1 flex flex-wrap items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint ${collapsed ? 'justify-center' : ''}`}>
           {!collapsed && (hasUpdate ? (
@@ -106,9 +116,12 @@ export function Sidebar({
               NEW
             </button>
           )}
-        </div>
+          </div>
       )}
-      <nav className="mt-6 space-y-1 text-sm">
+        </div>
+        {/* Only the nav scrolls, so the brand stays on screen with long menus. */}
+        <div className={`min-h-0 flex-1 overflow-y-auto ${collapsed ? 'p-2' : 'p-4 pt-2'}`}>
+      <nav className="space-y-1 text-sm">
         {activePlugin ? (
           <>
             {!collapsed && <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
@@ -184,7 +197,9 @@ export function Sidebar({
         </div>
         <div className="mt-1">742 GB of 2 TB</div>
       </div>}
-    </aside>
+        </div>
+      </aside>
+    </>
   );
 }
 
