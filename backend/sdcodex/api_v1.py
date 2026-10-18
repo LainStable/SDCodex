@@ -347,7 +347,7 @@ def library_set_cover(row_id: int):
     import tempfile
     from urllib.parse import urlparse
 
-    _, err = _require_user()
+    user, err = _require_user()
     if err:
         return err
     row = db.session.get(Download, row_id)
@@ -389,9 +389,18 @@ def library_set_cover(row_id: int):
 
     import requests
 
+    # Civitai rejects bare fetches (no User-Agent) and some previews need
+    # the caller's key — mirror the /proxy/image headers here.
+    fetch_headers = {"User-Agent": "SDCodex/1.0 (+https://github.com/LainStable/SDCodex)"}
+    authorization = (request.headers.get("Authorization") or "").strip()
+    if authorization.lower().startswith("bearer "):
+        fetch_headers["Authorization"] = authorization
+    elif getattr(user, "api_key", None):
+        fetch_headers["Authorization"] = f"Bearer {user.api_key}"
+
     temporary_path = None
     try:
-        with requests.get(image_url, stream=True, timeout=(5, 30)) as response:
+        with requests.get(image_url, headers=fetch_headers, stream=True, timeout=(5, 30)) as response:
             response.raise_for_status()
             final_host = (urlparse(response.url).hostname or "").lower()
             if not (final_host.endswith(".civitai.com") or final_host.endswith(".civitai.red")):

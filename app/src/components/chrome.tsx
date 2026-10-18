@@ -84,9 +84,9 @@ export function Sidebar({
             title={collapsed ? 'SDCodex' : undefined}
           >
             {collapsed ? (
-              <img src="/sdcodex.svg" alt="SDCodex" className="h-9 w-9 shrink-0 object-contain" />
+              <img src="/codex.svg" alt="SDCodex" className="h-9 w-9 shrink-0 object-contain" />
             ) : (
-              <img src="/sdcodex.svg" alt="SDCodex" className="h-12 w-full object-contain object-left" />
+              <img src="/codex.svg" alt="SDCodex" className="h-12 w-full object-contain object-left" />
             )}
           </div>
       {(hasUpdate || updates.newPluginAvailable || !collapsed) && (
