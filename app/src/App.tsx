@@ -549,10 +549,6 @@ export default function App() {
                 onServerChanged={() => {
                   void refreshServerAuth();
                 }}
-                onSwitchUser={() => {
-                  clearProfile();
-                  setProfile(null);
-                }}
                 onDone={(p) => {
                   void handleAuthed(p);
                 }}
@@ -590,7 +586,9 @@ export default function App() {
             signedIn={authed}
             onSignOut={() => {
               void backendLogout();
+              clearProfile();
               endSession();
+              setProfile(null);
               setAuthed(false);
             }}
             space={space}

@@ -21,7 +21,6 @@ export function BootstrapCard({
   serverMode,
   serverBootstrap,
   onServerChanged,
-  onSwitchUser,
   onDone,
 }: {
   existing: Profile | null;
@@ -31,8 +30,6 @@ export function BootstrapCard({
   serverBootstrap: boolean;
   /** Called when the server disagrees (e.g. users appeared) so App re-checks. */
   onServerChanged?: () => void;
-  /** Clear the saved profile so a different user can sign in. */
-  onSwitchUser?: () => void;
   onDone: (p: Profile) => void;
 }) {
   const [username, setUsername] = useState('');
@@ -239,15 +236,6 @@ export function BootstrapCard({
         >
           {busy ? 'Working…' : !isCreate ? 'Sign in' : 'Create administrator'}
         </PrimaryButton>
-        {existing && onSwitchUser && (
-          <button
-            type="button"
-            onClick={onSwitchUser}
-            className="text-center font-mono text-[11px] text-ink-faint hover:text-white"
-          >
-            Sign in as someone else
-          </button>
-        )}
         {sso.map((p) => (
           <GhostButton
             key={p.id}
