@@ -382,6 +382,8 @@ def list_installed() -> list:
                 "entry_page": mf.get("entry_page", ""),
                 "nav_items": mf.get("nav_items", []) if isinstance(mf.get("nav_items"), list) else [],
                 "settings": mf.get("settings", []) if isinstance(mf.get("settings"), list) else [],
+                "task_status": mf.get("task_status") if isinstance(mf.get("task_status"), dict) else None,
+                "assistant_actions": mf.get("assistant_actions") if isinstance(mf.get("assistant_actions"), list) else [],
                 "path": p,
                 "local_sha": local_rev(p),
             }

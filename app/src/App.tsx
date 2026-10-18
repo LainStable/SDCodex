@@ -4,7 +4,7 @@ import Library from './views/Library';
 import Settings from './views/Settings';
 import PluginView from './views/PluginView';
 import ModelModal, { type ModalTarget } from './components/ModelModal';
-import { Queue, BootstrapCard, DownloadFloat } from './views/Core';
+import { Queue, BootstrapCard, DownloadFloat, PluginTaskFloat } from './views/Core';
 import Home from './views/Home';
 import { MobileNav, Sidebar, Topbar, type Theme, type UpdateState, type ViewId } from './components/chrome';
 import {
@@ -16,6 +16,7 @@ import {
 } from './lib/queue';
 import { adoptServerUser, clearProfile, completeOidcCallback, endSession, fetchServerAuth, hasSession, initials, loadProfile, pullServerProfile, type Profile, type ServerAuthState } from './lib/auth';
 import type { InstalledPlugin } from './lib/plugins';
+import type { AssistantAction, AssistantSearchParams } from './lib/assistant';
 import { deleteScanned } from './lib/library';
 import { apiPost, backendLogout, backendAvailable } from './lib/backend';
 import { getApiKey, pullSettings, setApiUser } from './lib/settings';
@@ -209,9 +210,18 @@ export default function App() {
     }
   };
 
-  const [creatorSearch, setCreatorSearch] = useState<{ token: number; text: string }>({
+  const [creatorSearch, setCreatorSearch] = useState<{
+    token: number;
+    text: string;
+    spec?: AssistantSearchParams | null;
+  }>({
     token: 0,
     text: '',
+    spec: null,
+  });
+  const [assistantStatus, setAssistantStatus] = useState<{ configured: boolean; model: string }>({
+    configured: false,
+    model: '',
   });
   const [theme, setTheme] = useState<Theme>(() => {
     try {
@@ -378,6 +388,32 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // Assistant presence drives the topbar search box: configured => chat bar.
+  useEffect(() => {
+    if (!authed) return;
+    let live = true;
+    const refresh = async () => {
+      try {
+        const { getAssistantStatus } = await import('./lib/assistant');
+        const status = await getAssistantStatus();
+        if (live) {
+          setAssistantStatus({
+            configured: Boolean(status.configured),
+            model: status.configured ? status.model : '',
+          });
+        }
+      } catch {
+        if (live) setAssistantStatus({ configured: false, model: '' });
+      }
+    };
+    void refresh();
+    window.addEventListener('sdcodex:assistant-changed', refresh);
+    return () => {
+      live = false;
+      window.removeEventListener('sdcodex:assistant-changed', refresh);
+    };
+  }, [authed]);
+
   // Plugin installs/uninstalls refresh spaces everywhere.
   useEffect(() => {
     const onChange = () => void refreshInstalled();
@@ -391,6 +427,20 @@ export default function App() {
     setPluginPage(null);
     setView(v);
     writeRoute({ view: v, space: { kind: 'core' }, pluginPage: null, settingsTab });
+  };
+
+  const assistantAction = (action: AssistantAction) => {
+    if (action.type !== 'search') return;
+    setModal(null);
+    setSpace({ kind: 'core' });
+    setPluginPage(null);
+    setView('models');
+    writeRoute({ view: 'models', space: { kind: 'core' }, pluginPage: null, settingsTab });
+    setCreatorSearch((prev) => ({
+      token: prev.token + 1,
+      text: action.params.q ?? '',
+      spec: action.params,
+    }));
   };
 
   const goSettings = (tab: string) => {
@@ -416,6 +466,14 @@ export default function App() {
     setSpace({ kind: 'core' });
     setPluginPage(null);
     writeRoute({ view, space: { kind: 'core' }, pluginPage: null, settingsTab });
+  };
+
+  /** Jump from the floating task panel straight to the plugin running it. */
+  const openPluginTask = (id: string, page: string) => {
+    setModal(null);
+    setPluginPage(page || null);
+    setSpace({ kind: 'plugin', id });
+    writeRoute({ view, space: { kind: 'plugin', id }, pluginPage: page || null, settingsTab });
   };
 
   const navigatePluginPage = (page: string) => {
@@ -466,6 +524,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-obsidian-bg text-ink">
       <DownloadFloat go={() => go('queue')} />
+      <PluginTaskFloat onOpen={openPluginTask} />
       {callbackMsg && (
         <div className="fixed left-1/2 top-4 z-[70] -translate-x-1/2 rounded-lg border border-status-alert/40 bg-status-alert/15 px-4 py-2 font-mono text-xs text-[#f87171]">
           SSO: {callbackMsg}
@@ -538,6 +597,11 @@ export default function App() {
             plugins={installed}
             onSpaceCore={openCoreSpace}
             onSpacePlugin={openPluginSpace}
+            assistant={{
+              configured: assistantStatus.configured,
+              model: assistantStatus.model,
+              onAction: assistantAction,
+            }}
           />
 
           {space.kind === 'plugin'
@@ -567,6 +631,7 @@ export default function App() {
               onOpen={(id) => setModal({ kind: 'civitai', modelId: id })}
               searchToken={creatorSearch.token}
               searchText={creatorSearch.text}
+              searchSpec={creatorSearch.spec ?? null}
             />
           )}
           {space.kind === 'core' && view === 'library' && <Library key={libKey} onOpen={(t) => setModal(t)} />}

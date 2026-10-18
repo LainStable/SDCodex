@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { FilterPills, GhostButton, PageHeader, PrimaryButton } from '../components/chrome';
+import { AssistantPanel, McpPanel } from '../components/assistantPanels';
 import { TypeBadge } from '../components/ui';
 import { bindDirectoryKey, scanDir, serverScan, serverScanStatus } from '../lib/scan';
 import { getHandle } from '../lib/idb';
@@ -1311,6 +1312,8 @@ function System({ isAdmin }: { isAdmin: boolean }) {
           </p>
         )}
       </div>
+      <AssistantPanel isAdmin={isAdmin} />
+      <McpPanel isAdmin={isAdmin} />
     </div>
   );
 }

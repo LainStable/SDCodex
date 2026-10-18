@@ -694,6 +694,124 @@ export function DownloadFloat({ go }: { go: (v: 'queue') => void }) {
   );
 }
 
+/** Floating task panel (bottom right, all pages). Plugins that declare a
+    ``task_status`` endpoint report long-running work — batch renames, caption
+    batches — so this keeps their progress visible while the user browses
+    elsewhere in the app. */
+export function PluginTaskFloat({
+  onOpen,
+}: {
+  onOpen: (pluginId: string, page: string) => void;
+}) {
+  type PluginTask = {
+    pluginId: string;
+    pluginName: string;
+    page: string;
+    state: string;
+    current: number;
+    total: number;
+    detail: string;
+    message: string;
+    startedAt: number;
+  };
+  const [tasks, setTasks] = useState<PluginTask[]>([]);
+  const [dismissed, setDismissed] = useState(false);
+  const [now, setNow] = useState(() => Date.now() / 1000);
+
+  useEffect(() => {
+    let live = true;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const poll = async () => {
+      try {
+        const { apiGet, backendAvailable } = await import('../lib/backend');
+        if (!(await backendAvailable())) return;
+        const st = await apiGet<{ tasks?: PluginTask[] }>('/plugin-tasks');
+        if (!live) return;
+        const running = (st.tasks ?? []).filter((t) => t.state === 'running' || t.state === 'cancelling');
+        setTasks(running);
+        if (running.length === 0) setDismissed(false);
+        setNow(Date.now() / 1000);
+      } catch {
+        /* offline — keep the last view */
+      }
+    };
+    void poll();
+    timer = setInterval(() => void poll(), 2000);
+    return () => {
+      live = false;
+      if (timer) clearInterval(timer);
+    };
+  }, []);
+
+  if (tasks.length === 0 || dismissed) return null;
+
+  const elapsed = (task: PluginTask) => {
+    if (!task.startedAt) return '';
+    const seconds = Math.max(0, Math.round(now - task.startedAt));
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`;
+    return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
+  };
+
+  return (
+    <div className="glass-l2 fixed bottom-3 right-3 z-[55] w-[min(360px,92vw)] rounded-lg p-3">
+      <div className="flex items-center gap-2">
+        <h2 className="font-display text-sm font-semibold">Plugin Tasks</h2>
+        <span className="rounded border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] uppercase text-[#a5b4fc]">
+          {tasks.length} running
+        </span>
+        <button
+          type="button"
+          onClick={() => setDismissed(true)}
+          className="ml-auto rounded px-1.5 font-mono text-xs text-ink-faint hover:text-white"
+          title="Dismiss (reappears when a new task starts)"
+        >
+          ✕
+        </button>
+      </div>
+
+      <ul className="mt-2 space-y-2">
+        {tasks.map((task) => {
+          const percent = task.total > 0 ? Math.min(100, (task.current / task.total) * 100) : 0;
+          return (
+            <li key={task.pluginId} className="rounded border border-white/[0.06] p-2">
+              <div className="flex items-center justify-between gap-2 font-mono text-[11px]">
+                <span className="min-w-0 flex-1 truncate text-ink">{task.pluginName}</span>
+                <span className="shrink-0 text-ink-muted">
+                  {task.current}/{task.total || '?'}
+                </span>
+              </div>
+              <div className="mt-1.5 h-1.5 overflow-hidden rounded-sm bg-white/10">
+                <div
+                  className={`h-full rounded-sm bg-gradient-to-r from-primary to-secondary transition-all ${
+                    task.state === 'cancelling' ? 'animate-pulse' : ''
+                  }`}
+                  style={{ width: `${percent}%` }}
+                />
+              </div>
+              <div className="mt-1 flex items-center justify-between gap-2 font-mono text-[10px] text-ink-faint">
+                <span className="min-w-0 flex-1 truncate">
+                  {task.message || 'working…'}
+                  {task.detail ? ` · ${task.detail}` : ''}
+                </span>
+                <span className="shrink-0">{elapsed(task)}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onOpen(task.pluginId, task.page)}
+                className="mt-2 w-full rounded border border-white/15 py-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-muted hover:bg-white/5 hover:text-white"
+              >
+                Open {task.pluginName} →
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 /** Small indeterminate progress bar for git operations (replaces raw output). */
 function ProgressBar() {
   return (

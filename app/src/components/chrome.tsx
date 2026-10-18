@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { hexToRgba } from './ui';
 import { FanIcon } from './fanIcon';
+import { AssistantBar } from './assistantBar';
 import { getApiKey, getApiUser } from '../lib/settings';
+import type { AssistantAction } from '../lib/assistant';
 
 /* Shared chrome matching all four Stitch prototypes:
    sidebar order, topbar, page headers, buttons, stats. */
@@ -415,6 +417,7 @@ export function Topbar({
   plugins,
   onSpaceCore,
   onSpacePlugin,
+  assistant,
 }: {
   installMode?: 'docker' | 'local';
   go: (v: ViewId) => void;
@@ -430,6 +433,7 @@ export function Topbar({
   plugins: Array<{ id: string; name: string; icon?: string }>;
   onSpaceCore: () => void;
   onSpacePlugin: (id: string) => void;
+  assistant?: { configured: boolean; model: string; onAction: (action: AssistantAction) => void };
 }) {
   return (
     <div className="mb-4 flex items-center gap-2">
@@ -448,15 +452,21 @@ export function Topbar({
         />
       </button>
       <div className="glass-l1 flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2">
-        <span className="text-ink-faint">⌕</span>
-        <input
-          data-search
-          placeholder="Search models, paths, plugins…  ( / )"
-          className="w-full bg-transparent text-sm outline-none placeholder:text-ink-faint"
-        />
-        <kbd className="rounded border border-white/10 bg-white/5 px-1.5 font-mono text-[10px] text-ink-faint">
-          /
-        </kbd>
+        {assistant?.configured ? (
+          <AssistantBar model={assistant.model} onAction={assistant.onAction} />
+        ) : (
+          <>
+            <span className="text-ink-faint">⌕</span>
+            <input
+              data-search
+              placeholder="Search models, paths, plugins…  ( / )"
+              className="w-full bg-transparent text-sm outline-none placeholder:text-ink-faint"
+            />
+            <kbd className="rounded border border-white/10 bg-white/5 px-1.5 font-mono text-[10px] text-ink-faint">
+              /
+            </kbd>
+          </>
+        )}
       </div>
       <span
         title="Selected install mode"

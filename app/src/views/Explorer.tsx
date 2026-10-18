@@ -10,6 +10,7 @@ import {
   type ExplorerQuery,
 } from '../lib/civitai';
 import { getDirColors, targetDirFor } from '../lib/settings';
+import type { AssistantSearchParams } from '../lib/assistant';
 import { accentColor } from '../lib/categories';
 import { Stars, TypeBadge } from '../components/ui';
 import {
@@ -36,6 +37,7 @@ interface Props {
   onOpen: (modelId: number) => void;
   searchToken: number;
   searchText: string;
+  searchSpec?: AssistantSearchParams | null;
 }
 
 function isNsfwImage(img: { nsfwLevel: number }): boolean {
@@ -43,7 +45,7 @@ function isNsfwImage(img: { nsfwLevel: number }): boolean {
   return img.nsfwLevel > 1;
 }
 
-export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchToken, searchText }: Props) {
+export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchToken, searchText, searchSpec }: Props) {
   // Per-category accent colors set with each model directory in Settings.
   const [colors] = useState<Record<string, string>>(getDirColors);
   const [query, setQuery] = useState<ExplorerQuery>({
@@ -220,13 +222,27 @@ export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchT
     };
   }, []);
 
-  // Deep-link from detail view (creator search): external search requests.
+  // Deep-link from detail view (creator search) and assistant search actions.
   const lastToken = useRef(0);
   useEffect(() => {
     if (searchToken !== lastToken.current) {
       lastToken.current = searchToken;
-      setDraft(searchText);
-      patch({ q: searchText });
+      const text = searchSpec?.q ?? searchText;
+      setDraft(text);
+      patch({
+        q: text,
+        ...(searchSpec
+          ? {
+              type: searchSpec.type && searchSpec.type !== 'All' ? searchSpec.type : 'All',
+              baseModels: (searchSpec.baseModels ?? []).filter((m) =>
+                (BASE_MODELS as readonly string[]).includes(m),
+              ),
+              sort: ((SORTS as readonly string[]).includes(searchSpec.sort ?? '')
+                ? searchSpec.sort
+                : 'Highest Rated') as ExplorerQuery['sort'],
+            }
+          : {}),
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchToken]);

@@ -773,6 +773,158 @@ def plugins_list():
     return jsonify({"installed": installed})
 
 
+@api_v1.get("/plugin-tasks")
+def plugin_tasks():
+    """Running background tasks reported by installed plugins.
+
+    A plugin opts in with a ``task_status`` manifest entry whose ``path``
+    points at an in-process API route returning a normalized payload::
+
+        {"active": true, "state": "running", "current": 3, "total": 12,
+         "label": "AI Renamer", "message": "Analyzing 3 / 12"}
+
+    The floating task notification polls this endpoint, so plugin work stays
+    visible while the user browses elsewhere in the app.
+    """
+    _, err = _require_user()
+    if err:
+        return err
+    from . import assistant
+
+    return jsonify({"tasks": assistant.plugin_tasks(request.headers.get("Cookie", ""))})
+
+
+# ------------------------------------------------------------ assistant ---
+
+@api_v1.get("/assistant/status")
+def assistant_status():
+    user, err = _require_user()
+    if err:
+        return err
+    from . import assistant
+
+    settings = assistant.assistant_settings()
+    return jsonify({**settings, "isAdmin": bool(user.is_admin)})
+
+
+@api_v1.post("/assistant/settings")
+def assistant_settings_save():
+    user, err = _admin_or_401()
+    if err:
+        return err
+    from . import assistant
+
+    data = request.get_json(force=True, silent=True) or {}
+    settings = assistant.save_assistant_settings(
+        data, clear_key=bool(data.get("clearApiKey"))
+    )
+    return jsonify(settings)
+
+
+@api_v1.post("/assistant/test")
+def assistant_test():
+    user, err = _admin_or_401()
+    if err:
+        return err
+    from . import assistant
+
+    data = request.get_json(force=True, silent=True) or {}
+    if data:
+        # Allow testing values before saving them.
+        assistant.save_assistant_settings(data)
+    return jsonify(assistant.test_connection())
+
+
+@api_v1.post("/assistant/chat")
+def assistant_chat():
+    _, err = _require_user()
+    if err:
+        return err
+    from . import assistant
+
+    data = request.get_json(force=True, silent=True) or {}
+    messages = data.get("messages")
+    if not isinstance(messages, list):
+        return jsonify({"ok": False, "error": "Send a 'messages' list."}), 400
+    approved = data.get("approved") if isinstance(data.get("approved"), dict) else None
+    result = assistant.chat(
+        messages, cookie=request.headers.get("Cookie", ""), approved=approved
+    )
+    return jsonify(result), (200 if result.get("ok") else 400)
+
+
+@api_v1.get("/assistant/tools")
+def assistant_tools():
+    _, err = _require_user()
+    if err:
+        return err
+    from . import assistant
+
+    return jsonify({"tools": assistant.tool_schemas()})
+
+
+# ------------------------------------------------------------------ MCP ---
+
+@api_v1.get("/mcp/settings")
+def mcp_settings_get():
+    user, err = _require_user()
+    if err:
+        return err
+    from . import assistant
+
+    return jsonify({**assistant.mcp_settings(), "isAdmin": bool(user.is_admin)})
+
+
+@api_v1.post("/mcp/settings")
+def mcp_settings_save():
+    _, err = _admin_or_401()
+    if err:
+        return err
+    from . import assistant
+
+    data = request.get_json(force=True, silent=True) or {}
+    return jsonify(assistant.save_mcp_settings(data))
+
+
+@api_v1.route("/mcp", methods=["POST", "GET", "DELETE"])
+def mcp_endpoint():
+    """MCP server for external agents (Settings → System → MCP server).
+
+    Authenticated with the instance token rather than the UI session, so an
+    agent process can connect without a browser login.
+    """
+    from . import assistant, mcp
+
+    header = request.headers.get("Authorization", "")
+    token = header[7:].strip() if header.lower().startswith("bearer ") else ""
+    settings = assistant.mcp_settings()
+    if not settings["enabled"]:
+        return jsonify({"error": "The MCP server is disabled. Enable it in Settings → System."}), 403
+    if not assistant.mcp_token_valid(token):
+        return jsonify({"error": "unauthorized"}), 401
+
+    if request.method == "GET":
+        return jsonify(
+            {
+                "transport": "streamable-http (JSON-RPC over POST)",
+                "protocolVersion": mcp.PROTOCOL_VERSION,
+                "hint": "POST JSON-RPC messages to this endpoint with the bearer token.",
+            }
+        )
+    if request.method == "DELETE":
+        # Session teardown is a no-op: the server keeps no per-session state.
+        return ("", 204)
+
+    payload, status, is_json = mcp.handle_body(
+        request.get_data(), cookie=request.headers.get("Cookie", "")
+    )
+    if not is_json:
+        return ("", status)
+    response = make_response(payload, status)
+    response.headers["Content-Type"] = "application/json"
+    return response
+
+
 @api_v1.get("/plugins/store")
 def plugins_store():
     user, err = _require_user()
