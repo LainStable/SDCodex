@@ -1,8 +1,12 @@
 /* Topbar assistant bar: replaces the plain search field once an assistant
    endpoint is configured (Settings → System). The backend holds the endpoint,
-   runs the model, and calls tools; this component renders the conversation,
-   applies UI actions the backend reports, and gates plugin tasks behind an
-   explicit confirmation. */
+   runs the model, and calls tools.
+
+   The conversation itself lives in a floating task-style card (bottom right,
+   like the download / plugin-task notifications) so long model replies stay
+   readable: confirmations gate plugin tasks, and a follow-up box lets you
+   answer the model's questions or steer the task. The topbar stays a
+   single-line entry point. */
 
 import { useEffect, useRef, useState } from 'react';
 import { GhostButton, PrimaryButton } from './chrome';
@@ -24,31 +28,19 @@ export function AssistantBar({
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState('');
+  const [follow, setFollow] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [pending, setPending] = useState<AssistantPending | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const wrapRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const followRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    if (!open) return;
-    const onDown = (event: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) setOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (open) listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+    if (open) {
+      listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+      followRef.current?.focus();
+    }
   }, [open, turns, busy, pending, error]);
 
   const send = async (text: string, approved?: { name: string; args: Record<string, unknown> }) => {
@@ -89,43 +81,61 @@ export function AssistantBar({
     }
   };
 
+  const submitFollow = () => {
+    if (busy || !follow.trim()) return;
+    const text = follow;
+    setFollow('');
+    void send(text);
+  };
+
   const hasPanel = busy || Boolean(error) || Boolean(pending) || turns.length > 0;
 
   return (
-    <div ref={wrapRef} className="relative flex min-w-0 flex-1 items-center gap-2">
-      <span className="text-primary" aria-hidden>
-        ✦
-      </span>
-      <input
-        data-search
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onFocus={() => setOpen(true)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault();
-            if (busy || !draft.trim()) return;
-            const question = draft;
-            setDraft('');
-            void send(question);
-          }
-        }}
-        placeholder="Ask the assistant — search Civitai, check a plugin task…  ( / )"
-        className="w-full bg-transparent text-sm outline-none placeholder:text-ink-faint"
-      />
-      {busy ? (
-        <span className="shrink-0 font-mono text-[10px] text-ink-faint">thinking…</span>
-      ) : (
-        <kbd className="shrink-0 rounded border border-white/10 bg-white/5 px-1.5 font-mono text-[10px] text-ink-faint">
-          ⏎
-        </kbd>
-      )}
+    <>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <button
+          type="button"
+          onClick={() => (hasPanel ? setOpen((o) => !o) : null)}
+          title={hasPanel ? 'Toggle assistant conversation' : 'Assistant ready — type below'}
+          aria-label="Toggle assistant conversation"
+          className="shrink-0 text-primary"
+        >
+          ✦
+        </button>
+        <input
+          data-search
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              if (busy || !draft.trim()) return;
+              const question = draft;
+              setDraft('');
+              void send(question);
+            }
+          }}
+          placeholder="Ask the assistant — search Civitai, check a plugin task…  ( / )"
+          className="w-full bg-transparent text-sm outline-none placeholder:text-ink-faint"
+        />
+        {busy ? (
+          <span className="shrink-0 font-mono text-[10px] text-ink-faint">thinking…</span>
+        ) : (
+          <kbd className="shrink-0 rounded border border-white/10 bg-white/5 px-1.5 font-mono text-[10px] text-ink-faint">
+            ⏎
+          </kbd>
+        )}
+      </div>
 
       {open && hasPanel && (
-        <div className="glass-l2 absolute left-0 right-0 top-[calc(100%+10px)] z-40 flex max-h-[70vh] flex-col overflow-hidden rounded-lg border border-white/10 shadow-2xl">
+        <div className="glass-l2 fixed bottom-3 right-3 z-[56] flex max-h-[72vh] w-[min(430px,94vw)] flex-col overflow-hidden rounded-lg">
           <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2">
-            <span className="font-display text-xs font-semibold text-ink">Assistant</span>
+            <span className="text-primary" aria-hidden>
+              ✦
+            </span>
+            <span className="font-display text-sm font-semibold text-ink">Assistant</span>
             {model && <span className="truncate font-mono text-[10px] text-ink-faint">{model}</span>}
+            {busy && <span className="font-mono text-[10px] text-ink-faint">thinking…</span>}
             <div className="ml-auto flex items-center gap-2">
               {turns.length > 0 && (
                 <button
@@ -143,21 +153,21 @@ export function AssistantBar({
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                aria-label="Close assistant"
+                aria-label="Minimize assistant"
+                title="Minimize (reopens on new activity)"
                 className="text-ink-faint hover:text-white"
               >
                 ✕
               </button>
             </div>
           </div>
+
           <div ref={listRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
             {turns.map((turn, index) => (
               <div key={index} className="space-y-1">
-                <div
-                  className={`flex ${turn.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
+                <div className={`flex ${turn.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <p
-                    className={`max-w-[80%] whitespace-pre-wrap rounded px-2.5 py-1.5 text-xs leading-relaxed ${
+                    className={`max-w-[90%] whitespace-pre-wrap rounded px-2.5 py-1.5 text-xs leading-relaxed ${
                       turn.role === 'user'
                         ? 'border border-primary/30 bg-primary/10 text-ink'
                         : 'border border-white/[0.06] bg-obsidian-lowest/70 text-ink-muted'
@@ -218,8 +228,32 @@ export function AssistantBar({
               </p>
             )}
           </div>
+
+          <div className="flex items-center gap-2 border-t border-white/[0.06] p-2">
+            <input
+              ref={followRef}
+              value={follow}
+              onChange={(event) => setFollow(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  submitFollow();
+                }
+              }}
+              placeholder={pending ? 'Answer, adjust, or cancel above…' : 'Reply, answer, or steer the task…'}
+              aria-label="Reply to the assistant"
+              className="w-full rounded border border-white/10 bg-obsidian-lowest px-2.5 py-1.5 text-xs outline-none placeholder:text-ink-faint focus:border-primary"
+            />
+            <PrimaryButton
+              disabled={busy || !follow.trim()}
+              className="!px-3 !py-1.5 !text-xs"
+              onClick={submitFollow}
+            >
+              Send
+            </PrimaryButton>
+          </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
