@@ -241,9 +241,9 @@ export type Theme = 'dark' | 'light';
 
 export function UserMenu({
   go,
-  theme,
-  setTheme,
-  mdTheme,
+  theme: _,
+  setTheme: _,
+  mdTheme: _,
   profileLabel,
   avatarUrl,
   signedIn,
