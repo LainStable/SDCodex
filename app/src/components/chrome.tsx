@@ -78,13 +78,16 @@ export function Sidebar({
       <aside
         className={`fixed inset-y-0 left-0 z-30 hidden h-dvh flex-col border-r border-white/[0.06] bg-obsidian-bg/95 backdrop-blur transition-[width] duration-200 md:flex ${collapsed ? 'w-16' : 'w-60'}`}
       >
-        <div className={`shrink-0 ${collapsed ? 'p-2 pb-0' : 'p-4 pb-0'}`}>
+        <div className={`shrink-0 ${collapsed ? 'p-2 pb-0' : 'px-3 pb-0 pt-3'}`}>
           <div
-            className={`flex items-center gap-2 font-display text-lg font-bold tracking-tight ${collapsed ? 'justify-center' : ''}`}
+            className={`flex items-center ${collapsed ? 'justify-center' : ''}`}
             title={collapsed ? 'SDCodex' : undefined}
           >
-            <img src="/codex.svg" alt="" className="h-7 w-7 shrink-0 object-contain" />
-            {!collapsed && <span>SDCodex</span>}
+            {collapsed ? (
+              <img src="/sdcodex.svg" alt="SDCodex" className="h-9 w-9 shrink-0 object-contain" />
+            ) : (
+              <img src="/sdcodex.svg" alt="SDCodex" className="h-12 w-full object-contain object-left" />
+            )}
           </div>
       {(hasUpdate || updates.newPluginAvailable || !collapsed) && (
         <div className={`mt-1 flex flex-wrap items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint ${collapsed ? 'justify-center' : ''}`}>

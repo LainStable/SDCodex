@@ -190,8 +190,8 @@ export function BootstrapCard({
 
   return (
     <div onKeyDown={onKey}>
-      <div className="flex flex-col items-center">
-        <img src="/codex.svg" alt="SDCodex" className="h-24 w-24" />
+      <div className="flex flex-col items-center px-2 pb-1">
+        <img src="/sdcodex.svg" alt="SDCodex" className="h-36 w-full max-w-[300px] object-contain" />
       </div>
       <div className="mt-3 flex flex-col gap-2">
         <input
@@ -810,6 +810,43 @@ function ProgressBar() {
   );
 }
 
+const SELF_UPDATE_DOCKER_STEPS: Array<{ label: string; match: RegExp }> = [
+  { label: 'Pulling new image', match: /starting self-update|git pull|already up to date|marking plugin-managed|pulling new image/i },
+  { label: 'Building container config', match: /building per-user image|build context|building container config|image build started/i },
+  { label: 'Preparing updater', match: /sending build context|preparing updater|^.*\bbinds:|^.*\bports:/i },
+  { label: 'Creating new container', match: /creating sibling|creating new container|removed stale|sibling create/i },
+  { label: 'Launching updater', match: /sibling started|swap delegated|launching updater|waiting for health/i },
+  { label: 'Stopping old container', match: /stopping old|helper: stopping/i },
+  { label: 'Swapping container', match: /recreating sibling|rename (old|new)|swapping container|recreate/i },
+  { label: 'Starting updated container', match: /final started|final never healthy|swap done|starting updated/i },
+];
+
+const SELF_UPDATE_LOCAL_STEPS: Array<{ label: string; match: RegExp }> = [
+  { label: 'Pulling core update', match: /starting self-update|git pull|already up to date|marking plugin-managed|pulling/i },
+  { label: 'Restarting local app', match: /local restart|restarting|re-exec/i },
+  { label: 'Waiting for health', match: /health|reload|swap done/i },
+];
+
+/** Derive per-step status from the rebuild log so the indicator dot can
+    change colour as each phase starts/finishes. */
+function selfUpdateProgress(lines: string[], isLocal: boolean): {
+  steps: string[];
+  active: number;
+  failed: boolean;
+} {
+  const steps = (isLocal ? SELF_UPDATE_LOCAL_STEPS : SELF_UPDATE_DOCKER_STEPS).map((s) => s.label);
+  const matchers = (isLocal ? SELF_UPDATE_LOCAL_STEPS : SELF_UPDATE_DOCKER_STEPS).map((s) => s.match);
+  const joined = lines.join('\n');
+  const failed = /BUILD ERROR|rebuild exception|failed|abort|never healthy/i.test(joined);
+  let active = -1;
+  matchers.forEach((re, i) => {
+    if (re.test(joined)) active = i;
+  });
+  const done = /swap done/i.test(joined);
+  if (done) active = steps.length;
+  return { steps, active, failed };
+}
+
 export function Plugins() {
   const [q, setQ] = useState('');  const [filter, setFilter] = useState<'all' | 'official'>('all');
   const [catalog, setCatalog] = useState<HubCatalog | null>(null);
@@ -1154,46 +1191,91 @@ export function Plugins() {
         )}
         {updateMsg && <p className="mt-2 font-mono text-[11px] text-ink-muted">{updateMsg}</p>}
       </div>
-      {showRebuildLog && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-          <div className="glass-l2 edge-shimmer w-full max-w-2xl rounded-lg p-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-display text-sm font-semibold">
-                {applying
-                  ? 'Pulling core update'
-                  : updates?.rebuild?.mode === 'local'
-                    ? 'Restarting local app'
-                    : 'Rebuilding container'}{' '}
-                {applying || rebuilding ? '…' : '(done)'}
-              </h3>
-              <GhostButton onClick={() => setShowRebuildLog(false)}>
-                Hide
-              </GhostButton>
-            </div>
-            <div className="mt-3 h-72 overflow-y-auto rounded-lg bg-[#070a10] p-3 font-mono text-[11px] leading-relaxed">
-              {rebuildLog.length === 0 ? (
-                <p className="text-ink-faint">
-                  {applying
-                    ? 'waiting for git pull output…'
-                    : updates?.rebuild?.mode === 'local'
-                      ? 'waiting for the app to restart…'
-                      : 'waiting for build output…'}
-                </p>
-              ) : (
-                rebuildLog.map((l, i) => (
-                  <div key={i} className="break-words text-ink-muted">
-                    {l}
+      {showRebuildLog &&
+        (() => {
+          const isLocal = updates?.rebuild?.mode === 'local';
+          const { steps, active, failed } = selfUpdateProgress(rebuildLog, isLocal);
+          const running = applying || rebuilding;
+          const finished = active >= steps.length;
+          const statusText = finished
+            ? 'Update complete — reloading…'
+            : failed
+              ? `Failed at ${steps[Math.max(0, active)]} — see log`
+              : running && active >= 0
+                ? `${steps[active]}…`
+                : running
+                  ? 'Preparing…'
+                  : 'Preparing…';
+          return (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 p-4">
+              <div className="w-full max-w-2xl overflow-hidden rounded-xl border border-white/10 bg-[#2c2e33]">
+                <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+                  <h3 className="font-display text-xl font-bold text-white">Self-update</h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowRebuildLog(false)}
+                    aria-label="Close self-update dialog"
+                    className="text-2xl leading-none text-ink-faint hover:text-white"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="px-5 py-4">
+                  <ol className="flex flex-col gap-2.5">
+                    {steps.map((label, i) => {
+                      const done = finished || i < active;
+                      const current = !finished && i === active;
+                      const dot = failed && current
+                        ? 'bg-status-alert'
+                        : done
+                          ? 'bg-status-active'
+                          : current
+                            ? 'bg-[#5b5bd6] animate-pulse'
+                            : 'bg-[#5f636e]';
+                      return (
+                        <li key={label} className="flex items-center gap-3">
+                          <span className={`h-3 w-3 shrink-0 rounded-full ${dot}`} aria-hidden="true" />
+                          <span className={`text-[15px] ${done || current ? 'text-white' : 'text-[#c9cdd6]'}`}>
+                            {label}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                  <h4 className="mt-5 text-[15px] font-semibold text-white">Updater log</h4>
+                  <div className="mt-2 max-h-72 overflow-y-auto rounded-lg border border-white/10 bg-[#0b1020] p-4 font-mono text-[13px] leading-relaxed text-[#c9d1d9]">
+                    {rebuildLog.length === 0 ? (
+                      <p className="text-[#8b93a5]">
+                        {applying
+                          ? 'waiting for git pull output…'
+                          : isLocal
+                            ? 'waiting for the app to restart…'
+                            : 'waiting for build output…'}
+                      </p>
+                    ) : (
+                      rebuildLog.map((l, i) => (
+                        <div key={i} className="break-words">
+                          {l}
+                        </div>
+                      ))
+                    )}
+                    <div ref={rebuildLogEndRef} />
                   </div>
-                ))
-              )}
-              <div ref={rebuildLogEndRef} />
+                  <p className="mt-3 text-[14px] text-[#8b93a5]">{statusText}</p>
+                </div>
+                <div className="flex justify-end border-t border-white/10 px-5 py-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowRebuildLog(false)}
+                    className="rounded-lg bg-[#3b4a63] px-6 py-2 text-sm font-semibold text-white hover:bg-[#4a5a75]"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
             </div>
-            <p className="mt-2 font-mono text-[10px] text-ink-faint">
-              The page reloads automatically once the app answers health checks.
-            </p>
-          </div>
-        </div>
-      )}
+          );
+        })()}
       <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         {shown.map((p) => {
           const inst = installed[p.id];
