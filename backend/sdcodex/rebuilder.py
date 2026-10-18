@@ -500,7 +500,11 @@ def _rebuild_container() -> None:
         try:
             client.containers.run(
                 IMAGE_TAG,
-                command=["python", "-m", "sdcodex.swap_helper"],
+                # Override the image entrypoint rather than only passing a
+                # command: entrypoint.sh used to `exec` the app and drop its
+                # arguments, so the helper booted a second server and the
+                # swap never happened (the app hung in "swap delegated").
+                entrypoint=["python", "-m", "sdcodex.swap_helper"],
                 name="sdcodex-swap",
                 detach=True,
                 auto_remove=True,
