@@ -53,11 +53,6 @@ import AvatarCrop from '../components/AvatarCrop';
 import { clearScanLog, getScanLog, pushScanLog, subscribeScanLog } from '../lib/scanlog';
 import { loadTheme, saveTheme, THEMES } from '../lib/themes';
 
-const CORE_TABS: { id: string; label: string }[] = [
-  { id: 'dirs', label: 'Model dirs' },
-  { id: 'api', label: 'API keys' },
-  { id: 'auth', label: 'Profile' },
-];
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {  return (
     <div className="flex flex-wrap items-center gap-2 py-1.5">
@@ -1403,11 +1398,13 @@ export default function Settings({
   // Core tabs first, then one tab per plugin settings entry, with Plugins +
   // System always last.
   const tabs: { id: string; label: string }[] = [
-    ...CORE_TABS,
+    { id: 'dirs', label: 'Model dirs' },
     ...(installed ?? []).flatMap((p) =>
       (p.settings ?? []).map((s, i) => ({ id: `plugin:${p.id}:${i}`, label: s.label })),
     ),
     { id: 'plugins', label: 'Plugins' },
+    { id: 'api', label: 'API keys' },
+    { id: 'auth', label: 'Profile' },
     { id: 'system', label: 'System' },
   ];
   const [tab, setTab] = useState<string>(
