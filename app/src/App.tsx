@@ -18,6 +18,7 @@ import { adoptServerUser, clearProfile, completeOidcCallback, endSession, fetchS
 import type { InstalledPlugin } from './lib/plugins';
 import type { AssistantAction, AssistantSearchParams } from './lib/assistant';
 import { deleteScanned } from './lib/library';
+import { loadTheme, themeClass, THEME_CHANGED_EVENT, THEMES } from './lib/themes';
 import { apiPost, backendLogout, backendAvailable } from './lib/backend';
 import { getApiKey, pullSettings, setApiUser } from './lib/settings';
 import { fetchMe } from './lib/civitai';
@@ -230,16 +231,36 @@ export default function App() {
       return 'dark';
     }
   });
+  // Named theme from themes.md (Settings → Profile). Takes precedence over
+  // the binary light/dark toggle; '' = System default.
+  const [mdTheme, setMdTheme] = useState<string>(() => loadTheme());
   const queuedIds = useMemo(() => new Set(queue.map((i) => i.id)), [queue]);
 
   useEffect(() => {
-    document.documentElement.classList.toggle('light', theme === 'light');
+    const root = document.documentElement;
+    // Drop any previous named theme first.
+    for (const t of THEMES) root.classList.remove(themeClass(t.slug));
+    if (mdTheme) {
+      root.classList.remove('light');
+      root.classList.add(themeClass(mdTheme));
+      root.style.colorScheme = THEMES.find((t) => t.slug === mdTheme)?.mode ?? 'dark';
+    } else {
+      root.classList.toggle('light', theme === 'light');
+      root.style.colorScheme = theme === 'light' ? 'light' : 'dark';
+    }
     try {
       localStorage.setItem('sdcodex.theme.v1', theme);
     } catch {
       /* ignore */
     }
-  }, [theme]);
+  }, [theme, mdTheme]);
+
+  // Profile theme picker saves + broadcasts; pick it up live.
+  useEffect(() => {
+    const onTheme = () => setMdTheme(loadTheme());
+    window.addEventListener(THEME_CHANGED_EVENT, onTheme);
+    return () => window.removeEventListener(THEME_CHANGED_EVENT, onTheme);
+  }, []);
 
   useEffect(() => {
     try {
@@ -581,6 +602,7 @@ export default function App() {
             sidebarCollapsed={sidebarCollapsed}
             theme={theme}
             setTheme={setTheme}
+            mdTheme={mdTheme}
             profileLabel={initials(profile)}
             avatarUrl={profile?.avatar ?? ''}
             signedIn={authed}

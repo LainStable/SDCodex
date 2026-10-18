@@ -243,6 +243,7 @@ export function UserMenu({
   go,
   theme,
   setTheme,
+  mdTheme,
   profileLabel,
   avatarUrl,
   signedIn,
@@ -255,6 +256,9 @@ export function UserMenu({
   go: (v: ViewId) => void;
   theme: Theme;
   setTheme: (t: Theme) => void;
+  /** Active named theme slug ('' = System default). Hides the light/dark
+      toggle — no themes.md theme ships light+dark variants. */
+  mdTheme?: string;
   /** Avatar initials (or "?" for guests). */
   profileLabel: string;
   /** Uploaded picture data-URL, if set. */
@@ -290,8 +294,9 @@ export function UserMenu({
   // Fan-out arc: profile pic is the center (right side); items spread
   // left-to-bottom, i.e. 180° (west) → 90° (south) in screen coords.
   // Mirrors OldCode base.html: angle = start - (span * i) / (n - 1).
-  // Fan: theme toggle, core icon (once a plugin is installed), one icon per
-  // installed plugin, settings, sign out. Core icon returns to core views.
+  // Fan: theme toggle (hidden while a named theme is active — none of the
+  // themes.md themes ship light+dark variants), core icon (once a plugin is
+  // installed), one icon per installed plugin, settings, sign out.
   // The theme toggle keeps the fan open (click-off still closes it).
   const actions: Array<{
     id: string;
@@ -301,9 +306,13 @@ export function UserMenu({
     current?: boolean;
     keep?: boolean;
   }> = [
-    theme === 'dark'
-      ? { id: 'theme', label: 'Light', icon: 'sun', run: () => setTheme('light'), current: false, keep: true }
-      : { id: 'theme', label: 'Dark', icon: 'moon', run: () => setTheme('dark'), current: false, keep: true },
+    ...(mdTheme
+      ? []
+      : [
+          theme === 'dark'
+            ? { id: 'theme', label: 'Light', icon: 'sun', run: () => setTheme('light'), current: false, keep: true }
+            : { id: 'theme', label: 'Dark', icon: 'moon', run: () => setTheme('dark'), current: false, keep: true },
+        ]),
     ...(plugins.length > 0
       ? [
           {
@@ -423,6 +432,7 @@ export function Topbar({
   onSpaceCore,
   onSpacePlugin,
   assistant,
+  mdTheme,
 }: {
   installMode?: 'docker' | 'local';
   go: (v: ViewId) => void;
@@ -439,6 +449,7 @@ export function Topbar({
   onSpaceCore: () => void;
   onSpacePlugin: (id: string) => void;
   assistant?: { configured: boolean; model: string; onAction: (action: AssistantAction) => void };
+  mdTheme?: string;
 }) {
   return (
     <div className="mb-4 flex items-center gap-2">
@@ -494,6 +505,7 @@ export function Topbar({
         go={go}
         theme={theme}
         setTheme={setTheme}
+        mdTheme={mdTheme}
         profileLabel={profileLabel}
         avatarUrl={avatarUrl}
         signedIn={signedIn}

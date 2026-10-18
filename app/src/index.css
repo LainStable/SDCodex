@@ -4,6 +4,19 @@
 
 :root {
   color-scheme: dark;
+  /* Obsidian Codex defaults — every .theme-* block below overrides these. */
+  --c-bg: 15 19 28;
+  --c-bg-lowest: 10 14 23;
+  --c-bg-low: 24 27 37;
+  --c-obsidian: 28 31 41;
+  --c-bg-high: 38 42 52;
+  --c-bg-highest: 49 53 63;
+  --c-ink: 223 226 239;
+  --c-ink-muted: 199 196 215;
+  --c-ink-faint: 144 143 160;
+  --c-primary: 99 102 241;
+  --c-secondary: 6 182 212;
+  --c-tertiary: 139 92 246;
 }
 
 html,
@@ -25,17 +38,17 @@ body {
 }
 
 .glass-l1 {
-  background: rgba(15, 23, 42, 0.8);
+  background: color-mix(in srgb, rgb(var(--c-bg-low)) 82%, transparent);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgb(var(--c-ink) / 0.08);
 }
 
 .glass-l2 {
-  background: rgba(30, 41, 59, 0.9);
+  background: color-mix(in srgb, rgb(var(--c-bg-high)) 92%, transparent);
   backdrop-filter: blur(16px);
   box-shadow:
     0 8px 32px -4px rgba(0, 0, 0, 0.6),
-    0 0 0 1px rgba(99, 102, 241, 0.15);
+    0 0 0 1px rgb(var(--c-primary) / 0.15);
 }
 
 .edge-shimmer {
@@ -52,9 +65,170 @@ body {
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(99, 102, 241, 0.4),
+    rgb(var(--c-primary) / 0.4),
     transparent
   );
+}
+
+/* Named themes (lib/themes.ts) — each block recolors the vars above, so all
+   Tailwind opacity variants follow. Light themes also get light glass. */
+.theme-glacier {
+  color-scheme: dark;
+  --c-bg: 10 14 26;
+  --c-bg-lowest: 8 11 22;
+  --c-bg-low: 15 21 36;
+  --c-obsidian: 18 25 42;
+  --c-bg-high: 22 30 50;
+  --c-bg-highest: 30 40 66;
+  --c-ink: 225 235 245;
+  --c-ink-muted: 170 185 205;
+  --c-ink-faint: 120 135 155;
+  --c-primary: 125 211 252;
+  --c-secondary: 200 160 240;
+  --c-tertiary: 125 211 252;
+}
+.theme-glacier body { font-family: Inter, system-ui, sans-serif; }
+.theme-glacier .font-display { font-family: Inter, system-ui, sans-serif; }
+
+.theme-carbon {
+  color-scheme: light;
+  --c-bg: 255 255 255;
+  --c-bg-lowest: 244 244 244;
+  --c-bg-low: 240 240 240;
+  --c-obsidian: 232 232 232;
+  --c-bg-high: 224 224 224;
+  --c-bg-highest: 200 200 200;
+  --c-ink: 22 22 22;
+  --c-ink-muted: 60 60 60;
+  --c-ink-faint: 110 110 110;
+  --c-primary: 15 98 254;
+  --c-secondary: 15 98 254;
+  --c-tertiary: 25 128 56;
+}
+.theme-carbon body { font-family: 'IBM Plex Sans', Inter, system-ui, sans-serif; }
+.theme-carbon .font-display { font-family: 'IBM Plex Sans', Inter, system-ui, sans-serif; }
+
+.theme-silk {
+  color-scheme: light;
+  --c-bg: 232 234 240;
+  --c-bg-lowest: 222 224 232;
+  --c-bg-low: 232 234 240;
+  --c-obsidian: 228 230 237;
+  --c-bg-high: 242 243 247;
+  --c-bg-highest: 255 255 255;
+  --c-ink: 40 45 60;
+  --c-ink-muted: 90 95 115;
+  --c-ink-faint: 140 145 165;
+  --c-primary: 99 102 241;
+  --c-secondary: 124 58 237;
+  --c-tertiary: 124 58 237;
+}
+.theme-silk body { font-family: 'Plus Jakarta Sans', Inter, system-ui, sans-serif; }
+.theme-silk .font-display { font-family: 'Plus Jakarta Sans', Inter, system-ui, sans-serif; }
+
+.theme-obsidian-high-contrast {
+  color-scheme: dark;
+  --c-bg: 9 9 11;
+  --c-bg-lowest: 12 12 15;
+  --c-bg-low: 18 18 22;
+  --c-obsidian: 20 20 24;
+  --c-bg-high: 30 30 36;
+  --c-bg-highest: 39 39 42;
+  --c-ink: 250 250 250;
+  --c-ink-muted: 161 161 170;
+  --c-ink-faint: 110 110 120;
+  --c-primary: 167 139 250;
+  --c-secondary: 52 211 153;
+  --c-tertiary: 52 211 153;
+}
+
+.theme-candy {
+  color-scheme: light;
+  --c-bg: 254 247 255;
+  --c-bg-lowest: 255 255 255;
+  --c-bg-low: 253 240 252;
+  --c-obsidian: 250 232 248;
+  --c-bg-high: 250 228 246;
+  --c-bg-highest: 244 214 240;
+  --c-ink: 60 20 50;
+  --c-ink-muted: 130 80 120;
+  --c-ink-faint: 180 140 175;
+  --c-primary: 224 64 160;
+  --c-secondary: 124 82 170;
+  --c-tertiary: 0 150 204;
+}
+.theme-candy body { font-family: 'DM Sans', Inter, system-ui, sans-serif; }
+.theme-candy .font-display { font-family: 'DM Sans', Inter, system-ui, sans-serif; }
+
+.theme-alexandria {
+  color-scheme: light;
+  --c-bg: 250 249 246;
+  --c-bg-lowest: 244 242 236;
+  --c-bg-low: 250 249 246;
+  --c-obsidian: 246 244 238;
+  --c-bg-high: 240 238 231;
+  --c-bg-highest: 228 224 214;
+  --c-ink: 25 25 30;
+  --c-ink-muted: 80 78 85;
+  --c-ink-faint: 140 138 145;
+  --c-primary: 9 76 178;
+  --c-secondary: 109 94 0;
+  --c-tertiary: 109 94 0;
+}
+.theme-alexandria body { font-family: Inter, system-ui, sans-serif; }
+.theme-alexandria .font-display { font-family: 'Noto Serif', Georgia, serif; }
+
+.theme-terra {
+  color-scheme: light;
+  --c-bg: 250 246 240;
+  --c-bg-lowest: 244 238 230;
+  --c-bg-low: 250 246 240;
+  --c-obsidian: 246 241 233;
+  --c-bg-high: 240 232 220;
+  --c-bg-highest: 232 222 208;
+  --c-ink: 46 50 48;
+  --c-ink-muted: 110 105 95;
+  --c-ink-faint: 160 155 145;
+  --c-primary: 74 124 89;
+  --c-secondary: 112 92 48;
+  --c-tertiary: 112 92 48;
+}
+.theme-terra body { font-family: 'Nunito Sans', Inter, system-ui, sans-serif; }
+.theme-terra .font-display { font-family: Literata, Georgia, serif; }
+
+/* Light glass for the light named themes (dark keeps the defaults above). */
+.theme-carbon body,
+.theme-silk body,
+.theme-candy body,
+.theme-alexandria body,
+.theme-terra body {
+  background: rgb(var(--c-bg));
+  color: rgb(var(--c-ink));
+}
+.theme-carbon .glass-l1,
+.theme-silk .glass-l1,
+.theme-candy .glass-l1,
+.theme-alexandria .glass-l1,
+.theme-terra .glass-l1 {
+  background: color-mix(in srgb, rgb(var(--c-bg-lowest)) 88%, transparent);
+  border-color: rgb(var(--c-ink) / 0.1);
+}
+.theme-carbon .glass-l2,
+.theme-silk .glass-l2,
+.theme-candy .glass-l2,
+.theme-alexandria .glass-l2,
+.theme-terra .glass-l2 {
+  background: color-mix(in srgb, rgb(var(--c-bg-lowest)) 96%, transparent);
+  box-shadow:
+    0 8px 32px -4px rgb(var(--c-ink) / 0.18),
+    0 0 0 1px rgb(var(--c-primary) / 0.2);
+}
+.theme-carbon input::placeholder,
+.theme-silk input::placeholder,
+.theme-candy input::placeholder,
+.theme-alexandria input::placeholder,
+.theme-terra input::placeholder {
+  color: rgb(var(--c-ink-faint));
 }
 
 /* Light theme — toggled from the profile menu. Dark Obsidian stays default. */
