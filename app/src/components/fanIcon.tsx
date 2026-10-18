@@ -26,6 +26,24 @@ const ICON_ALIASES: Record<string, string> = {
   'fas fa-compass': 'explore',
   'fas fa-folder': 'folder',
   'fas fa-cubes': 'cubes',
+  // Material symbol names shipped by plugin manifests.
+  photo_library: 'images',
+  auto_fix_high: 'wand',
+  drive_file_rename_outline: 'rename',
+  subtitles: 'captions',
+  // Glyph icons from manifests and the radial menu. Mapping them keeps every
+  // icon an inline SVG: a bare glyph falls back to a colour emoji font, which
+  // paints its own dark box behind the symbol.
+  '☀': 'sun',
+  '☾': 'moon',
+  '⌂': 'home',
+  '⚙': 'settings',
+  '→': 'arrow-right',
+  '⤓': 'download',
+  '☰': 'list',
+  '▣': 'images',
+  '⚿': 'key',
+  '≡': 'list',
 };
 
 const ICON_PATHS: Record<string, string[]> = {
@@ -48,6 +66,12 @@ const ICON_PATHS: Record<string, string[]> = {
   tasks: ['M9 11l2 2 4-4', 'M9 5h11', 'M9 12h11', 'M9 19h11', 'M4 5h.01', 'M4 12h.01', 'M4 19h.01'],
   puzzle: ['M19 13h-2a2 2 0 1 0-4 0h-2v8h8v-2a2 2 0 1 0 0-4v-2Z', 'M3 3h8v2a2 2 0 1 0 4 0V3h6v8h-2a2 2 0 1 0-4 0h-2'],
   sliders: ['M4 21v-7', 'M4 10V3', 'M12 21v-9', 'M12 8V3', 'M20 21v-5', 'M20 12V3', 'M2 14h4', 'M10 8h4', 'M18 16h4'],
+  sun: ['M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z', 'M12 2v2', 'M12 20v2', 'M2 12h2', 'M20 12h2', 'm4.9 4.9 1.4 1.4', 'm17.7 17.7 1.4 1.4', 'm4.9 19.1 1.4-1.4', 'm17.7 6.3 1.4-1.4'],
+  moon: ['M21 12.8A8.5 8.5 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z'],
+  'arrow-right': ['M4 12h15', 'm14 6 6 6-6 6'],
+  wand: ['M3 21 12 12', 'm15 3 1.3 2.7 2.7 1.3-2.7 1.3L15 11l-1.3-2.7L11 7l2.7-1.3L15 3Z', 'm7 14 .7 1.5L9 16.2l-1.3.7L7 18.4l-.7-1.5L5 16.2l1.3-.7L7 14Z'],
+  rename: ['M4 20h16', 'm14.4 5.6 4 4', 'M13 7 5 15v4h4l8-8-4-4Z'],
+  captions: ['M3 5h18v14H3z', 'M7 12h3', 'M14 12h3'],
 };
 
 export function FanIcon({
@@ -60,7 +84,8 @@ export function FanIcon({
   className?: string;
 }) {
   const raw = (icon ?? '').trim();
-  if ([...raw].length === 1) return <span className={className}>{raw}</span>;
+  // Aliases first: a one-character glyph may still have an SVG equivalent,
+  // and only an unmapped glyph should fall back to its own font rendering.
   const mapped = ICON_ALIASES[raw] ?? raw.replaceAll('_', '-');
   const paths = ICON_PATHS[mapped];
   if (paths) {
@@ -79,5 +104,6 @@ export function FanIcon({
       </svg>
     );
   }
+  if ([...raw].length === 1) return <span className={className}>{raw}</span>;
   return <span className={className}>{(name.trim()[0] ?? '?').toUpperCase()}</span>;
 }

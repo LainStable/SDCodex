@@ -9,7 +9,8 @@ import {
   type CivitaiModel,
   type ExplorerQuery,
 } from '../lib/civitai';
-import { targetDirFor } from '../lib/settings';
+import { getDirColors, targetDirFor } from '../lib/settings';
+import { accentColor } from '../lib/categories';
 import { Stars, TypeBadge } from '../components/ui';
 import {
   BaseCloud,
@@ -43,6 +44,8 @@ function isNsfwImage(img: { nsfwLevel: number }): boolean {
 }
 
 export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchToken, searchText }: Props) {
+  // Per-category accent colors set with each model directory in Settings.
+  const [colors] = useState<Record<string, string>>(getDirColors);
   const [query, setQuery] = useState<ExplorerQuery>({
     q: '',
     type: 'All',
@@ -389,7 +392,7 @@ export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchT
                       </div>
                     )}
                     <div className="absolute left-2 top-2">
-                      <TypeBadge type={m.type} />
+                      <TypeBadge type={m.type} color={accentColor(colors, m.type)} />
                     </div>
                   </div>
                   <div className="p-3 pb-0">

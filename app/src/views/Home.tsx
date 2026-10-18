@@ -10,6 +10,8 @@ import {
 } from '../lib/civitai';
 import { loadScanned } from '../lib/library';
 import { GhostButton, PrimaryButton } from '../components/chrome';
+import { getDirColors } from '../lib/settings';
+import { accentColor } from '../lib/categories';
 import { Stars, TypeBadge } from '../components/ui';
 
 interface Rail {
@@ -41,6 +43,8 @@ function copyText(text: string): void {
 }
 
 export default function Home({ goModels, onOpen, onQueue, queuedIds, ownedIds }: Props) {
+  // Per-category accent colors set with each model directory in Settings.
+  const [colors] = useState<Record<string, string>>(getDirColors);
   const [rail, setRail] = useState<Rail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -111,7 +115,7 @@ export default function Home({ goModels, onOpen, onQueue, queuedIds, ownedIds }:
                 <span className="rounded border border-secondary/40 bg-secondary/10 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-[#22d3ee]">
                   Community pick
                 </span>
-                <TypeBadge type={hero.type} />
+                <TypeBadge type={hero.type} color={accentColor(colors, hero.type)} />
                 {heroVersion && (
                   <span className="rounded border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[10px] text-ink-muted">
                     {heroVersion.name}
@@ -228,7 +232,7 @@ export default function Home({ goModels, onOpen, onQueue, queuedIds, ownedIds }:
                       </div>
                     )}
                     <div className="absolute left-2 top-2">
-                      <TypeBadge type={m.type} />
+                      <TypeBadge type={m.type} color={accentColor(colors, m.type)} />
                     </div>
                   </div>
                   <div className="p-3 pb-0">

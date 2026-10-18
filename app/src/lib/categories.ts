@@ -24,3 +24,12 @@ const API_TO_FOLDER: Record<string, string> = {
 export function folderForModelType(apiType: string): string {
   return API_TO_FOLDER[apiType] ?? 'Other';
 }
+
+/** Accent color for a model type, honoring the folder-category keys the
+    Settings picker writes (Checkpoint, Embedding, LORA, …). */
+export function accentColor(
+  colors: Record<string, string>,
+  modelType: string,
+): string | undefined {
+  return colors[modelType] ?? colors[folderForModelType(modelType)];
+}

@@ -79,24 +79,34 @@ def _detect_remote(path: str) -> str:
         return "origin"
 
 
+def _https_url(url: str) -> str:
+    """Map a GitHub SSH URL to its HTTPS equivalent; other URLs pass through.
+
+    Minimal production images ship without an SSH client or keys, so an SSH
+    remote cannot be the default transport.
+    """
+    value = (url or "").strip()
+    match = re.match(r"^git@github\.com:([^/]+/[^/]+?)(?:\.git)?$", value)
+    if not match:
+        match = re.match(r"^ssh://git@github\.com/([^/]+/[^/]+?)(?:\.git)?$", value)
+    if not match:
+        return value
+    return f"https://github.com/{match.group(1)}.git"
+
+
 def _https_github_remote(path: str, remote: str) -> str:
     """Return an HTTPS equivalent for a GitHub SSH remote, if one exists.
 
-    Minimal production images may not include an SSH client. Retrying public
-    GitHub repositories over HTTPS lets self-update work without changing the
-    checkout's configured remote.
+    Empty string means the remote is already HTTPS (or not a GitHub SSH URL),
+    i.e. there is nothing to prefer.
     """
     try:
         r = _git(["remote", "get-url", remote], cwd=path)
         if r.returncode != 0:
             return ""
         url = r.stdout.strip()
-        match = re.match(r"^git@github\.com:([^/]+/[^/]+?)(?:\.git)?$", url)
-        if not match:
-            match = re.match(r"^ssh://git@github\.com/([^/]+/[^/]+?)(?:\.git)?$", url)
-        if not match:
-            return ""
-        return f"https://github.com/{match.group(1)}.git"
+        https = _https_url(url)
+        return https if https != url else ""
     except Exception:
         return ""
 
@@ -106,9 +116,12 @@ def remote_rev(repo_path_or_url: str) -> str:
     try:
         if os.path.isdir(os.path.join(repo_path_or_url, ".git")):
             remote = _detect_remote(repo_path_or_url)
-            r = _git(["ls-remote", remote, "HEAD"], cwd=repo_path_or_url)
+            # HTTPS first (see _https_url): SSH remotes are unreachable in a
+            # minimal image, which used to hide every available update.
+            target = _https_github_remote(repo_path_or_url, remote) or remote
+            r = _git(["ls-remote", target, "HEAD"], cwd=repo_path_or_url)
         else:
-            r = _git(["ls-remote", repo_path_or_url, "HEAD"], cwd=root_dir())
+            r = _git(["ls-remote", _https_url(repo_path_or_url), "HEAD"], cwd=root_dir())
         if r.returncode != 0:
             return ""
         return r.stdout.split()[0]
@@ -273,15 +286,18 @@ def update_core() -> tuple[bool, str]:
     if not branch:
         _update_log("Update failed: detached HEAD")
         return False, "Detached HEAD — check out a branch (e.g. main) to self-update."
+    # HTTPS first, then the configured remote. Production images have no SSH
+    # client, so an SSH remote only ever failed here and then retried over
+    # HTTPS; the fallback stays for private repos that authenticate by key.
+    https_remote = _https_github_remote(root, remote)
+    target = https_remote or remote
     try:
-        pull_args = ["pull", "--ff-only", remote, branch]
-        _update_log(f"Running git pull --ff-only {remote} {branch}")
+        pull_args = ["pull", "--ff-only", target, branch]
+        _update_log(f"Running git pull --ff-only {target} {branch}")
         r = _git_pull_with_progress(pull_args, cwd=root)
-        if r.returncode != 0 and "cannot run ssh" in (r.stderr or r.stdout or "").lower():
-            https_remote = _https_github_remote(root, remote)
-            if https_remote:
-                _update_log("SSH unavailable; retrying git pull over HTTPS")
-                r = _git_pull_with_progress(["pull", "--ff-only", https_remote, branch], cwd=root)
+        if r.returncode != 0 and https_remote:
+            _update_log(f"HTTPS pull failed; retrying over the configured remote {remote}")
+            r = _git_pull_with_progress(["pull", "--ff-only", remote, branch], cwd=root)
         if r.returncode != 0:
             error = (r.stderr or r.stdout).strip()[:500]
             _update_log(f"Git pull failed: {error}")
@@ -442,7 +458,15 @@ def update_plugin(plugin_id: str) -> tuple[bool, str]:
             msg += f" Dirty: {dirty}"
         return False, msg
     try:
-        r = _git(["pull", "--ff-only"], cwd=target)
+        branch = _current_branch(target)
+        remote = _detect_remote(target)
+        # HTTPS first, configured remote as the fallback (see update_core).
+        https_remote = _https_github_remote(target, remote)
+        target_remote = https_remote or remote
+        args = ["pull", "--ff-only", target_remote] + ([branch] if branch else [])
+        r = _git(args, cwd=target)
+        if r.returncode != 0 and https_remote:
+            r = _git(["pull", "--ff-only", remote] + ([branch] if branch else []), cwd=target)
         if r.returncode != 0:
             return False, (r.stderr or r.stdout).strip()[:500]
         return True, (r.stdout or "Already up to date.").strip()[:500]

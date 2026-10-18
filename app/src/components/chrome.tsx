@@ -295,14 +295,14 @@ export function UserMenu({
     keep?: boolean;
   }> = [
     theme === 'dark'
-      ? { id: 'theme', label: 'Light', icon: '☀', run: () => setTheme('light'), current: false, keep: true }
-      : { id: 'theme', label: 'Dark', icon: '☾', run: () => setTheme('dark'), current: false, keep: true },
+      ? { id: 'theme', label: 'Light', icon: 'sun', run: () => setTheme('light'), current: false, keep: true }
+      : { id: 'theme', label: 'Dark', icon: 'moon', run: () => setTheme('dark'), current: false, keep: true },
     ...(plugins.length > 0
       ? [
           {
             id: 'space-core',
             label: 'models',
-            icon: '⌂',
+            icon: 'home',
             run: onSpaceCore,
             current: space.kind === 'core',
           },
@@ -315,10 +315,10 @@ export function UserMenu({
       run: () => onSpacePlugin(p.id),
       current: space.kind === 'plugin' && space.id === p.id,
     })),
-    { id: 'settings', label: 'Settings', icon: '⚙', run: () => go('settings') },
+    { id: 'settings', label: 'Settings', icon: 'settings', run: () => go('settings') },
     signedIn
-      ? { id: 'signout', label: 'Sign out', icon: '→', run: onSignOut }
-      : { id: 'signin', label: 'Sign in', icon: '→', run: () => go('settings') },
+      ? { id: 'signout', label: 'Sign out', icon: 'arrow-right', run: onSignOut }
+      : { id: 'signin', label: 'Sign in', icon: 'arrow-right', run: () => go('settings') },
   ];
   const n = actions.length;
   const radius = n > 4 ? Math.min(220, 168 + (n - 4) * 12) : 168;
@@ -381,7 +381,7 @@ export function UserMenu({
                   a.current ? 'border-primary/60 ring-1 ring-primary/50' : ''
                 }`}
               >
-                <FanIcon icon={a.icon} name={a.label} />
+                <FanIcon icon={a.icon} name={a.label} className="!text-[18px]" />
               </button>
               <span className="whitespace-nowrap rounded border border-white/10 bg-obsidian-low px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-muted">
                 {a.label}

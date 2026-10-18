@@ -11,6 +11,8 @@ import {
   type CivitaiModel,
 } from '../lib/civitai';
 import { DangerButton, GhostButton, PrimaryButton } from '../components/chrome';
+import { getDirColors } from '../lib/settings';
+import { accentColor } from '../lib/categories';
 import { Stars, TypeBadge } from '../components/ui';
 
 export type ModalTarget =
@@ -358,6 +360,8 @@ export default function ModelModal({
   onForgetLocal?: (modelId: number, versionId: number) => void;
   onLibraryChanged?: () => void;
 }) {
+  // Per-category accent colors set with each model directory in Settings.
+  const [colors] = useState<Record<string, string>>(getDirColors);
   const [model, setModel] = useState<CivitaiModel | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [versionId, setVersionId] = useState<number | null>(null);
@@ -489,7 +493,7 @@ export default function ModelModal({
             <div>
               <h2 className="font-display text-xl font-semibold">{t.title}</h2>
               <div className="mt-1 flex gap-1.5">
-                <TypeBadge type={t.type} />
+                <TypeBadge type={t.type} color={accentColor(colors, t.type)} />
               </div>
             </div>
             <GhostButton onClick={onClose}>✕</GhostButton>
@@ -565,7 +569,7 @@ export default function ModelModal({
             <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-5">
               <div className="lg:col-span-3">
                 <div className="flex items-center gap-2">
-                  <TypeBadge type={model.type} />
+                  <TypeBadge type={model.type} color={accentColor(colors, model.type)} />
                 </div>
 
                 <div ref={mainRef} className="relative mt-3 flex h-[320px] items-center justify-center overflow-hidden rounded-lg bg-black/40 md:h-[440px]">
