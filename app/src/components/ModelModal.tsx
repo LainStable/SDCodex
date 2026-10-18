@@ -78,11 +78,10 @@ function formatDate(iso?: string): string {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
 }
 
-/** Civitai marks some previews as videos (mp4); those cannot be saved as the
-    on-disk library preview and are shown as a placeholder instead. */
-function isImagePreview(img?: CivitaiImage): img is CivitaiImage {
+/** Civitai marks some previews as videos (mp4); those are shown as playable
+    video elements rather than still images. */
+function isImagePreview(img?: CivitaiImage): boolean {
   if (!img) return false;
-  // Check if URL extension indicates a video
   return !/\.(mp4|webm|mov|m4v)(\?|$)/i.test(img.url);
 }
 
@@ -609,31 +608,27 @@ export default function ModelModal({
                         title="Click to expand · scroll to browse images"
                       />
                     ) : (
-                      <div className="flex h-full w-full items-center justify-center font-mono text-xs text-ink-faint">
-                        video preview
-                      </div>
+                      <video
+                        src={images[imgIdx].url}
+                        controls
+                        className="max-h-full max-w-full object-contain"
+                        title="Video preview"
+                        preload="metadata"
+                      />
                     )
                   ) : (
                     <div className="font-mono text-xs text-ink-faint">no preview</div>
                   )}
-                  {target.kind === 'local' && images[imgIdx] &&
-                    (isImagePreview(images[imgIdx]) ? (
-                      <button
-                        type="button"
-                        onClick={() => void setCurrentImageAsCover()}
-                        disabled={savingCover}
-                        className="absolute left-2 top-2 rounded border border-primary/30 bg-primary/20 px-2 py-1 font-mono text-[10px] text-white hover:border-primary/70 hover:bg-primary/30 disabled:cursor-default disabled:opacity-80"
-                      >
-                        {savingCover ? 'Saving…' : 'Replace library image'}
-                      </button>
-                    ) : (
-                      <span
-                        className="absolute left-2 top-2 rounded border border-white/10 bg-black/75 px-2 py-1 font-mono text-[10px] text-ink-faint backdrop-blur"
-                        title="This preview is a video — scroll to an image to replace the library preview"
-                      >
-                        video preview — cannot be saved
-                      </span>
-                    ))}
+                  {target.kind === 'local' && images[imgIdx] && isImagePreview(images[imgIdx]) && (
+                    <button
+                      type="button"
+                      onClick={() => void setCurrentImageAsCover()}
+                      disabled={savingCover}
+                      className="absolute left-2 top-2 rounded border border-primary/30 bg-primary/20 px-2 py-1 font-mono text-[10px] text-white hover:border-primary/70 hover:bg-primary/30 disabled:cursor-default disabled:opacity-80"
+                    >
+                      {savingCover ? 'Saving…' : 'Replace library image'}
+                    </button>
+                  )}
                   {/* Open model page in new tab — bottom right */}
                   {images[imgIdx] && isImagePreview(images[imgIdx]) && (
                     <button
