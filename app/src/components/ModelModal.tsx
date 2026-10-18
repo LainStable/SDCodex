@@ -347,6 +347,15 @@ function UpdateMetadata({
                   {c.type} · {c.modelVersions[0]?.baseModel ?? '—'} · @{c.creator?.username ?? '—'}
                 </div>
               </div>
+              <button
+                type="button"
+                title="Open model page in new tab"
+                aria-label="Open model page in new tab"
+                onClick={() => window.open(`https://civitai.com/models/${c.id}`, '_blank')}
+                className="ml-auto shrink-0 rounded border border-white/10 px-1.5 py-0.5 font-mono text-[10px] text-ink-muted hover:border-white/25 hover:text-white"
+              >
+                ↗
+              </button>
               <GhostButton disabled={adopting !== null} onClick={() => void adopt(c.id)}>
                 {adopting === c.id ? '…' : 'Select'}
               </GhostButton>
@@ -613,7 +622,7 @@ export default function ModelModal({
                         type="button"
                         onClick={() => void setCurrentImageAsCover()}
                         disabled={savingCover}
-                        className="absolute left-2 top-2 rounded border border-white/20 bg-black/75 px-2 py-1 font-mono text-[10px] text-white backdrop-blur hover:border-primary/70 disabled:cursor-default disabled:opacity-80"
+                        className="absolute left-2 top-2 rounded border border-white/20 px-2 py-1 font-mono text-[10px] text-white hover:border-primary/70 disabled:cursor-default disabled:opacity-80"
                       >
                         {savingCover ? 'Saving…' : 'Replace library image'}
                       </button>
@@ -625,6 +634,17 @@ export default function ModelModal({
                         video preview — cannot be saved
                       </span>
                     ))}
+                  {/* Open model page in new tab — bottom right */}
+                  {images[imgIdx] && isImagePreview(images[imgIdx]) && (
+                    <button
+                      type="button"
+                      title="Open model page in new tab"
+                      onClick={() => window.open(`https://civitai.com/models/${modelId}`, '_blank')}
+                      className="absolute right-2 bottom-2 rounded border border-white/20 px-2 py-1 font-mono text-[10px] text-white hover:border-primary/60 backdrop-blur"
+                    >
+                      ↗
+                    </button>
+                  )}
                 </div>
                 {coverMessage && (
                   <p className={`mt-1 font-mono text-[10px] ${coverMessage.startsWith('Replaced') ? 'text-status-active' : 'text-[#f87171]'}`}>
@@ -806,30 +826,37 @@ export default function ModelModal({
 
       {lightbox && images[imgIdx] && (
         <div
-          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4 backdrop-blur-sm"
           onClick={closeLightbox}
         >
-          <div
-            className="glass-l2 modal-pop checker max-h-[86vh] max-w-[92vw] overflow-auto rounded-lg p-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <span className="font-mono text-[11px] text-ink-faint">
-                image {imgIdx + 1}/{images.length}
-              </span>
-              <button
-                type="button"
-                onClick={closeLightbox}
-                className="rounded border border-white/20 bg-black/60 px-2.5 py-1 font-mono text-xs text-white hover:bg-black/80"
-              >
-                ✕
-              </button>
+          <div className="glass-l2 modal-pop checker max-h-[86vh] max-w-[92vw] overflow-auto rounded-lg p-3" onClick={(e) => e.stopPropagation()}>
+            <div className="relative flex h-full flex-col items-center justify-center">
+              <img
+                src={images[imgIdx].url}
+                alt=""
+                className="max-h-full max-w-full rounded object-contain"
+              />
+              <div className="pointer-events-none absolute bottom-3 right-3 flex items-center gap-1.5 rounded border border-white/20 bg-black/50 px-2.5 py-1 font-mono text-[10px] text-white">
+                <button
+                  type="button"
+                  disabled={imgIdx === 0}
+                  onClick={() => setImgIdx((i) => (i - 1 + images.length) % images.length)}
+                  className="hover:bg-black/80 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  ‹
+                </button>
+                <span className="px-1">{imgIdx + 1}/{images.length}</span>
+                <button
+                  type="button"
+                  disabled={imgIdx >= images.length - 1}
+                  onClick={() => setImgIdx((i) => (i + 1) % images.length)}
+                  className="hover:bg-black/80 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  ›
+                </button>
+                <button type="button" onClick={closeLightbox} className="hover:bg-black/80 ml-1">✕</button>
+              </div>
             </div>
-            <img
-              src={images[imgIdx].url}
-              alt=""
-              className="max-h-[70vh] max-w-full rounded object-contain"
-            />
           </div>
         </div>
       )}
