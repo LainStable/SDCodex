@@ -62,17 +62,6 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-const SWATCHES = [
-  '#ffffff',
-  '#fb4d6d',
-  '#f97316',
-  '#fbbf24',
-  '#22c55e',
-  '#14b8a6',
-  '#3b82f6',
-  '#a855f7',
-];
-
 function isValidCssColor(v: string): boolean {
   if (!v.trim()) return false;
   const opt = new Option().style;
@@ -80,8 +69,29 @@ function isValidCssColor(v: string): boolean {
   return opt.color !== '';
 }
 
-/** Floating accent picker (swatches + custom dialog), as per reference.
-    The category badge itself is the trigger. */
+function hsvToRgb(h: number, s: number, v: number): { r: number; g: number; b: number } {
+  const i = Math.floor(h / 60) % 6;
+  const f = h / 60 - Math.floor(h / 60);
+  const p = v * (1 - s);
+  const q = v * (1 - f * s);
+  const t = v * (1 - (1 - f) * s);
+  let r = 0, g = 0, b = 0;
+  switch (i) {
+    case 0: [r, g, b] = [v, t, p]; break;
+    case 1: [r, g, b] = [q, v, p]; break;
+    case 2: [r, g, b] = [p, v, t]; break;
+    case 3: [r, g, b] = [p, q, v]; break;
+    case 4: [r, g, b] = [t, p, v]; break;
+    case 5: [r, g, b] = [v, p, q]; break;
+  }
+  return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  return `#${[r, g, b].map(x => Math.round(x).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** Floating accent picker: HSV color wheel with hex input below. */
 function ColorMenu({
   type,
   current,
@@ -94,139 +104,105 @@ function ColorMenu({
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const [customOpen, setCustomOpen] = useState(false);
-  const [customValue, setCustomValue] = useState('');
-  const [customError, setCustomError] = useState<string | null>(null);
+  const [hexValue, setHexValue] = useState(current.startsWith('#') ? current : '');
+  const wheelRef = useRef<HTMLCanvasElement>(null);
   const ref = useRef<HTMLDivElement>(null);
 
+  // Draw color wheel on canvas when open
   useEffect(() => {
-    if (!open && !customOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-        setCustomOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setOpen(false);
-        setCustomOpen(false);
-      }
-    };
-    window.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open, customOpen]);
+    if (!open || !wheelRef.current) return;
+    const canvas = wheelRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const size = canvas.width;
+    const cx = size / 2;
+    const cy = size / 2;
+    const radius = size / 2 - 4;
 
-  const applyCustom = () => {
-    if (!isValidCssColor(customValue)) {
-      setCustomError('Enter a valid CSS color (hex, rgb, hsl).');
-      return;
+    ctx.clearRect(0, 0, size, size);
+    for (let angle = 0; angle < 360; angle++) {
+      const start = (angle * Math.PI) / 180;
+      const end = ((angle + 1) * Math.PI) / 180;
+      const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+      gradient.addColorStop(0, `hsl(${angle}, 0%, 100%)`);
+      gradient.addColorStop(0.5, `hsl(${angle}, 100%, 50%)`);
+      gradient.addColorStop(1, `hsl(${angle}, 100%, 30%)`);
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, radius, start, end);
+      ctx.closePath();
+      ctx.fill();
     }
-    onPick(customValue.trim());
-    setCustomOpen(false);
+    // White dot at center
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * 0.18, 0, Math.PI * 2);
+    ctx.fill();
+  }, [open]);
+
+  const onWheelClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = wheelRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const dx = x - cx;
+    const dy = y - cy;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const radius = canvas.width / 2 - 4;
+
+    if (distance > radius) return;
+
+    const hue = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+    const saturation = Math.max(0, 100 - (distance / radius) * 100);
+    const value = Math.min(100, Math.max(30, saturation));
+    const { r, g, b } = hsvToRgb(hue, saturation / 100, value / 100);
+    const hex = rgbToHex(r, g, b);
+
+    setHexValue(hex);
+    onPick(hex);
     setOpen(false);
-    setCustomError(null);
+  };
+
+  const onHexChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setHexValue(val);
+    if (isValidCssColor(val)) onPick(val);
   };
 
   return (
     <div ref={ref} className="relative">
       <button
         type="button"
-        onClick={() => {
-          setCustomOpen(false);
-          setOpen((o) => !o);
-        }}
+        onClick={() => setOpen((o) => !o)}
         title={`Accent color for ${type}`}
         className="block"
       >
         {children}
       </button>
 
-      {open && !customOpen && (
-        <div className="glass-l2 modal-pop absolute left-0 top-8 z-50 flex gap-1.5 rounded-lg p-2">
-          <button
-            type="button"
-            title="Default grey"
-            onClick={() => {
-              onPick('');
-              setOpen(false);
-            }}
-            className={`h-6 w-6 rounded-full border-2 ${
-              !current ? 'border-white' : 'border-white/25 hover:border-white/60'
-            }`}
-            style={{ width: 24, height: 24, backgroundColor: '#3a3f4d' }}
+      {open && (
+        <div className="glass-l2 modal-pop absolute left-0 top-8 z-50 flex flex-col items-center rounded-lg p-3">
+          <canvas
+            ref={wheelRef}
+            width={180}
+            height={180}
+            className="rounded-full cursor-pointer"
+            onClick={onWheelClick}
           />
-          {SWATCHES.map((c) => (
-            <button
-              key={c}
-              type="button"
-              title={c}
-              onClick={() => {
-                onPick(c);
-                setOpen(false);
-              }}
-              className={`h-6 w-6 rounded-full border-2 ${
-                current.toLowerCase() === c.toLowerCase()
-                  ? 'border-white'
-                  : 'border-transparent hover:border-white/50'
-              }`}
-              style={{ width: 24, height: 24, backgroundColor: c }}
-            />
-          ))}
-          <button
-            type="button"
-            title="Custom color"
-            onClick={() => {
-              setCustomValue(current.startsWith('#') ? current : '');
-              setCustomError(null);
-              setCustomOpen(true);
-            }}
-            className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-dashed border-white/40 text-[10px] text-white hover:border-white"
-            style={{ width: 24, height: 24 }}
-          >
-            +
-          </button>
-        </div>
-      )}
-
-      {customOpen && (
-        <div className="glass-l2 modal-pop absolute left-0 top-8 z-50 w-72 rounded-lg p-4">
-          <div className="flex items-start justify-between gap-2">
-            <h3 className="font-display text-sm font-semibold">Custom Accent Color</h3>
-            <GhostButton onClick={() => setCustomOpen(false)}>✕</GhostButton>
-          </div>
-          <label className="mt-2 block">
+          <div className="mt-2 flex items-center gap-2 w-full justify-center">
+            <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+              Color:
+            </span>
             <input
-              type="color"
-              value={customValue.startsWith('#') ? customValue : '#6366f1'}
-              onChange={(e) => {
-                setCustomValue(e.target.value);
-                setCustomError(null);
-              }}
-              className="h-10 w-full cursor-pointer rounded border border-white/15 bg-obsidian-lowest p-1 outline-none"
-            />
-          </label>
-          <label className="mt-2 block">
-            <input
-              value={customValue}
-              onChange={(e) => {
-                setCustomValue(e.target.value);
-                setCustomError(null);
-              }}
+              value={hexValue}
+              onChange={onHexChange}
               placeholder="#3b82f6"
-              className="mt-1 w-full rounded border border-white/15 bg-obsidian-lowest px-3 py-2 font-mono text-xs outline-none placeholder:text-ink-faint focus:border-primary"
+              className="w-28 rounded border border-white/10 bg-obsidian-lowest px-2 py-1 font-mono text-[10px] text-ink-faint outline-none focus:border-primary"
             />
-          </label>
-          {customError && (
-            <p className="mt-1 font-mono text-[10px] text-[#f87171]">{customError}</p>
-          )}
-          <div className="mt-3 flex justify-end gap-2">
-            <GhostButton onClick={() => setCustomOpen(false)}>Cancel</GhostButton>
-            <PrimaryButton onClick={applyCustom}>Apply</PrimaryButton>
           </div>
         </div>
       )}

@@ -306,13 +306,6 @@ export function UserMenu({
     current?: boolean;
     keep?: boolean;
   }> = [
-    ...(mdTheme
-      ? []
-      : [
-          theme === 'dark'
-            ? { id: 'theme', label: 'Light', icon: 'sun', run: () => setTheme('light'), current: false, keep: true }
-            : { id: 'theme', label: 'Dark', icon: 'moon', run: () => setTheme('dark'), current: false, keep: true },
-        ]),
     ...(plugins.length > 0
       ? [
           {
