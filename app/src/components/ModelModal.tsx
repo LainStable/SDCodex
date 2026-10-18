@@ -829,7 +829,7 @@ export default function ModelModal({
           className="fixed inset-0 z-[70] flex items-center justify-center p-4 backdrop-blur-sm"
           onClick={closeLightbox}
         >
-          <div className="glass-l2 modal-pop checker max-h-[86vh] max-w-[92vw] overflow-auto rounded-lg p-3" onClick={(e) => e.stopPropagation()}>
+          <div className="glass-l2 modal-pop max-h-[86vh] max-w-[92vw] overflow-auto rounded-lg p-3" onClick={(e) => e.stopPropagation()}>
             <div className="relative flex h-full flex-col items-center justify-center">
               <img
                 src={images[imgIdx].url}
