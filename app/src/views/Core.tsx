@@ -191,7 +191,7 @@ export function BootstrapCard({
   return (
     <div onKeyDown={onKey}>
       <div className="flex flex-col items-center">
-        <img src="/sdcodex.svg" alt="SDCodex" className="h-24 w-24" />
+        <img src="/codex.svg" alt="SDCodex" className="h-24 w-24" />
       </div>
       <div className="mt-3 flex flex-col gap-2">
         <input
@@ -1166,13 +1166,9 @@ export function Plugins() {
                     : 'Rebuilding container'}{' '}
                 {applying || rebuilding ? '…' : '(done)'}
               </h3>
-              <button
-                type="button"
-                onClick={() => setShowRebuildLog(false)}
-                className="font-mono text-[11px] text-ink-faint hover:text-white"
-              >
+              <GhostButton onClick={() => setShowRebuildLog(false)}>
                 Hide
-              </button>
+              </GhostButton>
             </div>
             <div className="mt-3 h-72 overflow-y-auto rounded-lg bg-[#070a10] p-3 font-mono text-[11px] leading-relaxed">
               {rebuildLog.length === 0 ? (

@@ -460,6 +460,54 @@ def serve_file():
     return send_file(real)
 
 
+@api_v1.get("/proxy/image")
+def proxy_image():
+    """Proxy an external image URL for download.
+
+    Used by the frontend when browser CORS prevents direct fetch.
+    Authed only. Supports GET with ?url= parameter.
+    """
+    import requests
+    from urllib.parse import urlparse
+
+    user, err = _require_user()
+    if err:
+        return err
+
+    image_url = request.args.get("url")
+    if not image_url or len(image_url) > 2048:
+        return jsonify({"error": "valid url required"}), 400
+
+    try:
+        parsed = urlparse(image_url)
+        if not parsed.scheme or not parsed.netloc:
+            return jsonify({"error": "invalid url"}), 400
+        if parsed.scheme not in ("http", "https"):
+            return jsonify({"error": "http/https only"}), 400
+    except Exception:
+        return jsonify({"error": "invalid url"}), 400
+
+    try:
+        headers = {"User-Agent": "SDCodex/1.0 (+https://github.com/LainStable/SDCodex)"}
+        authorization = (request.headers.get("Authorization") or "").strip()
+        if authorization.lower().startswith("bearer "):
+            headers["Authorization"] = authorization
+        elif user.api_key:
+            headers["Authorization"] = f"Bearer {user.api_key}"
+
+        with requests.get(image_url, headers=headers, stream=True, timeout=(5, 30)) as response:
+            if response.status_code != 200:
+                return jsonify({"error": f"upstream returned {response.status_code}"}), response.status_code
+            content_type = response.headers.get("Content-Type", "application/octet-stream")
+            return Response(
+                response.content,
+                status=200,
+                headers={"Content-Type": content_type},
+            )
+    except Exception as e:
+        return jsonify({"error": f"download failed: {e}"}), 502
+
+
 @api_v1.post("/scan")
 def scan():
     user, err = _require_user()

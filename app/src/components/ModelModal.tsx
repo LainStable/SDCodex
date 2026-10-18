@@ -78,6 +78,14 @@ function formatDate(iso?: string): string {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
 }
 
+/** Civitai marks some previews as videos (mp4); those cannot be saved as the
+    on-disk library preview and are shown as a placeholder instead. */
+function isImagePreview(img?: CivitaiImage): img is CivitaiImage {
+  if (!img) return false;
+  // Check if URL extension indicates a video
+  return !/\.(mp4|webm|mov|m4v)(\?|$)/i.test(img.url);
+}
+
 function formatSize(kb: number | null | undefined): string {
   if (kb == null) return '—';
   const gb = kb / 1024 / 1024;
@@ -191,7 +199,16 @@ async function saveLibraryCover(
   const modelFilename = segments.pop();
   if (!modelFilename) throw new Error('Invalid scanned model path.');
   for (const segment of segments) dir = await dir.getDirectoryHandle(segment);
-  const response = await fetch(imageUrl);
+  // Use backend proxy to avoid CORS issues when fetching from Civitai
+  const { backendAvailable } = await import('../lib/backend');
+  let proxyUrl: string;
+  if (await backendAvailable()) {
+    proxyUrl = `/api/proxy/image?url=${encodeURIComponent(imageUrl)}`;
+  } else {
+    // Fallback to direct fetch (may fail with CORS)
+    proxyUrl = imageUrl;
+  }
+  const response = await fetch(proxyUrl);
   if (!response.ok) throw new Error(`Image download failed (${response.status}).`);
   const blob = await response.blob();
   if (!blob.type.startsWith('image/')) throw new Error('Civitai did not return an image.');
@@ -574,26 +591,40 @@ export default function ModelModal({
 
                 <div ref={mainRef} className="relative mt-3 flex h-[320px] items-center justify-center overflow-hidden rounded-lg bg-black/40 md:h-[440px]">
                   {images[imgIdx] ? (
-                    <img
-                      src={images[imgIdx].url}
-                      alt=""
-                      onClick={() => setLightbox(true)}
-                      className="max-h-full max-w-full cursor-zoom-in object-contain"
-                      title="Click to expand · scroll to browse images"
-                    />
+                    isImagePreview(images[imgIdx]) ? (
+                      <img
+                        src={images[imgIdx].url}
+                        alt=""
+                        onClick={() => setLightbox(true)}
+                        className="max-h-full max-w-full cursor-zoom-in object-contain"
+                        title="Click to expand · scroll to browse images"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center font-mono text-xs text-ink-faint">
+                        video preview
+                      </div>
+                    )
                   ) : (
                     <div className="font-mono text-xs text-ink-faint">no preview</div>
                   )}
-                  {target.kind === 'local' && images[imgIdx] && (
-                    <button
-                      type="button"
-                      onClick={() => void setCurrentImageAsCover()}
-                      disabled={savingCover}
-                      className="absolute left-2 top-2 rounded border border-white/20 bg-black/75 px-2 py-1 font-mono text-[10px] text-white backdrop-blur hover:border-primary/70 disabled:cursor-default disabled:opacity-80"
-                    >
-                      {savingCover ? 'Saving…' : 'Replace library image'}
-                    </button>
-                  )}
+                  {target.kind === 'local' && images[imgIdx] &&
+                    (isImagePreview(images[imgIdx]) ? (
+                      <button
+                        type="button"
+                        onClick={() => void setCurrentImageAsCover()}
+                        disabled={savingCover}
+                        className="absolute left-2 top-2 rounded border border-white/20 bg-black/75 px-2 py-1 font-mono text-[10px] text-white backdrop-blur hover:border-primary/70 disabled:cursor-default disabled:opacity-80"
+                      >
+                        {savingCover ? 'Saving…' : 'Replace library image'}
+                      </button>
+                    ) : (
+                      <span
+                        className="absolute left-2 top-2 rounded border border-white/10 bg-black/75 px-2 py-1 font-mono text-[10px] text-ink-faint backdrop-blur"
+                        title="This preview is a video — scroll to an image to replace the library preview"
+                      >
+                        video preview — cannot be saved
+                      </span>
+                    ))}
                 </div>
                 {coverMessage && (
                   <p className={`mt-1 font-mono text-[10px] ${coverMessage.startsWith('Replaced') ? 'text-status-active' : 'text-[#f87171]'}`}>

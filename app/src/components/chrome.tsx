@@ -83,7 +83,7 @@ export function Sidebar({
             className={`flex items-center gap-2 font-display text-lg font-bold tracking-tight ${collapsed ? 'justify-center' : ''}`}
             title={collapsed ? 'SDCodex' : undefined}
           >
-            <img src="/sdcodex.svg" alt="" className="h-7 w-7 shrink-0 object-contain" />
+            <img src="/codex.svg" alt="" className="h-7 w-7 shrink-0 object-contain" />
             {!collapsed && <span>SDCodex</span>}
           </div>
       {(hasUpdate || updates.newPluginAvailable || !collapsed) && (
@@ -106,7 +106,9 @@ export function Sidebar({
               {updates.core ? '⟳' : '⬢'} v{version}
             </button>
           ) : (
-            <span>v{version}</span>
+            <span className="rounded border border-white/20 bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em] text-white">
+              v{version}
+            </span>
           ))}
           {updates.newPluginAvailable && (
             <button
