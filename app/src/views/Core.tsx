@@ -810,21 +810,25 @@ function ProgressBar() {
   );
 }
 
+/* Step labels mirror the real backend phases (updater.update_core writes the
+   git-pull lines, rebuilder._rebuild_container writes the image/build/swap
+   lines, swap_helper writes the helper: lines) so each label describes what
+   the log underneath is actually doing. */
 const SELF_UPDATE_DOCKER_STEPS: Array<{ label: string; match: RegExp }> = [
-  { label: 'Pulling new image', match: /starting self-update|git pull|already up to date|marking plugin-managed|pulling new image/i },
-  { label: 'Building container config', match: /building per-user image|build context|building container config|image build started/i },
-  { label: 'Preparing updater', match: /sending build context|preparing updater|^.*\bbinds:|^.*\bports:/i },
-  { label: 'Creating new container', match: /creating sibling|creating new container|removed stale|sibling create/i },
-  { label: 'Launching updater', match: /sibling started|swap delegated|launching updater|waiting for health/i },
-  { label: 'Stopping old container', match: /stopping old|helper: stopping/i },
-  { label: 'Swapping container', match: /recreating sibling|rename (old|new)|swapping container|recreate/i },
-  { label: 'Starting updated container', match: /final started|final never healthy|swap done|starting updated/i },
+  { label: 'Pulling code from GitHub', match: /Core update requested|Running git pull|^\s*\d{4}-.*\bgit:/im },
+  { label: 'Building new image', match: /image build started|^\s*\d{4}-.*\bbuild:/im },
+  { label: 'Resolving container config', match: /\b(binds|ports):/i },
+  { label: 'Creating new container', match: /creating sibling|removed stale|sibling create/i },
+  { label: 'Starting new container', match: /sibling joined network|sibling started, waiting for health/i },
+  { label: 'Stopping old container', match: /swap delegated|helper: stopping old/i },
+  { label: 'Swapping container', match: /helper: recreating sibling|rename (old|new)/i },
+  { label: 'Starting updated container', match: /helper: final started|swap done/i },
 ];
 
 const SELF_UPDATE_LOCAL_STEPS: Array<{ label: string; match: RegExp }> = [
-  { label: 'Pulling core update', match: /starting self-update|git pull|already up to date|marking plugin-managed|pulling/i },
-  { label: 'Restarting local app', match: /local restart|restarting|re-exec/i },
-  { label: 'Waiting for health', match: /health|reload|swap done/i },
+  { label: 'Pulling code from GitHub', match: /Core update requested|Running git pull|^.*\bgit:/i },
+  { label: 'Restarting app', match: /local restart started|Restarting backend/i },
+  { label: 'Waiting for app', match: /swap done|answers health/i },
 ];
 
 /** Derive per-step status from the rebuild log so the indicator dot can
@@ -837,7 +841,8 @@ function selfUpdateProgress(lines: string[], isLocal: boolean): {
   const steps = (isLocal ? SELF_UPDATE_LOCAL_STEPS : SELF_UPDATE_DOCKER_STEPS).map((s) => s.label);
   const matchers = (isLocal ? SELF_UPDATE_LOCAL_STEPS : SELF_UPDATE_DOCKER_STEPS).map((s) => s.match);
   const joined = lines.join('\n');
-  const failed = /BUILD ERROR|rebuild exception|failed|abort|never healthy/i.test(joined);
+  // "HTTPS pull failed; retrying…" is a routine retry, not a failure.
+  const failed = /BUILD ERROR|rebuild exception|ABORT:|Update failed|Git pull failed(?!; retrying)|sibling create failed|swap helper launch failed|never healthy/i.test(joined);
   let active = -1;
   matchers.forEach((re, i) => {
     if (re.test(joined)) active = i;
