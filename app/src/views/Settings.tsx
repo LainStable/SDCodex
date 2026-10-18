@@ -200,18 +200,21 @@ function ColorMenu({
       {customOpen && (
         <div className="glass-l2 modal-pop absolute left-0 top-8 z-50 w-72 rounded-lg p-4">
           <div className="flex items-start justify-between gap-2">
-            <div>
-              <h3 className="font-display text-sm font-semibold">Custom Accent Color</h3>
-              <p className="mt-0.5 text-[11px] text-ink-muted">
-                Enter a custom color using valid CSS color formats (e.g., hex, rgb, hsl).
-              </p>
-            </div>
+            <h3 className="font-display text-sm font-semibold">Custom Accent Color</h3>
             <GhostButton onClick={() => setCustomOpen(false)}>✕</GhostButton>
           </div>
-          <label className="mt-3 block">
-            <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
-              Color Value
-            </span>
+          <label className="mt-2 block">
+            <input
+              type="color"
+              value={customValue.startsWith('#') ? customValue : '#6366f1'}
+              onChange={(e) => {
+                setCustomValue(e.target.value);
+                setCustomError(null);
+              }}
+              className="h-10 w-full cursor-pointer rounded border border-white/15 bg-obsidian-lowest p-1 outline-none"
+            />
+          </label>
+          <label className="mt-2 block">
             <input
               value={customValue}
               onChange={(e) => {

@@ -29,6 +29,27 @@ export default defineConfig({
         target: 'http://127.0.0.1:5000',
         changeOrigin: true,
       },
+      // Plugin API endpoints (GalleryDL, Gallery, etc.)
+      '/gdl': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+      },
+      '/gallery': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+      },
+      '/ai-renamer': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+      },
+      '/rembg': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+      },
+      '/comfy-caption': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+      },
     },
   },
 })
