@@ -191,7 +191,7 @@ export function BootstrapCard({
   return (
     <div onKeyDown={onKey}>
       <div className="flex flex-col items-center px-2 pb-1">
-        <img src="/codex.svg" alt="SDCodex" className="h-36 w-full max-w-[300px] object-contain" />
+        <img src="/codex.svg" alt="SDCodex" className="h-36 w-full object-contain" />
       </div>
       <div className="mt-3 flex flex-col gap-2">
         <input
