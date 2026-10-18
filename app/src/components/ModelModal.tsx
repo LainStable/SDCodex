@@ -622,7 +622,7 @@ export default function ModelModal({
                         type="button"
                         onClick={() => void setCurrentImageAsCover()}
                         disabled={savingCover}
-                        className="absolute left-2 top-2 rounded border border-white/20 px-2 py-1 font-mono text-[10px] text-white hover:border-primary/70 disabled:cursor-default disabled:opacity-80"
+                        className="absolute left-2 top-2 rounded border border-primary/30 bg-primary/20 px-2 py-1 font-mono text-[10px] text-white hover:border-primary/70 hover:bg-primary/30 disabled:cursor-default disabled:opacity-80"
                       >
                         {savingCover ? 'Saving…' : 'Replace library image'}
                       </button>
