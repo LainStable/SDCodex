@@ -191,7 +191,7 @@ export function BootstrapCard({
   return (
     <div onKeyDown={onKey}>
       <div className="flex flex-col items-center px-2 pb-1">
-        <img src="/codex.svg" alt="SDCodex" className="h-36 w-full object-contain" />
+        <img src="/codex.svg" alt="SDCodex" className="h-54 w-full object-contain" />
       </div>
       <div className="mt-3 flex flex-col gap-2">
         <input
@@ -1215,7 +1215,7 @@ export function Plugins() {
             <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 p-4">
               <div className="w-full max-w-2xl overflow-hidden rounded-xl border border-white/10 bg-[#2c2e33]">
                 <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-                  <img src="/codex.svg" alt="SDCodex" className="h-12 w-full object-fill" />
+                  <img src="/codex.svg" alt="SDCodex" className="h-18 w-full object-fill" />
                   <button
                     type="button"
                     onClick={() => setShowRebuildLog(false)}
