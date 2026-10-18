@@ -34,6 +34,7 @@ export function AssistantPanel({ isAdmin }: { isAdmin: boolean }) {
   const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [models, setModels] = useState<string[]>([]);
 
   useEffect(() => {
     let live = true;
@@ -86,13 +87,13 @@ export function AssistantPanel({ isAdmin }: { isAdmin: boolean }) {
         ...(apiKey.trim() ? { apiKey } : {}),
       });
       if (result.ok) {
-        const models = (result.models ?? []).slice(0, 3).join(', ');
+        const found = (result.models ?? []).filter(Boolean);
+        setModels(found);
         setMessage(
-          `Reachable in ${result.latencyMs ?? 0} ms — ${(result.models ?? []).length} model(s)${
-            models ? `: ${models}${(result.models ?? []).length > 3 ? '…' : ''}` : ''
-          }`,
+          `Reachable in ${result.latencyMs ?? 0} ms — ${found.length} model(s) below. Click one to use it.`,
         );
       } else {
+        setModels([]);
         setMessage(result.error ?? 'The endpoint did not answer.');
       }
     } catch (error) {
@@ -198,6 +199,32 @@ export function AssistantPanel({ isAdmin }: { isAdmin: boolean }) {
         <p role="status" className="mt-2 font-mono text-[11px] text-ink-muted">
           {message}
         </p>
+      )}
+      {models.length > 0 && (
+        <div className="mt-2">
+          <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+            Available models ({models.length}) — click to use
+          </p>
+          <ul className="mt-1 max-h-40 overflow-y-auto rounded border border-white/10 bg-black/20 p-1">
+            {models.map((name) => (
+              <li key={name}>
+                <button
+                  type="button"
+                  disabled={!isAdmin}
+                  onClick={() => setModel(name)}
+                  title={name === model ? 'Already selected' : `Use ${name}`}
+                  className={`block w-full truncate rounded px-2 py-1 text-left font-mono text-[11px] ${
+                    name === model
+                      ? 'bg-primary/20 text-white'
+                      : 'text-ink-muted hover:bg-white/5 hover:text-ink'
+                  }`}
+                >
+                  {name === model ? `✓ ${name}` : name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );

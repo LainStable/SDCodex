@@ -528,6 +528,19 @@ def _run_plugin_task(args: dict, *, cookie: str, confirmed: bool) -> dict:
 
 # ---------------------------------------------------------------- chat ---
 
+def _api_root(settings: dict) -> str:
+    """Endpoint root without a trailing /v1.
+
+    The settings placeholder shows a URL *with* /v1 (LM Studio style) while
+    the code appends /v1/... itself — accept both forms instead of producing
+    a doubled /v1/v1/... path.
+    """
+    base = (settings.get("baseUrl") or "").strip().rstrip("/")
+    if base.lower().endswith("/v1"):
+        base = base[: -len("/v1")].rstrip("/")
+    return base
+
+
 def _chat_completion(settings: dict, messages: list[dict], tools: list[dict]) -> dict:
     headers = {"Content-Type": "application/json"}
     api_key = _assistant_api_key()
@@ -538,7 +551,7 @@ def _chat_completion(settings: dict, messages: list[dict], tools: list[dict]) ->
         payload["tools"] = [{"type": "function", "function": tool} for tool in tools]
         payload["tool_choice"] = "auto"
     response = requests.post(
-        f"{settings['baseUrl']}/v1/chat/completions",
+        f"{_api_root(settings)}/v1/chat/completions",
         json=payload,
         headers=headers,
         timeout=REQUEST_TIMEOUT,
@@ -715,18 +728,25 @@ def test_connection() -> dict:
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     started = time.time()
+    root = _api_root(settings)
+    models: list[str] = []
     try:
-        response = requests.get(
-            f"{settings['baseUrl']}/v1/models", headers=headers, timeout=15
-        )
+        response = requests.get(f"{root}/v1/models", headers=headers, timeout=15)
         response.raise_for_status()
         payload = response.json()
+        models = [m.get("id") for m in payload.get("data", []) if isinstance(m, dict)]
     except (requests.RequestException, ValueError) as error:
-        return {"ok": False, "error": f"Endpoint unreachable: {error}"}
-    models = [m.get("id") for m in payload.get("data", []) if isinstance(m, dict)]
+        # Older Ollama servers only expose the native tags endpoint.
+        try:
+            fallback = requests.get(f"{root}/api/tags", headers=headers, timeout=15)
+            fallback.raise_for_status()
+            tags = fallback.json().get("models", [])
+            models = [m.get("name") for m in tags if isinstance(m, dict) and m.get("name")]
+        except (requests.RequestException, ValueError):
+            return {"ok": False, "error": f"Endpoint unreachable: {error}"}
     return {
         "ok": True,
-        "models": models[:100],
+        "models": [m for m in models if m][:100],
         "latencyMs": int((time.time() - started) * 1000),
         "model": settings["model"],
     }
