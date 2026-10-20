@@ -237,13 +237,8 @@ export function MobileNav({
   );
 }
 
-export type Theme = 'dark' | 'light';
-
 export function UserMenu({
   go,
-  theme: _t,
-  setTheme: _s,
-  mdTheme: _m,
   profileLabel,
   avatarUrl,
   signedIn,
@@ -254,11 +249,6 @@ export function UserMenu({
   onSpacePlugin,
 }: {
   go: (v: ViewId) => void;
-  theme: Theme;
-  setTheme: (t: Theme) => void;
-  /** Active named theme slug ('' = System default). Hides the light/dark
-      toggle — no themes.md theme ships light+dark variants. */
-  mdTheme?: string;
   /** Avatar initials (or "?" for guests). */
   profileLabel: string;
   /** Uploaded picture data-URL, if set. */
@@ -294,10 +284,8 @@ export function UserMenu({
   // Fan-out arc: profile pic is the center (right side); items spread
   // left-to-bottom, i.e. 180° (west) → 90° (south) in screen coords.
   // Mirrors OldCode base.html: angle = start - (span * i) / (n - 1).
-  // Fan: theme toggle (hidden while a named theme is active — none of the
-  // themes.md themes ship light+dark variants), core icon (once a plugin is
-  // installed), one icon per installed plugin, settings, sign out.
-  // The theme toggle keeps the fan open (click-off still closes it).
+  // Fan: core icon (once a plugin is installed), one icon per installed
+  // plugin, settings, sign out. Appearance lives in Settings → Profile.
   const actions: Array<{
     id: string;
     label: string;
@@ -414,8 +402,6 @@ export function Topbar({
   go,
   onToggleSidebar,
   sidebarCollapsed,
-  theme,
-  setTheme,
   profileLabel,
   avatarUrl,
   signedIn,
@@ -425,14 +411,11 @@ export function Topbar({
   onSpaceCore,
   onSpacePlugin,
   assistant,
-  mdTheme,
 }: {
   installMode?: 'docker' | 'local';
   go: (v: ViewId) => void;
   onToggleSidebar: () => void;
   sidebarCollapsed: boolean;
-  theme: Theme;
-  setTheme: (t: Theme) => void;
   profileLabel: string;
   avatarUrl: string;
   signedIn: boolean;
@@ -442,7 +425,6 @@ export function Topbar({
   onSpaceCore: () => void;
   onSpacePlugin: (id: string) => void;
   assistant?: { configured: boolean; model: string; onAction: (action: AssistantAction) => void };
-  mdTheme?: string;
 }) {
   return (
     <div className="mb-4 flex items-center gap-2">
@@ -496,9 +478,6 @@ export function Topbar({
       </button>
       <UserMenu
         go={go}
-        theme={theme}
-        setTheme={setTheme}
-        mdTheme={mdTheme}
         profileLabel={profileLabel}
         avatarUrl={avatarUrl}
         signedIn={signedIn}

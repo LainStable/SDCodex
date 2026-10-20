@@ -87,6 +87,21 @@ def _install_sqlite_pragmas() -> None:
             cursor.close()
 
 
+def _ensure_user_theme_column(app) -> None:
+    """`db.create_all()` never alters an existing table, so add the per-user
+    theme column to older databases instead of losing saved choices."""
+    try:
+        from sqlalchemy import inspect, text
+
+        columns = {c["name"] for c in inspect(db.engine).get_columns("users")}
+        if "theme" in columns:
+            return
+        with db.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN theme VARCHAR(64)"))
+    except Exception:
+        app.logger.warning("Could not add users.theme column", exc_info=True)
+
+
 def create_app(db_path: str | None = None) -> Flask:
     app = Flask(__name__)
     db_file = _database_path(db_path)
@@ -162,6 +177,7 @@ def create_app(db_path: str | None = None) -> Flask:
 
     with app.app_context():
         db.create_all()
+        _ensure_user_theme_column(app)
 
     # Installed plugins (entrypoint init is optional; page-only plugins skip).
     try:

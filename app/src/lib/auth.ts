@@ -12,6 +12,8 @@ export interface Profile {
   passwordHash: string;
   /** Avatar data-URL (128px JPEG). Mirrors OldCode User.avatar. */
   avatar: string;
+  /** Named UI theme slug picked at account creation (mirrors User.theme). */
+  theme?: string;
   createdAt: number;
 }
 
@@ -32,6 +34,8 @@ export interface OidcProvider {
   adminClaim: string;
   adminValue: string;
 }
+
+import { saveTheme } from './themes';
 
 const PROFILE_KEY = 'sdcodex.profile.v1';
 const OIDC_KEY = 'sdcodex.oidc.v1';
@@ -121,6 +125,7 @@ export async function bootstrapUser(
   username: string,
   displayName: string,
   password: string,
+  theme?: string,
 ): Promise<Profile> {
   let first = true;
   try {
@@ -137,6 +142,7 @@ export async function bootstrapUser(
     authProvider: 'local',
     passwordHash: await hashPassword(password),
     avatar: '',
+    theme: theme || '',
     createdAt: Date.now(),
   };
   saveProfile(p);
@@ -203,6 +209,7 @@ export interface ServerAuthState {
     email: string;
     isAdmin: boolean;
     authProvider: string;
+    theme?: string;
   } | null;
 }
 
@@ -231,9 +238,12 @@ export function adoptServerUser(u: ServerAuthState['user']): Profile | null {
     authProvider: u.authProvider || 'local',
     passwordHash: sameUser ? (existing?.passwordHash ?? '') : '',
     avatar: sameUser ? (existing?.avatar ?? '') : '',
+    theme: u.theme || existing?.theme || '',
     createdAt: existing?.createdAt ?? Date.now(),
   };
   saveProfile(p);
+  // The account row owns the theme; apply it as soon as we adopt the user.
+  if (p.theme) saveTheme(p.theme);
   return p;
 }
 
@@ -277,9 +287,11 @@ export async function pullServerProfile(): Promise<Profile | null> {
       authProvider: u.authProvider || 'local',
       passwordHash: sameUser ? (existing?.passwordHash ?? '') : '',
       avatar,
+      theme: u.theme || existing?.theme || '',
       createdAt: existing?.createdAt ?? Date.now(),
     };
     saveProfile(p);
+    if (p.theme) saveTheme(p.theme);
     return p;
   } catch {
     return null;
@@ -315,6 +327,7 @@ export async function pushProfile(p: Profile): Promise<boolean> {
       displayName: p.displayName,
       email: p.email,
       avatar: p.avatar,
+      ...(p.theme ? { theme: p.theme } : {}),
     });
     setLastServerAvatar(p.avatar);
     return true;

@@ -1,5 +1,5 @@
 // Named UI themes from themes.md (repo root).
-// '' = System default (the classic dark/light binary toggle).
+// A user always has one of these selected; there is no "system default" mode.
 
 export interface ThemeDef {
   name: string;
@@ -148,21 +148,51 @@ export const THEMES: ThemeDef[] = [
 
 export const THEME_STORAGE_KEY = 'sdcodex.theme.md.v1';
 export const THEME_CHANGED_EVENT = 'sdcodex:theme-changed';
+/** Every account starts on Obsidian Codex unless it picked something else. */
+export const DEFAULT_THEME_SLUG = 'obsidian-codex';
 
-/** Active named-theme slug, or '' for the System default (binary toggle). */
+export function isThemeSlug(slug: string): boolean {
+  return THEMES.some((t) => t.slug === slug);
+}
+
+/** Active named-theme slug. Falls back to the default theme, never ''. */
 export function loadTheme(): string {
   try {
     const v = localStorage.getItem(THEME_STORAGE_KEY) || '';
-    return THEMES.some((t) => t.slug === v) ? v : '';
+    return isThemeSlug(v) ? v : DEFAULT_THEME_SLUG;
   } catch {
-    return '';
+    return DEFAULT_THEME_SLUG;
+  }
+}
+
+export const THEME_PAYLOAD_KEY = 'sdcodex.theme.payload.v1';
+
+/** Serialised palette for consumers outside the React tree (plugin iframes). */
+export function themePayload(slug: string) {
+  const t = THEMES.find((x) => x.slug === slug) ?? THEMES[0];
+  return {
+    slug: t.slug,
+    mode: t.mode,
+    vars: t.vars,
+    fontDisplay: t.fontDisplay,
+    fontBody: t.fontBody,
+  };
+}
+
+/** Mirror the resolved palette into localStorage so a plugin page can paint
+    itself before its parent posts anything. */
+export function saveThemePayload(slug: string): void {
+  try {
+    localStorage.setItem(THEME_PAYLOAD_KEY, JSON.stringify(themePayload(slug)));
+  } catch {
+    /* ignore */
   }
 }
 
 export function saveTheme(slug: string): void {
+  const value = isThemeSlug(slug) ? slug : DEFAULT_THEME_SLUG;
   try {
-    if (slug && THEMES.some((t) => t.slug === slug)) localStorage.setItem(THEME_STORAGE_KEY, slug);
-    else localStorage.removeItem(THEME_STORAGE_KEY);
+    localStorage.setItem(THEME_STORAGE_KEY, value);
   } catch {
     /* ignore */
   }
@@ -170,5 +200,5 @@ export function saveTheme(slug: string): void {
 }
 
 export function themeClass(slug: string): string {
-  return slug ? `theme-${slug}` : '';
+  return `theme-${isThemeSlug(slug) ? slug : DEFAULT_THEME_SLUG}`;
 }

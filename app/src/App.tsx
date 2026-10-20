@@ -6,7 +6,7 @@ import PluginView from './views/PluginView';
 import ModelModal, { type ModalTarget } from './components/ModelModal';
 import { Queue, BootstrapCard, DownloadFloat, PluginTaskFloat } from './views/Core';
 import Home from './views/Home';
-import { MobileNav, Sidebar, Topbar, type Theme, type UpdateState, type ViewId } from './components/chrome';
+import { MobileNav, Sidebar, Topbar, type UpdateState, type ViewId } from './components/chrome';
 import {
   addToQueue,
   clearCompleted,
@@ -18,7 +18,7 @@ import { adoptServerUser, clearProfile, completeOidcCallback, endSession, fetchS
 import type { InstalledPlugin } from './lib/plugins';
 import type { AssistantAction, AssistantSearchParams } from './lib/assistant';
 import { deleteScanned } from './lib/library';
-import { loadTheme, themeClass, THEME_CHANGED_EVENT, THEMES } from './lib/themes';
+import { loadTheme, saveThemePayload, themeClass, THEME_CHANGED_EVENT, THEMES } from './lib/themes';
 import { apiPost, backendLogout, backendAvailable } from './lib/backend';
 import { getApiKey, pullSettings, setApiUser } from './lib/settings';
 import { fetchMe } from './lib/civitai';
@@ -224,15 +224,8 @@ export default function App() {
     configured: false,
     model: '',
   });
-  const [theme, setTheme] = useState<Theme>(() => {
-    try {
-      return localStorage.getItem('sdcodex.theme.v1') === 'light' ? 'light' : 'dark';
-    } catch {
-      return 'dark';
-    }
-  });
-  // Named theme from themes.md (Settings → Profile). Takes precedence over
-  // the binary light/dark toggle; '' = System default.
+  // Named theme from themes.md (picked at account creation or in Settings →
+  // Profile). There is no system default: an account always has a theme.
   const [mdTheme, setMdTheme] = useState<string>(() => loadTheme());
   const queuedIds = useMemo(() => new Set(queue.map((i) => i.id)), [queue]);
 
@@ -240,20 +233,12 @@ export default function App() {
     const root = document.documentElement;
     // Drop any previous named theme first.
     for (const t of THEMES) root.classList.remove(themeClass(t.slug));
-    if (mdTheme) {
-      root.classList.remove('light');
-      root.classList.add(themeClass(mdTheme));
-      root.style.colorScheme = THEMES.find((t) => t.slug === mdTheme)?.mode ?? 'dark';
-    } else {
-      root.classList.toggle('light', theme === 'light');
-      root.style.colorScheme = theme === 'light' ? 'light' : 'dark';
-    }
-    try {
-      localStorage.setItem('sdcodex.theme.v1', theme);
-    } catch {
-      /* ignore */
-    }
-  }, [theme, mdTheme]);
+    root.classList.remove('light');
+    root.classList.add(themeClass(mdTheme));
+    root.style.colorScheme = THEMES.find((t) => t.slug === mdTheme)?.mode ?? 'dark';
+    // Plugin iframes are separate documents: hand them the resolved palette.
+    saveThemePayload(mdTheme);
+  }, [mdTheme]);
 
   // Profile theme picker saves + broadcasts; pick it up live.
   useEffect(() => {
@@ -600,9 +585,6 @@ export default function App() {
             go={go}
             onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
             sidebarCollapsed={sidebarCollapsed}
-            theme={theme}
-            setTheme={setTheme}
-            mdTheme={mdTheme}
             profileLabel={initials(profile)}
             avatarUrl={profile?.avatar ?? ''}
             signedIn={authed}

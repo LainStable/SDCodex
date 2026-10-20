@@ -68,6 +68,7 @@ class User(db.Model):
     is_admin = db.Column(db.Boolean, default=False)
     api_key = db.Column(db.String(256))  # optional Civitai API key (per-user, not auth)
     avatar = db.Column(db.String(512))   # profile image: URL or filename under static/uploads/avatars
+    theme = db.Column(db.String(64))     # named UI theme slug picked at account creation
     last_login = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 

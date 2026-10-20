@@ -13,6 +13,7 @@ import { bootstrapUser, startSession, verifyPassword, type Profile } from '../li
 import { adoptServerUser, fetchPublicProviders, type ServerAuthState } from '../lib/auth';
 import { apiPost, mirrorAuth } from '../lib/backend';
 import { fetchCatalog, type HubCatalog } from '../lib/plugins';
+import { loadTheme, saveTheme, THEMES } from '../lib/themes';
 
 /** Blocking auth gate (mirrors OldCode bootstrap + login). No session, no app:
     first-ever user sets a password and becomes admin; returning users sign in. */
@@ -39,6 +40,8 @@ export function BootstrapCard({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sso, setSso] = useState<Array<{ id: number; name: string; host: string }>>([]);
+  // First-run accounts pick their UI theme here; it is stored on the user row.
+  const [themeSlug, setThemeSlug] = useState<string>(() => loadTheme());
   const [faviconSrc, setFaviconSrc] = useState<Record<number, number>>({});
 
   /** Favicon cascade: provider root, Authentik convention, icon service, hidden. */
@@ -142,6 +145,7 @@ export function BootstrapCard({
             username: loginName,
             displayName: display,
             password,
+            theme: themeSlug,
           });
           const adopted = adoptServerUser(r.user);
           if (!adopted) throw new Error('Bootstrap failed');
@@ -162,9 +166,14 @@ export function BootstrapCard({
         }
         return;
       }
-      const created = await bootstrapUser(loginName, display, password);
+      const created = await bootstrapUser(loginName, display, password, themeSlug);
       try {
-        await mirrorAuth('bootstrap', { username: loginName, displayName: display, password });
+        await mirrorAuth('bootstrap', {
+          username: loginName,
+          displayName: display,
+          password,
+          theme: themeSlug,
+        });
       } catch {
         /* standalone — local account stands */
       }
@@ -227,6 +236,28 @@ export function BootstrapCard({
             autoComplete="new-password"
             className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
           />
+        )}
+        {isCreate && (
+          <label className="flex flex-col gap-1">
+            <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+              Theme
+            </span>
+            <select
+              value={themeSlug}
+              onChange={(e) => {
+                // Apply immediately so the gate itself previews the theme.
+                saveTheme(e.target.value);
+                setThemeSlug(loadTheme());
+              }}
+              className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none focus:border-primary"
+            >
+              {THEMES.map((t) => (
+                <option key={t.slug} value={t.slug}>
+                  {t.name} · {t.mode === 'dark' ? 'Dark' : 'Light'}
+                </option>
+              ))}
+            </select>
+          </label>
         )}
         {error && <p className="font-mono text-[11px] text-status-alert">{error}</p>}
         <PrimaryButton
@@ -308,6 +339,17 @@ const STATUS_STYLE: Record<string, string> = {
   done: 'border-status-active/40 bg-status-active/10 text-status-active',
   failed: 'border-status-alert/40 bg-status-alert/10 text-[#f87171]',
   cancelled: 'border-white/15 bg-white/5 text-ink-faint',
+  paused: 'border-status-warning/40 bg-status-warning/10 text-[#fbbf24]',
+};
+
+/** One server-side task row from /downloads/status. */
+type ServerTask = {
+  type?: string;
+  model_id?: number;
+  version_id?: number;
+  status?: string;
+  progress?: number;
+  message?: string;
 };
 
 export function Queue({
@@ -325,18 +367,62 @@ export function Queue({
   const [speedLimit, setSpeedLimit] = useState('Unlimited');
   const [maxParallel, setMaxParallel] = useState(1);
   const [server, setServer] = useState<{
-    active: Array<{ type?: string; model_id?: number; version_id?: number; status?: string; progress?: number; message?: string }>;
-    history: Array<{ model_id?: number; version_id?: number; status?: string; progress?: number; message?: string }>;
+    active: ServerTask[];
+    queuedTasks: ServerTask[];
+    pausedTasks: ServerTask[];
+    history: ServerTask[];
     queued: number;
     max: number;
     reachable: boolean;
-  }>({ active: [], history: [], queued: 0, max: 1, reachable: false });
+  }>({
+    active: [],
+    queuedTasks: [],
+    pausedTasks: [],
+    history: [],
+    queued: 0,
+    max: 1,
+    reachable: false,
+  });
   const active = items.filter((i) => i.status !== 'done');
+  // Staged items that never reached the worker (backend restarted, POST failed
+  // while offline) are re-submitted once; the ref prevents retry loops.
+  const revived = useRef<Set<string>>(new Set());
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
 
   const togglePaused = () => {
     const next = !paused;
     setPaused(next);
     setPausedState(next);
+    void (async () => {
+      try {
+        const { apiPost, backendAvailable } = await import('../lib/backend');
+        if (!(await backendAvailable())) return;
+        await apiPost(next ? '/downloads/pause-all' : '/downloads/start-all', { force: true });
+      } catch {
+        /* standalone — local flag still gates the list */
+      }
+    })();
+  };
+
+  // Per-item control. Start always asks the worker to run now (`force`), so a
+  // download can jump the parallel limit; pause parks it without losing the
+  // task definition.
+  const controlTask = async (item: QueueItem, action: 'pause' | 'start') => {
+    if (!item.modelId || !item.versionId) return;
+    try {
+      const { apiPost } = await import('../lib/backend');
+      await apiPost(action === 'pause' ? '/downloads/pause' : '/downloads/start', {
+        modelId: item.modelId,
+        versionId: item.versionId,
+        force: true,
+      });
+      if (action === 'start') {
+        revived.current.delete(`${item.modelId}:${item.versionId}`);
+      }
+    } catch {
+      /* poll refreshes; a stale row self-heals on the next tick */
+    }
   };
 
   // Backend worker state: max-parallel setting + live task polling.
@@ -357,19 +443,51 @@ export function Queue({
       const poll = async () => {
         try {
           const st = await apiGet<{
-            active_tasks?: Array<{ type?: string; model_id?: number; version_id?: number; status?: string; progress?: number; message?: string }>;
-            recent_history?: Array<{ model_id?: number; version_id?: number; status?: string; progress?: number; message?: string }>;
+            active_tasks?: ServerTask[];
+            queued_tasks?: ServerTask[];
+            paused_tasks?: ServerTask[];
+            recent_history?: ServerTask[];
+            history?: ServerTask[];
             queue_length?: number;
             max_parallel?: number;
           }>('/downloads/status');
           if (!live) return;
+          const activeTasks = st.active_tasks ?? [];
+          const queuedTasks = st.queued_tasks ?? [];
+          const pausedTasks = st.paused_tasks ?? [];
+          const historyTasks = st.history ?? st.recent_history ?? [];
           setServer({
-            active: st.active_tasks ?? [],
-            history: st.recent_history ?? [],
+            active: activeTasks,
+            queuedTasks,
+            pausedTasks,
+            history: historyTasks,
             queued: st.queue_length ?? 0,
             max: st.max_parallel ?? 1,
             reachable: true,
           });
+          // Re-stage staged rows the worker never saw (one attempt each). A
+          // key found in history already finished, so it is not retried.
+          const known = new Set(
+            [...activeTasks, ...queuedTasks, ...pausedTasks, ...historyTasks].map(
+              (t) => `${t.model_id}:${t.version_id}`,
+            ),
+          );
+          for (const item of itemsRef.current) {
+            // Only rows still waiting locally: a finished or failed row must
+            // not be retried behind the user's back.
+            if (item.status !== 'queued' || !item.modelId || !item.versionId) continue;
+            const key = `${item.modelId}:${item.versionId}`;
+            if (known.has(key) || revived.current.has(key)) continue;
+            revived.current.add(key);
+            try {
+              await apiPost('/downloads', {
+                modelId: item.modelId,
+                versionId: item.versionId,
+              });
+            } catch {
+              revived.current.delete(key);
+            }
+          }
         } catch {
           /* worker offline — local list stands */
         }
@@ -518,9 +636,10 @@ export function Queue({
       ) : (
         <ul className="mt-3 space-y-2">
           {items.map((i) => {
-            const task = [...server.active, ...server.history].find(
-              (entry) => entry.model_id === i.modelId && entry.version_id === i.versionId,
-            );
+            const match = (list: ServerTask[]) =>
+              list.find((entry) => entry.model_id === i.modelId && entry.version_id === i.versionId);
+            const task = match(server.active) ?? match(server.pausedTasks) ?? match(server.queuedTasks);
+            const finished = match(server.history);
             const status =
               {
                 completed: 'done',
@@ -528,7 +647,12 @@ export function Queue({
                 failed: 'failed',
                 cancelled: 'cancelled',
                 queued: 'queued',
-              }[task?.status ?? ''] ?? i.status;
+                paused: 'paused',
+              }[(task ?? finished)?.status ?? ''] ?? (paused ? 'paused' : i.status);
+            const canPause =
+              server.reachable && (status === 'queued' || status === 'downloading');
+            const canStart =
+              server.reachable && ['paused', 'failed', 'cancelled', 'queued', 'staged'].includes(status);
             return (
               <li key={i.id} className="glass-l1 rounded-lg p-3">
                 <div className="flex items-center gap-3 text-sm">
@@ -539,17 +663,58 @@ export function Queue({
                     </div>
                   </div>
                   <span
-                    className={`rounded border px-2 py-0.5 font-mono text-[10px] uppercase ${STATUS_STYLE[status]}`}
+                    className={`rounded border px-2 py-0.5 font-mono text-[10px] uppercase ${STATUS_STYLE[status] ?? STATUS_STYLE.queued}`}
                   >
-                    {paused && status !== 'done' ? 'paused' : status}
+                    {paused && status !== 'done' && status !== 'downloading' ? 'paused' : status}
                   </span>
                   <span className="font-mono text-[11px] text-ink">
-                    {task?.progress != null ? `${task.progress}%` : i.progress != null ? `${i.progress}%` : 'staged'}
+                    {(task ?? finished)?.progress != null
+                      ? `${(task ?? finished)!.progress}%`
+                      : i.progress != null
+                        ? `${i.progress}%`
+                        : 'staged'}
                   </span>
+                  {canPause && (
+                    <button
+                      type="button"
+                      title="Pause download"
+                      onClick={() => void controlTask(i, 'pause')}
+                      className="rounded border border-white/15 px-2 py-0.5 font-mono text-xs text-ink-faint hover:border-status-warning/60 hover:text-[#fbbf24]"
+                    >
+                      ❙❙
+                    </button>
+                  )}
+                  {canStart && (
+                    <button
+                      type="button"
+                      title={status === 'queued' ? 'Start now (past the parallel limit)' : 'Start download'}
+                      onClick={() => void controlTask(i, 'start')}
+                      className="rounded border border-white/15 px-2 py-0.5 font-mono text-xs text-ink-faint hover:border-status-active/60 hover:text-status-active"
+                    >
+                      ▶
+                    </button>
+                  )}
                   <button
                     type="button"
                     title="Remove from queue"
-                    onClick={() => onRemove(i.id)}
+                    onClick={() => {
+                      // Tell the worker too, so a parked (paused) task does
+                      // not outlive the row the user just deleted.
+                      if (i.modelId && i.versionId) {
+                        void (async () => {
+                          try {
+                            const { apiPost } = await import('../lib/backend');
+                            await apiPost('/downloads/cancel', {
+                              modelId: i.modelId,
+                              versionId: i.versionId,
+                            });
+                          } catch {
+                            /* offline — local row still goes away */
+                          }
+                        })();
+                      }
+                      onRemove(i.id);
+                    }}
                     className="rounded border border-white/15 px-2 py-0.5 font-mono text-xs text-ink-faint hover:border-status-alert/50 hover:text-[#f87171]"
                   >
                     ✕
@@ -558,11 +723,11 @@ export function Queue({
                 <div className="mt-2 h-1.5 overflow-hidden rounded-sm bg-white/10">
                   <div
                     className="h-full rounded-sm bg-gradient-to-r from-primary to-secondary transition-all"
-                    style={{ width: `${task?.progress ?? i.progress ?? 0}%` }}
+                    style={{ width: `${(task ?? finished)?.progress ?? i.progress ?? 0}%` }}
                   />
                 </div>
                 <div className="mt-1 truncate font-mono text-[10px] text-ink-faint">
-                  {task?.message ||
+                  {(task ?? finished)?.message ||
                     (server.reachable
                       ? 'Waiting for worker status.'
                       : 'Hash status unavailable while the backend is offline.')}
@@ -883,6 +1048,8 @@ export function Plugins() {
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildLog, setRebuildLog] = useState<string[]>([]);
   const [showRebuildLog, setShowRebuildLog] = useState(false);
+  // The updater log is secondary detail — collapsed until the user asks for it.
+  const [logOpen, setLogOpen] = useState(false);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
   const rebuildLogEndRef = useRef<HTMLDivElement>(null);
   const updateUnavailable = updates?.rebuild?.can_rebuild === false;
@@ -915,6 +1082,7 @@ export function Plugins() {
     setUpdateMsg(null);
     setRebuildLog([]);
     setShowRebuildLog(true);
+    setLogOpen(false);
     let polling = true;
     const pollLogs = async () => {
       while (polling) {
@@ -955,6 +1123,7 @@ export function Plugins() {
   const rebuild = async () => {
     setRebuilding(true);
     setShowRebuildLog(true);
+    setLogOpen(false);
     setUpdateMsg(null);
     // Docker keeps the old app answering health until replacement; local
     // mode restarts the backend process in place.
@@ -1184,7 +1353,7 @@ export function Plugins() {
         {(updates?.plugins ?? []).length > 0 && (
           <div className="mt-2 font-mono text-[11px] text-ink-muted">
             Plugin updates: {(updates?.plugins ?? []).map((p) => p.name ?? p.id).join(', ')} — the
-            Update button above pulls these too, or use each card below.
+            Update button above pulls these too.
           </div>
         )}
         {updates?.rebuild_required && (
@@ -1252,25 +1421,40 @@ export function Plugins() {
                       );
                     })}
                   </ol>
-                  <h4 className="mt-5 text-[15px] font-semibold text-white">Updater log</h4>
-                  <div className="mt-2 max-h-72 overflow-y-auto rounded-lg border border-white/10 bg-[#0b1020] p-4 font-mono text-[13px] leading-relaxed text-[#c9d1d9]">
-                    {rebuildLog.length === 0 ? (
-                      <p className="text-[#8b93a5]">
-                        {applying
-                          ? 'waiting for git pull output…'
-                          : isLocal
-                            ? 'waiting for the app to restart…'
-                            : 'waiting for build output…'}
-                      </p>
-                    ) : (
-                      rebuildLog.map((l, i) => (
-                        <div key={i} className="break-words">
-                          {l}
-                        </div>
-                      ))
-                    )}
-                    <div ref={rebuildLogEndRef} />
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLogOpen((open) => !open)}
+                    aria-expanded={logOpen}
+                    className="mt-5 flex w-full items-center justify-between gap-2 rounded-lg px-1 py-1 text-left text-[15px] font-semibold text-white hover:text-[#c9d1d9]"
+                  >
+                    <span>Updater log</span>
+                    <span
+                      aria-hidden="true"
+                      className={`shrink-0 text-xs text-[#8b93a5] transition-transform ${logOpen ? 'rotate-90' : ''}`}
+                    >
+                      ▶
+                    </span>
+                  </button>
+                  {logOpen && (
+                    <div className="mt-2 max-h-72 overflow-y-auto rounded-lg border border-white/10 bg-[#0b1020] p-4 font-mono text-[13px] leading-relaxed text-[#c9d1d9]">
+                      {rebuildLog.length === 0 ? (
+                        <p className="text-[#8b93a5]">
+                          {applying
+                            ? 'waiting for git pull output…'
+                            : isLocal
+                              ? 'waiting for the app to restart…'
+                              : 'waiting for build output…'}
+                        </p>
+                      ) : (
+                        rebuildLog.map((l, i) => (
+                          <div key={i} className="break-words">
+                            {l}
+                          </div>
+                        ))
+                      )}
+                      <div ref={rebuildLogEndRef} />
+                    </div>
+                  )}
                   <p className="mt-3 text-[14px] text-[#8b93a5]">{statusText}</p>
                 </div>
                 <div className="flex justify-end px-5 py-3">
@@ -1350,22 +1534,6 @@ export function Plugins() {
                     {updates?.install_mode?.mode === 'docker' && (
                       <GhostButton disabled={busy !== null} onClick={() => void openVolumes(p.id)}>
                         {volOpen === p.id ? 'Hide volumes' : 'Volumes'}
-                      </GhostButton>
-                    )}
-                    {inst.has_update && (
-                      <GhostButton
-                        disabled={busy !== null}
-                        onClick={() =>
-                          void runAction(p.id, async (api) => {
-                            const r = await api.apiPost<{ ok: boolean; message?: string }>(
-                              `/plugins/${p.id}/update`,
-                              {},
-                            );
-                            return r.message ?? (r.ok ? 'Updated.' : 'Update failed.');
-                          })
-                        }
-                      >
-                        {busy === p.id ? 'Updating…' : 'Update'}
                       </GhostButton>
                     )}
                     <GhostButton

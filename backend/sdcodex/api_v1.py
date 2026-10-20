@@ -91,6 +91,7 @@ def _user_json(u: User) -> dict:
         "isAdmin": bool(u.is_admin),
         "authProvider": u.auth_provider,
         "avatar": bool(u.avatar),
+        "theme": u.theme or "",
     }
 
 
@@ -98,6 +99,16 @@ def _profile_json(u: User) -> dict:
     out = _user_json(u)
     out["avatarData"] = u.avatar or ""
     return out
+
+
+def _clean_theme(value) -> str | None:
+    """Theme slugs are CSS-class safe; anything else is rejected."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) > 64 or not all(ch.isalnum() or ch in "-_" for ch in text):
+        return None
+    return text
 
 
 def _require_user():
@@ -144,6 +155,7 @@ def auth_bootstrap():
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
     display = (data.get("displayName") or "").strip() or username
+    theme = _clean_theme(data.get("theme"))
     if not username:
         return jsonify({"error": "username required"}), 400
     if len(password) < 8:
@@ -160,6 +172,7 @@ def auth_bootstrap():
             auth_provider="local",
             is_admin=True,
             is_active=True,
+            theme=theme or None,
         )
         db.session.add(user)
         try:
@@ -224,6 +237,11 @@ def put_profile():
         if len(avatar) > 300_000:
             return jsonify({"error": "avatar too large"}), 400
         user.avatar = avatar
+    if "theme" in data:
+        theme = _clean_theme(data.get("theme"))
+        if theme is None:
+            return jsonify({"error": "invalid theme"}), 400
+        user.theme = theme or None
     db.session.commit()
     return jsonify({"ok": True, "user": _profile_json(user)})
 
@@ -369,6 +387,72 @@ def downloads_status():
     from .download_manager import download_manager
 
     return jsonify(download_manager.get_status())
+
+
+def _download_key(data):
+    try:
+        return int(data.get("modelId")), int(data.get("versionId"))
+    except (TypeError, ValueError):
+        return None
+
+
+@api_v1.post("/downloads/pause")
+def downloads_pause():
+    """Park one download (queued or running) without losing its definition."""
+    user, err = _require_user()
+    if err:
+        return err
+    key = _download_key(request.get_json(force=True, silent=True) or {})
+    if key is None:
+        return jsonify({"error": "modelId and versionId must be integers"}), 400
+    from .download_manager import download_manager
+
+    ok, msg = download_manager.pause_task(*key)
+    return jsonify({"ok": ok, "message": msg}), (200 if ok else 404)
+
+
+@api_v1.post("/downloads/start")
+def downloads_start():
+    """Resume/start a download. `force` bypasses the parallel limit."""
+    user, err = _require_user()
+    if err:
+        return err
+    data = request.get_json(force=True, silent=True) or {}
+    key = _download_key(data)
+    if key is None:
+        return jsonify({"error": "modelId and versionId must be integers"}), 400
+    from .download_manager import download_manager
+
+    force = data.get("force", True) is not False
+    ok, msg, _task = download_manager.start_task(
+        key[0], key[1], api_key=user.api_key or None, force=force
+    )
+    return jsonify({"ok": ok, "message": msg}), (200 if ok else 404)
+
+
+@api_v1.post("/downloads/pause-all")
+def downloads_pause_all():
+    user, err = _require_user()
+    if err:
+        return err
+    from .download_manager import download_manager
+
+    stopped = download_manager.pause_all()
+    return jsonify({"ok": True, "paused": stopped})
+
+
+@api_v1.post("/downloads/start-all")
+def downloads_start_all():
+    user, err = _require_user()
+    if err:
+        return err
+    data = request.get_json(force=True, silent=True) or {}
+    from .download_manager import download_manager
+
+    started = download_manager.start_all(
+        api_key=user.api_key or None, force=data.get("force", True) is not False
+    )
+    return jsonify({"ok": True, "started": started})
 
 
 @api_v1.post("/downloads/cancel")
@@ -1352,6 +1436,123 @@ _MISSING_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"/>
 <p>Ship <code>pages/{name}.html</code> in the plugin repo to fill this slot.</p></body></html>"""
 
 
+# --- plugin theme bridge -------------------------------------------------
+# Plugin pages are standalone documents (their own <head>, Tailwind Play CDN,
+# hardcoded Stitch palette). They cannot inherit the core's CSS variables, so
+# the core injects this bridge before </head>: it paints the page from the
+# palette the app mirrors into localStorage (`sdcodex.theme.payload.v1`) and
+# repaints on the `sdcodex:theme` message the plugin iframe receives.
+_THEME_BRIDGE = """<script id="sdcodex-theme-bridge">
+(function () {
+  var KEY = 'sdcodex.theme.payload.v1';
+  // Plugin pages name their Tailwind colour tokens after the Stitch design
+  // system; order matters (a prefix must come before its own extensions).
+  var TOKENS = [
+    ['surface', '--c-bg'],
+    ['surface-container', '--c-obsidian'],
+    ['surface-container-low', '--c-bg-low'],
+    ['surface-container-lowest', '--c-bg-lowest'],
+    ['surface-container-high', '--c-bg-high'],
+    ['surface-container-highest', '--c-bg-highest'],
+    ['slate-surface', '--c-bg-high'],
+    ['background', '--c-bg'],
+    ['primary', '--c-primary'],
+    ['secondary', '--c-secondary'],
+    ['tertiary', '--c-tertiary'],
+    ['on-surface', '--c-ink'],
+    ['on-surface-variant', '--c-ink-muted'],
+    ['outline', '--c-ink-faint'],
+    ['outline-variant', '--c-bg-highest'],
+    ['badge-checkpoint', '--c-primary'],
+    ['badge-sdxl', '--c-secondary'],
+    ['badge-lora', '--c-tertiary'],
+    ['badge-flux', '--c-secondary']
+  ];
+  var PROPS = ['bg', 'text', 'border', 'from', 'via', 'to', 'ring', 'fill',
+               'stroke', 'divide', 'placeholder', 'shadow'];
+  var PROP_CSS = {
+    bg: 'background-color', text: 'color', border: 'border-color',
+    from: '--tw-gradient-from', via: '--tw-gradient-via', to: '--tw-gradient-to',
+    ring: '--tw-ring-color', fill: 'fill', stroke: 'stroke',
+    divide: 'border-color', placeholder: 'color', shadow: '--tw-shadow-color'
+  };
+  function rules() {
+    var out = [];
+    TOKENS.forEach(function (pair) {
+      var token = pair[0], v = pair[1];
+      PROPS.forEach(function (prop) {
+        // [class*="bg-surface-container-low"] catches hover:/md:/opacity
+        // variants of the same token without listing them.
+        out.push('[class*="' + prop + '-' + token + '"]{' +
+                 PROP_CSS[prop] + ':rgb(var(' + v + '))!important}');
+      });
+    });
+    // Hardcoded near-black inputs / code panes in the shipped pages.
+    out.push('[class*="bg-[#070a10]"]{background-color:rgb(var(--c-bg-lowest))!important}');
+    out.push('[class*="bg-[#0a0e17]"]{background-color:rgb(var(--c-bg-lowest))!important}');
+    // White headings become theme ink so light themes stay readable.
+    out.push('[class*="text-white"]{color:rgb(var(--c-ink))!important}');
+    out.push('.font-display{font-family:var(--sd-font-display)!important}');
+    out.push('.font-body{font-family:var(--sd-font-body)!important}');
+    return out.join('\\n');
+  }
+  function apply(theme) {
+    if (!theme || !theme.vars) return;
+    var root = document.documentElement;
+    Object.keys(theme.vars).forEach(function (k) {
+      root.style.setProperty(k, theme.vars[k]);
+    });
+    if (theme.fontDisplay) root.style.setProperty('--sd-font-display', theme.fontDisplay);
+    if (theme.fontBody) root.style.setProperty('--sd-font-body', theme.fontBody);
+    root.style.colorScheme = theme.mode === 'light' ? 'light' : 'dark';
+    root.setAttribute('data-sd-theme', theme.slug || '');
+    root.setAttribute('data-sd-mode', theme.mode === 'light' ? 'light' : 'dark');
+    root.classList.toggle('sd-light', theme.mode === 'light');
+    var style = document.getElementById('sdcodex-theme-style');
+    if (!style) {
+      style = document.createElement('style');
+      style.id = 'sdcodex-theme-style';
+    }
+    style.textContent = rules();
+    // Keep the override last so it wins against Tailwind's generated sheet.
+    document.head.appendChild(style);
+  }
+  function stored() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+  var theme = stored();
+  if (theme) apply(theme);
+  document.addEventListener('DOMContentLoaded', function () {
+    var t = theme || stored();
+    if (t) apply(t);
+    try { window.parent.postMessage({ type: 'sdcodex:theme-ready' }, window.location.origin); }
+    catch (e) { /* standalone */ }
+  });
+  window.addEventListener('message', function (e) {
+    if (e.origin !== window.location.origin) return;
+    var d = e.data || {};
+    if (d.type === 'sdcodex:theme' && d.theme) { theme = d.theme; apply(theme); }
+  });
+  window.addEventListener('storage', function (e) {
+    if (e.key === KEY) { theme = stored(); if (theme) apply(theme); }
+  });
+})();
+</script>"""
+
+
+def _inject_theme_bridge(html: str) -> str:
+    """Inject the theme bridge into a plugin page (before </head> when seen)."""
+    if 'sdcodex-theme-bridge' in html:
+        return html
+    idx = html.lower().rfind('</head>')
+    if idx == -1:
+        return _THEME_BRIDGE + html
+    return html[:idx] + _THEME_BRIDGE + html[idx:]
+
+
 def _plugin_page_file(plugin_id: str, name: str) -> str | None:
     from . import updater as updater_mod
 
@@ -1383,7 +1584,7 @@ def plugin_page(plugin_id: str, name: str):
         )
         return Response(html, content_type="text/html")
     with open(cand, encoding="utf-8") as f:
-        resp = Response(f.read(), content_type="text/html")
+        resp = Response(_inject_theme_bridge(f.read()), content_type="text/html")
     # Plugin pages iterate fast — never let browsers cache them.
     resp.headers["Cache-Control"] = "no-store, max-age=0"
     return resp
@@ -1406,7 +1607,7 @@ def plugin_settings_page(plugin_id: str, tab: str):
         )
         return Response(html, content_type="text/html")
     with open(cand, encoding="utf-8") as f:
-        resp = Response(f.read(), content_type="text/html")
+        resp = Response(_inject_theme_bridge(f.read()), content_type="text/html")
     resp.headers["Cache-Control"] = "no-store, max-age=0"
     return resp
 

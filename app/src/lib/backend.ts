@@ -109,7 +109,7 @@ export async function apiDelete<T>(path: string): Promise<T> {
 /** Mirror local credentials into the backend (creates the same User row + cookie). */
 export async function mirrorAuth(
   kind: 'bootstrap' | 'login',
-  creds: { username: string; displayName?: string; password: string },
+  creds: { username: string; displayName?: string; password: string; theme?: string },
 ): Promise<void> {
   await apiPost(`/auth/${kind}`, creds);
 }
