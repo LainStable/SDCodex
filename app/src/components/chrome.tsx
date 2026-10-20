@@ -176,9 +176,11 @@ export function Sidebar({
                         : 'text-ink-muted hover:bg-white/5'
                     }`}
                   >
-                    <span className="material-symbols-outlined !text-[16px] text-ink-faint">
-                      {source.id === 'media' ? 'folder' : 'cloud'}
-                    </span>
+                    <FanIcon
+                      icon={source.id === 'media' ? 'folder' : 'cloud'}
+                      name={source.label}
+                      className="!text-[16px] text-ink-faint shrink-0"
+                    />
                     {!collapsed && <span className="truncate">{source.label}</span>}
                   </button>
                 ))}

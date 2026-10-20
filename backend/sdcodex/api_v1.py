@@ -1509,15 +1509,32 @@ _THEME_BRIDGE = """<script id="sdcodex-theme-bridge">
              'border-color: rgba(255, 255, 255, 0.2) !important;' +
              'background-color: rgba(255, 255, 255, 0.05) !important;' +
              '}');
-    // GhostButton style matching Screenshot 1
-    out.push('button.btn-secondary, .btn-ghost, button[class*="border-outline-variant"] {' +
+    // GhostButton style matching Screenshot 1 and Settings model path buttons
+    out.push('button.btn-secondary, .btn-ghost, button[class*="border-outline-variant"], .warning-actions .btn-secondary, #info-panel .btn, #info-panel button, #info-panel .caption-this-btn {' +
              'border-color: rgba(255, 255, 255, 0.15) !important;' +
              'color: rgb(var(--c-ink-muted)) !important;' +
              'background-color: transparent !important;' +
+             'border-radius: 4px !important;' +
              '}');
-    out.push('button.btn-secondary:hover, .btn-ghost:hover, button[class*="border-outline-variant"]:hover {' +
-             'background-color: rgba(255, 255, 255, 0.05) !important;' +
+    out.push('button.btn-secondary:hover:not(:disabled), .btn-ghost:hover:not(:disabled), button[class*="border-outline-variant"]:hover:not(:disabled), .warning-actions .btn-secondary:hover:not(:disabled), #info-panel .btn:hover:not(:disabled), #info-panel button:hover:not(:disabled), #info-panel .caption-this-btn:hover:not(:disabled) {' +
+             'background-color: rgba(255, 255, 255, 0.08) !important;' +
+             'border-color: rgba(255, 255, 255, 0.25) !important;' +
              'color: #ffffff !important;' +
+             '}');
+    out.push('button.btn-primary, .btn-primary, .warning-actions .btn-primary {' +
+             'border-color: rgba(var(--c-primary), 0.5) !important;' +
+             'background-color: rgba(var(--c-primary), 0.2) !important;' +
+             'color: #ffffff !important;' +
+             'border-radius: 4px !important;' +
+             '}');
+    out.push('button.btn-primary:hover:not(:disabled), .btn-primary:hover:not(:disabled), .warning-actions .btn-primary:hover:not(:disabled) {' +
+             'background-color: rgba(var(--c-primary), 0.3) !important;' +
+             '}');
+    out.push('#info-panel, aside.info-panel, #gallery-wrapper.viewer-open #info-panel {' +
+             'background-color: rgb(var(--c-obsidian)) !important;' +
+             'border-color: rgba(255, 255, 255, 0.1) !important;' +
+             'color: rgb(var(--c-ink)) !important;' +
+             'border-radius: 12px !important;' +
              '}');
     // Hardcoded near-black inputs / code panes in the shipped pages.
     out.push('[class*="bg-[#070a10]"]{background-color:rgb(var(--c-bg-lowest))!important}');
