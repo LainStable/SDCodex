@@ -51,6 +51,7 @@ class DownloadManager:
             cls._instance.running = False
             cls._instance.lock = threading.Lock()
             cls._instance.workers = 0
+            cls._instance._worker_threads = []
             cls._instance.scan_worker_on = False
         return cls._instance
 
@@ -99,9 +100,14 @@ class DownloadManager:
         """Top up download worker threads to the configured parallelism."""
         limit = self.max_workers()
         with self.lock:
+            if not hasattr(self, '_worker_threads'):
+                self._worker_threads = []
+            self._worker_threads = [t for t in self._worker_threads if t.is_alive()]
+            self.workers = len(self._worker_threads)
             while self.workers < limit:
                 self.workers += 1
-                thread = threading.Thread(target=self._worker, daemon=True)
+                thread = threading.Thread(target=self._worker_wrapper, daemon=True)
+                self._worker_threads.append(thread)
                 thread.start()
 
     def ensure_scan_worker(self):
@@ -264,6 +270,11 @@ class DownloadManager:
         return False, "Task not found (it may have finished)."
 
     def get_status(self):
+        try:
+            if not self.queue.empty():
+                self.ensure_workers()
+        except Exception:
+            pass
         with self.lock:
             active = list(self.active_tasks)
             recent_history = list(self.history[-5:])
@@ -555,6 +566,15 @@ class DownloadManager:
                 self._park(task)
             else:
                 self._finish(task)
+
+    def _worker_wrapper(self):
+        try:
+            self._worker()
+        finally:
+            with self.lock:
+                if hasattr(self, '_worker_threads'):
+                    self._worker_threads = [t for t in self._worker_threads if t.is_alive()]
+                    self.workers = len(self._worker_threads)
 
     def _worker(self):
         print("DownloadManager worker started")

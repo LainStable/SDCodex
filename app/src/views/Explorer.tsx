@@ -9,7 +9,7 @@ import {
   type CivitaiModel,
   type ExplorerQuery,
 } from '../lib/civitai';
-import { getDirColors, targetDirFor } from '../lib/settings';
+import { getDirColors } from '../lib/settings';
 import type { AssistantSearchParams } from '../lib/assistant';
 import { accentColor } from '../lib/categories';
 import { Stars, TypeBadge } from '../components/ui';
@@ -417,38 +417,29 @@ export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchT
                     </h2>
                   </div>
                 </button>
-                <div className="p-3 pt-1.5">
-                  <div className="flex items-center justify-between font-mono text-[11px] text-ink-muted">
+                <div className="flex items-center gap-2 p-3 pt-1.5">
+                  <div className="flex min-w-0 flex-1 items-center gap-2 font-mono text-[11px] text-ink-muted">
                     <Stars rating={m.stats?.rating ?? 0} />
                     <span>{formatCount(m.stats?.downloadCount ?? 0)} DL</span>
-                    <span className="truncate text-ink-faint">@{m.creator?.username ?? '—'}</span>
                   </div>
-                  <div className="mt-1 truncate font-mono text-[10px] text-ink-faint">
-                    {targetDirFor(m.type, v?.baseModel ?? query.baseModels[0] ?? 'All')}
-                  </div>
-                  <button
-                    type="button"
-                    disabled={queued || owned || !v}
-                    onClick={() =>
-                      v &&
-                      onQueue({
-                        id: `civitai-${m.id}-${v.id}`,
-                        name: m.name,
-                        detail: `${m.type} · ${v.baseModel}`,
-                        downloadUrl: v.downloadUrl,
-                        modelId: m.id,
-                        versionId: v.id,
-                        baseModel: v.baseModel,
-                      })
-                    }
-                    className={`mt-2 w-full rounded border py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.06em] ${
-                      queued || owned
-                        ? 'border-status-active/40 bg-status-active/10 text-status-active'
-                        : 'border-primary/50 bg-primary/20 text-white hover:bg-primary/30 disabled:opacity-50'
-                    }`}
-                  >
-                    {queued ? '✓ Queued' : owned ? '✓ Installed' : '+ Download queue'}
-                  </button>
+                  {v && (
+                    <GhostButton
+                      disabled={queued || owned}
+                      onClick={() =>
+                        onQueue({
+                          id: `civitai-${m.id}-${v.id}`,
+                          name: m.name,
+                          detail: `${m.type} · ${v.baseModel}`,
+                          downloadUrl: v.downloadUrl,
+                          modelId: m.id,
+                          versionId: v.id,
+                          baseModel: v.baseModel,
+                        })
+                      }
+                    >
+                      {queued ? '✓ Queued' : owned ? '✓ Installed' : '⬇ Download'}
+                    </GhostButton>
+                  )}
                 </div>
               </article>
             );

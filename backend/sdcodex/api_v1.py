@@ -1481,12 +1481,44 @@ _THEME_BRIDGE = """<script id="sdcodex-theme-bridge">
     TOKENS.forEach(function (pair) {
       var token = pair[0], v = pair[1];
       PROPS.forEach(function (prop) {
-        // [class*="bg-surface-container-low"] catches hover:/md:/opacity
-        // variants of the same token without listing them.
-        out.push('[class*="' + prop + '-' + token + '"]{' +
+        // Word-scoped exact match: e.g. "bg-surface-container-low"
+        out.push('[class~="' + prop + '-' + token + '"]{' +
+                 PROP_CSS[prop] + ':rgb(var(' + v + '))!important}');
+        // Tailwind opacity variant: e.g. "bg-surface-container-low/30"
+        out.push('[class^="' + prop + '-' + token + '/"], [class*=" ' + prop + '-' + token + '/"]{' +
+                 PROP_CSS[prop] + ':rgb(var(' + v + '))!important}');
+        // Pseudo-classes hover: and focus:
+        out.push('[class*="hover\\:' + prop + '-' + token + '"]:hover{' +
+                 PROP_CSS[prop] + ':rgb(var(' + v + '))!important}');
+        out.push('[class*="focus\\:' + prop + '-' + token + '"]:focus{' +
                  PROP_CSS[prop] + ':rgb(var(' + v + '))!important}');
       });
     });
+    // Baseline styling for inputs, selects, textareas matching Screenshot 3
+    out.push('input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]), select, textarea {' +
+             'background-color: rgb(var(--c-bg-lowest)) !important;' +
+             'border-color: rgba(255, 255, 255, 0.1) !important;' +
+             'color: rgb(var(--c-ink)) !important;' +
+             '}');
+    out.push('input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):focus, select:focus, textarea:focus {' +
+             'border-color: rgb(var(--c-primary)) !important;' +
+             'outline: none !important;' +
+             '}');
+    // Checkbox and radio buttons: neutral borders, subtle styling
+    out.push('input[type="checkbox"], input[type="radio"] {' +
+             'border-color: rgba(255, 255, 255, 0.2) !important;' +
+             'background-color: rgba(255, 255, 255, 0.05) !important;' +
+             '}');
+    // GhostButton style matching Screenshot 1
+    out.push('button.btn-secondary, .btn-ghost, button[class*="border-outline-variant"] {' +
+             'border-color: rgba(255, 255, 255, 0.15) !important;' +
+             'color: rgb(var(--c-ink-muted)) !important;' +
+             'background-color: transparent !important;' +
+             '}');
+    out.push('button.btn-secondary:hover, .btn-ghost:hover, button[class*="border-outline-variant"]:hover {' +
+             'background-color: rgba(255, 255, 255, 0.05) !important;' +
+             'color: #ffffff !important;' +
+             '}');
     // Hardcoded near-black inputs / code panes in the shipped pages.
     out.push('[class*="bg-[#070a10]"]{background-color:rgb(var(--c-bg-lowest))!important}');
     out.push('[class*="bg-[#0a0e17]"]{background-color:rgb(var(--c-bg-lowest))!important}');
@@ -1501,7 +1533,22 @@ _THEME_BRIDGE = """<script id="sdcodex-theme-bridge">
     var root = document.documentElement;
     Object.keys(theme.vars).forEach(function (k) {
       root.style.setProperty(k, theme.vars[k]);
+      if (k.indexOf('--c-') === 0) {
+        root.style.setProperty('--' + k.slice(4), 'rgb(' + theme.vars[k] + ')');
+      }
     });
+    // Standard variables for non-Tailwind plugins like Gallery
+    var bgVal = theme.vars['--c-bg'] || theme.vars.bg || '15 19 28';
+    var cardVal = theme.vars['--c-obsidian'] || theme.vars.card || '28 31 41';
+    var inkVal = theme.vars['--c-ink'] || theme.vars.ink || '223 226 239';
+    var inkMutedVal = theme.vars['--c-ink-muted'] || theme.vars.inkMuted || '199 196 215';
+    var primaryVal = theme.vars['--c-primary'] || theme.vars.primary || '99 102 241';
+    root.style.setProperty('--bg', 'rgb(' + bgVal + ')');
+    root.style.setProperty('--card-bg', 'rgb(' + cardVal + ')');
+    root.style.setProperty('--text', 'rgb(' + inkVal + ')');
+    root.style.setProperty('--text-secondary', 'rgb(' + inkMutedVal + ')');
+    root.style.setProperty('--border', 'rgba(255, 255, 255, 0.1)');
+    root.style.setProperty('--primary', 'rgb(' + primaryVal + ')');
     if (theme.fontDisplay) root.style.setProperty('--sd-font-display', theme.fontDisplay);
     if (theme.fontBody) root.style.setProperty('--sd-font-body', theme.fontBody);
     root.style.colorScheme = theme.mode === 'light' ? 'light' : 'dark';

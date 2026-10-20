@@ -1,27 +1,11 @@
 import { useEffect, useRef } from 'react';
 import type { InstalledPlugin } from '../lib/plugins';
-import { THEME_CHANGED_EVENT, loadTheme } from '../lib/themes';
+import { THEME_CHANGED_EVENT, loadTheme, themePayload } from '../lib/themes';
 
 /** Read the palette the core currently has applied to <html> so the embedded
     plugin page can mirror it (iframes do not inherit CSS custom properties). */
 function readAppTheme() {
-  const root = document.documentElement;
-  const cs = getComputedStyle(root);
-  const channels = (name: string) => cs.getPropertyValue(name).trim();
-  return {
-    slug: loadTheme(),
-    mode: root.style.colorScheme === 'light' ? 'light' : 'dark',
-    vars: {
-      bg: channels('--c-bg'),
-      card: channels('--c-obsidian'),
-      raised: channels('--c-bg-high'),
-      ink: channels('--c-ink'),
-      inkMuted: channels('--c-ink-muted'),
-      inkFaint: channels('--c-ink-faint'),
-      primary: channels('--c-primary'),
-      secondary: channels('--c-secondary'),
-    },
-  };
+  return themePayload(loadTheme());
 }
 
 /** A plugin space: sidebar swaps to the plugin's nav, main area embeds the

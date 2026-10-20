@@ -67,6 +67,36 @@ export function Sidebar({
   const activePlugin =
     space.kind === 'plugin' ? plugins.find((p) => p.id === space.id) : undefined;
   const currentPage = pluginPage ?? activePlugin?.nav_items[0]?.page ?? null;
+
+  const [gallerySources, setGallerySources] = useState<Array<{ id: string; label: string }>>([]);
+  const [activeGallerySource, setActiveGallerySource] = useState<string>('media');
+
+  useEffect(() => {
+    if (activePlugin?.id !== 'gallery') return;
+    let live = true;
+    fetch('/gallery/api/folderframe.config.json')
+      .then((r) => r.json())
+      .then((data) => {
+        if (!live || !Array.isArray(data?.sources)) return;
+        setGallerySources(data.sources.map((s: { id: string; label: string }) => ({ id: s.id, label: s.label })));
+        if (data.defaults?.source) setActiveGallerySource(data.defaults.source);
+      })
+      .catch(() => {});
+    const onMsg = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return;
+      if (e.data?.type === 'sdcodex:gallery-sources') {
+        if (Array.isArray(e.data.sources)) {
+          setGallerySources(e.data.sources.map((s: { id: string; label: string }) => ({ id: s.id, label: s.label })));
+        }
+        if (e.data.activeSourceId) setActiveGallerySource(e.data.activeSourceId);
+      }
+    };
+    window.addEventListener('message', onMsg);
+    return () => {
+      live = false;
+      window.removeEventListener('message', onMsg);
+    };
+  }, [activePlugin?.id]);
   return (
     <>
       {/* Fixed menu + spacer: the nav floats over the page, the spacer keeps
@@ -135,7 +165,7 @@ export function Sidebar({
               {activePlugin.name}
               {activePlugin.version ? ` · v${activePlugin.version}` : ''}
             </div>}
-            {activePlugin.nav_items.length > (collapsed ? 0 : 1) && activePlugin.nav_items.map((item) => (
+            {activePlugin.nav_items.length > 0 && activePlugin.nav_items.map((item) => (
               <button
                 key={item.page}
                 type="button"
@@ -153,6 +183,43 @@ export function Sidebar({
                   : <>{item.icon ? <FanIcon icon={item.icon} name={item.label} className="!text-[16px]" /> : null}<span>{item.label}</span></>}
               </button>
             ))}
+            {activePlugin.id === 'gallery' && gallerySources.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-white/[0.06]">
+                {!collapsed && (
+                  <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+                    Sources
+                  </div>
+                )}
+                {gallerySources.map((source) => (
+                  <button
+                    key={source.id}
+                    type="button"
+                    onClick={() => {
+                      setActiveGallerySource(source.id);
+                      const iframes = document.querySelectorAll('iframe');
+                      iframes.forEach((f) => {
+                        f.contentWindow?.postMessage(
+                          { type: 'sdcodex:set-source', sourceId: source.id },
+                          window.location.origin,
+                        );
+                      });
+                    }}
+                    title={collapsed ? source.label : undefined}
+                    aria-label={collapsed ? source.label : undefined}
+                    className={`flex w-full items-center ${collapsed ? 'justify-center px-1' : 'gap-2 px-3'} rounded py-1.5 text-left text-xs ${
+                      activeGallerySource === source.id
+                        ? 'bg-primary/15 text-white ring-1 ring-inset ring-primary/40'
+                        : 'text-ink-muted hover:bg-white/5'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined !text-[16px] text-ink-faint">
+                      {source.id === 'media' ? 'folder' : 'cloud'}
+                    </span>
+                    {!collapsed && <span className="truncate">{source.label}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
           </>
         ) : (
           NAV.map((item) => (
