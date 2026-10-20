@@ -1273,7 +1273,7 @@ export function Plugins() {
                   </div>
                   <p className="mt-3 text-[14px] text-[#8b93a5]">{statusText}</p>
                 </div>
-                <div className="flex justify-end border-t border-white/10 px-5 py-3">
+                <div className="flex justify-end px-5 py-3">
                   <button
                     type="button"
                     onClick={() => setShowRebuildLog(false)}
