@@ -244,7 +244,8 @@ def get_settings():
         {
             "dirs": {k: v for k, v in rows.items() if k.startswith("dir_")},
             "colors": {k[6:]: v for k, v in rows.items() if k.startswith("color_")},
-            "civitaiApiKey": user.api_key or rows.get("civitai_api_key", ""),
+            "civitaiApiKey": user.api_key
+            or (rows.get("civitai_api_key", "") if user.is_admin else ""),
             "apiMirror": rows.get("api_mirror", "civitai.com") or "civitai.com",
             "organizeByBase": rows.get("organize_by_base", "0") == "1",
             "maxParallel": max(1, min(16, max_parallel)),
