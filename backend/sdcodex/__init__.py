@@ -121,7 +121,9 @@ def create_app(db_path: str | None = None) -> Flask:
         response.headers.setdefault(
             "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
         )
-        if request.path.startswith(("/api/auth", "/api/profile", "/api/mcp")):
+        if request.path.startswith(
+            ("/api/auth", "/api/profile", "/api/mcp", "/api/settings", "/api/oidc")
+        ):
             response.headers.setdefault("Cache-Control", "no-store")
         return response
 

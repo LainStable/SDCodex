@@ -74,12 +74,16 @@ if __name__ == "__main__":
             # thread pool.
             from waitress import serve
 
+            try:
+                threads = max(4, min(64, int(os.environ.get("SDCODEX_THREADS", "8"))))
+            except (TypeError, ValueError):
+                threads = 8
             print(f"Serving with waitress on http://{host}:{port}", flush=True)
             serve(
                 app,
                 host=host,
                 port=port,
-                threads=int(os.environ.get("SDCODEX_THREADS", "8")),
+                threads=threads,
                 channel_timeout=600,
                 ident="SDCodex",
             )

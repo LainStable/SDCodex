@@ -12,6 +12,7 @@ Slim port of OldCode plugin_manager.py flows, adapted to the new layout:
 """
 
 import codecs
+import functools
 import json
 import logging
 import os
@@ -52,6 +53,24 @@ def _cached(key: str, ttl: float, producer):
 
 _REPO_PART_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98})$")
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+
+# `git pull`/clone in the same working tree cannot run concurrently: the loser
+# hits index.lock and can leave a half-updated plugin. Serialize these
+# operations instead of letting two admin clicks race.
+_OP_LOCK = threading.Lock()
+
+
+def _serialized(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not _OP_LOCK.acquire(blocking=False):
+            return False, "Another update or install is already running."
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _OP_LOCK.release()
+
+    return wrapper
 
 
 def root_dir() -> str:
@@ -287,6 +306,7 @@ def check_core() -> dict:
     }
 
 
+@_serialized
 def update_core() -> tuple[bool, str]:
     root = root_dir()
     _update_log("Core update requested", reset=True)
@@ -496,6 +516,7 @@ def check_plugin_updates() -> list:
     return _cached("plugin_updates", 60, _check)
 
 
+@_serialized
 def update_plugin(plugin_id: str) -> tuple[bool, str]:
     target = plugin_path(plugin_id)
     if not target or not os.path.isdir(os.path.join(target, ".git")):
@@ -581,6 +602,7 @@ def _merge_requirements(root: str, plugin_id: str, plugin_req: str) -> None:
         logger.error("Writing plugin-requirements.txt: %s", e)
 
 
+@_serialized
 def install_plugin(
     repo_url: str,
     volume_paths: dict | None = None,
@@ -669,6 +691,7 @@ def install_plugin(
     return True, {"id": plugin_id, "name": manifest.get("name", plugin_id), "volumes": needed}
 
 
+@_serialized
 def uninstall_plugin(plugin_id: str, install_mode: str | None = None) -> tuple[bool, str]:
     target = plugin_path(plugin_id)
     if not target or not os.path.isdir(target):
