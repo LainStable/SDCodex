@@ -108,7 +108,7 @@ export function Sidebar({
       <aside
         className={`fixed inset-y-0 left-0 z-30 hidden h-dvh flex-col border-r border-white/[0.06] bg-obsidian-bg/95 backdrop-blur transition-[width] duration-200 md:flex ${collapsed ? 'w-16' : 'w-60'}`}
       >
-        <div className={`shrink-0 ${collapsed ? 'p-2 pb-0' : 'px-3 pb-0 pt-3'}`}>
+        <div className={`shrink-0 ${collapsed ? 'p-2' : 'px-3 pt-3 pb-1'}`}>
           <div
             className={`flex items-center ${collapsed ? 'justify-center' : ''}`}
             title={collapsed ? 'SDCodex' : undefined}
@@ -119,44 +119,8 @@ export function Sidebar({
               <img src="/codex.svg" alt="SDCodex" className="h-24 w-full object-fill" />
             )}
           </div>
-      {(hasUpdate || updates.newPluginAvailable || !collapsed) && (
-        <div className={`mt-1 flex flex-wrap items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint ${collapsed ? 'justify-center' : ''}`}>
-          {!collapsed && (hasUpdate ? (
-            <button
-              type="button"
-              onClick={onGoPlugins}
-              title={
-                updates.core
-                  ? 'Core update available — open Plugin Hub to update'
-                  : 'Plugin updates available — open Plugin Hub'
-              }
-              className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
-                updates.core
-                  ? 'border-status-warning/50 bg-status-warning/15 text-[#fcd34d] hover:bg-status-warning/25'
-                  : 'border-secondary/50 bg-secondary/15 text-[#22d3ee] hover:bg-secondary/25'
-              }`}
-            >
-              {updates.core ? '⟳' : '⬢'} v{version}
-            </button>
-          ) : (
-            <span className="rounded border border-white/20 bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em] text-white">
-              v{version}
-            </span>
-          ))}
-          {updates.newPluginAvailable && (
-            <button
-              type="button"
-              onClick={onGoPlugins}
-              title="A new plugin is available to install — open Plugin Hub"
-              className="rounded border border-status-warning/50 bg-status-warning/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-[#fcd34d] hover:bg-status-warning/25"
-            >
-              NEW
-            </button>
-          )}
-          </div>
-      )}
         </div>
-        {/* Only the nav scrolls, so the brand stays on screen with long menus. */}
+        {/* Only the nav scrolls, so the brand and footer stay on screen with long menus. */}
         <div className={`min-h-0 flex-1 overflow-y-auto ${collapsed ? 'p-2' : 'p-4 pt-2'}`}>
       <nav className="space-y-1 text-sm">
         {activePlugin ? (
@@ -264,13 +228,95 @@ export function Sidebar({
           )))
         }
       </nav>
-      {!collapsed && <div className="mt-6 border-t border-white/[0.06] pt-3 font-mono text-[10px] leading-relaxed text-ink-faint">
-        Storage
-        <div className="mt-1 h-1.5 overflow-hidden rounded-sm bg-white/10">
-          <div className="h-full w-[37%] rounded-sm bg-gradient-to-r from-primary to-secondary" />
         </div>
-        <div className="mt-1">742 GB of 2 TB</div>
-      </div>}
+        <div className={`shrink-0 border-t border-white/[0.06] ${collapsed ? 'p-2' : 'p-3'}`}>
+          {!collapsed ? (
+            <div className="space-y-2.5">
+              <div className="font-mono text-[10px] leading-relaxed text-ink-faint">
+                <div className="flex items-center justify-between">
+                  <span>Storage</span>
+                  <span className="text-ink-muted">742 GB of 2 TB</span>
+                </div>
+                <div className="mt-1 h-1.5 overflow-hidden rounded-sm bg-white/10">
+                  <div className="h-full w-[37%] rounded-sm bg-gradient-to-r from-primary to-secondary" />
+                </div>
+              </div>
+              {(hasUpdate || updates.newPluginAvailable || !collapsed) && (
+                <div className="flex flex-wrap items-center justify-between gap-1.5 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+                  {hasUpdate ? (
+                    <button
+                      type="button"
+                      onClick={onGoPlugins}
+                      title={
+                        updates.core
+                          ? 'Core update available — open Plugin Hub to update'
+                          : 'Plugin updates available — open Plugin Hub'
+                      }
+                      className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
+                        updates.core
+                          ? 'border-status-warning/50 bg-status-warning/15 text-[#fcd34d] hover:bg-status-warning/25'
+                          : 'border-secondary/50 bg-secondary/15 text-[#22d3ee] hover:bg-secondary/25'
+                      }`}
+                    >
+                      {updates.core ? '⟳' : '⬢'} v{version}
+                    </button>
+                  ) : (
+                    <span className="rounded border border-white/20 bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em] text-white">
+                      v{version}
+                    </span>
+                  )}
+                  {updates.newPluginAvailable && (
+                    <button
+                      type="button"
+                      onClick={onGoPlugins}
+                      title="A new plugin is available to install — open Plugin Hub"
+                      className="rounded border border-status-warning/50 bg-status-warning/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-[#fcd34d] hover:bg-status-warning/25"
+                    >
+                      NEW
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-2">
+              <div className="h-1 w-8 overflow-hidden rounded-sm bg-white/10" title="Storage: 742 GB of 2 TB">
+                <div className="h-full w-[37%] rounded-sm bg-gradient-to-r from-primary to-secondary" />
+              </div>
+              {(hasUpdate || updates.newPluginAvailable) && (
+                <div className="flex flex-col items-center gap-1 font-mono text-[10px]">
+                  {hasUpdate && (
+                    <button
+                      type="button"
+                      onClick={onGoPlugins}
+                      title={
+                        updates.core
+                          ? 'Core update available — open Plugin Hub to update'
+                          : 'Plugin updates available — open Plugin Hub'
+                      }
+                      className={`rounded border px-1 py-0.5 font-mono text-[9px] font-semibold ${
+                        updates.core
+                          ? 'border-status-warning/50 bg-status-warning/15 text-[#fcd34d]'
+                          : 'border-secondary/50 bg-secondary/15 text-[#22d3ee]'
+                      }`}
+                    >
+                      {updates.core ? '⟳' : '⬢'}
+                    </button>
+                  )}
+                  {updates.newPluginAvailable && (
+                    <button
+                      type="button"
+                      onClick={onGoPlugins}
+                      title="A new plugin is available to install"
+                      className="rounded border border-status-warning/50 bg-status-warning/15 px-1 py-0.5 font-mono text-[9px] font-semibold text-[#fcd34d]"
+                    >
+                      +
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </aside>
     </>
