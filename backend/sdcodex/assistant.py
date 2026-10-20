@@ -64,9 +64,14 @@ def assistant_settings() -> dict:
 
 def save_assistant_settings(data: dict, *, clear_key: bool = False) -> dict:
     if "baseUrl" in data:
-        _set_setting("assistant_base_url", str(data.get("baseUrl") or "").strip().rstrip("/"))
+        base = str(data.get("baseUrl") or "").strip().rstrip("/")
+        # Only HTTP(S) endpoints; anything else (file://, gopher://) is not a
+        # chat-completions server and should never be contacted.
+        if base and not base.lower().startswith(("http://", "https://")):
+            base = ""
+        _set_setting("assistant_base_url", base[:512])
     if "model" in data:
-        _set_setting("assistant_model", str(data.get("model") or "").strip())
+        _set_setting("assistant_model", str(data.get("model") or "").strip()[:200])
     if clear_key:
         _set_setting("assistant_api_key", "")
     elif "apiKey" in data and str(data.get("apiKey") or "").strip():
@@ -493,7 +498,9 @@ def _run_plugin_task(args: dict, *, cookie: str, confirmed: bool) -> dict:
     for key, value in values.items():
         placeholder = "{%s}" % key
         if placeholder in path:
-            path = path.replace(placeholder, value)
+            # Encode: a parameter must not be able to inject `/`, `?` or `&`
+            # into the plugin route and reach an unintended handler.
+            path = path.replace(placeholder, requests.utils.quote(value, safe=""))
         elif action["method"] == "GET":
             query[key] = value
         else:

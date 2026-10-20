@@ -61,6 +61,12 @@ def fetch_discovery(issuer: str):
         return cached["doc"]
     if not key.startswith("https://") and not key.startswith("http://"):
         raise ValueError("issuer URL must be http(s)")
+    if key.startswith("http://"):
+        from urllib.parse import urlparse
+
+        host = (urlparse(key).hostname or "").lower()
+        if host not in ("localhost", "127.0.0.1", "::1"):
+            raise ValueError("issuer URL must use HTTPS (HTTP is only allowed for localhost testing)")
     last_err = None
     for url in _well_known_urls(issuer):
         try:
@@ -135,6 +141,11 @@ def build_authorization_url(config: OidcConfig, redirect_url: str = "/"):
         nonce = _b64url(secrets.token_bytes(16))
         verifier, challenge = generate_pkce()
         _prune_state()
+        # Public endpoint: cap the store so repeated hits cannot grow memory
+        # without bound. Drop the oldest entries, keeping in-flight logins.
+        if len(STATE_STORE) > 2000:
+            for stale in sorted(STATE_STORE, key=lambda k: STATE_STORE[k]["expires_at"])[:1000]:
+                STATE_STORE.pop(stale, None)
         STATE_STORE[state] = {
             "config_id": config.id,
             "code_verifier": verifier,
@@ -204,11 +215,40 @@ def handle_callback(code: str, state: str):
             return {"success": False, "error": f"Token exchange failed: {token_resp.text[:200]}"}
         tokens = token_resp.json()
 
-        # Decode ID token payload (base64url JWT). Basic validation only — matches
-        # Dockhand's comment that production should use a JWT library.
+        # Decode ID token payload (base64url JWT). The token arrives directly
+        # from the configured token endpoint over HTTPS; signature verification
+        # would require a JWKS dependency, so validate the claims we can here
+        # (issuer, audience, nonce, expiry) before trusting it.
         claims = {}
-        if tokens.get("id_token"):
-            claims = _decode_jwt_payload(tokens["id_token"])
+        if not tokens.get("id_token"):
+            return {"success": False, "error": "Provider did not return an ID token"}
+        claims = _decode_jwt_payload(tokens["id_token"])
+        if not claims:
+            return {"success": False, "error": "Invalid ID token"}
+
+        expected_issuer = (discovery.get("issuer") or config.issuer_url or "").rstrip("/")
+        token_issuer = str(claims.get("iss") or "").rstrip("/")
+        if expected_issuer and token_issuer and token_issuer != expected_issuer:
+            return {"success": False, "error": "Invalid token issuer"}
+
+        audience = claims.get("aud")
+        audiences = audience if isinstance(audience, list) else [audience]
+        if config.client_id and audiences and config.client_id not in [str(a) for a in audiences]:
+            return {"success": False, "error": "Invalid token audience"}
+
+        now = time.time()
+        try:
+            if claims.get("exp") is not None and float(claims["exp"]) < now - 60:
+                return {"success": False, "error": "ID token has expired"}
+            if claims.get("nbf") is not None and float(claims["nbf"]) > now + 60:
+                return {"success": False, "error": "ID token is not valid yet"}
+        except (TypeError, ValueError):
+            return {"success": False, "error": "Invalid token timestamps"}
+
+        # Nonce is mandatory: without it a token from another flow could be
+        # replayed into this callback.
+        if not claims.get("nonce") or claims.get("nonce") != state_data["nonce"]:
+            return {"success": False, "error": "Invalid nonce"}
 
         # Enrich with userinfo when available.
         userinfo_ep = discovery.get("userinfo_endpoint")
@@ -224,20 +264,26 @@ def handle_callback(code: str, state: str):
             except requests.RequestException:
                 pass
 
-        # Nonce check.
-        if claims.get("nonce") and claims.get("nonce") != state_data["nonce"]:
-            return {"success": False, "error": "Invalid nonce"}
-
         username = claims.get(config.username_claim) or claims.get("preferred_username") or claims.get("sub")
         email = claims.get(config.email_claim) or claims.get("email")
         display_name = claims.get(config.display_name_claim) or claims.get("name")
+        username = str(username or "").strip()[:128]
         if not username:
             return {"success": False, "error": "Username claim not found in token"}
+        if any(ch in username for ch in "\r\n\x00"):
+            return {"success": False, "error": "Username claim contains invalid characters"}
 
         should_be_admin = _claim_matches(claims, config.admin_claim, config.admin_value)
 
         provider = f"oidc:{config.name}"
         user = User.query.filter_by(username=username).first()
+        if user is not None and user.auth_provider != provider:
+            # Never let an IdP claim a username that belongs to a local (or
+            # different-provider) account: that would hand over the account.
+            return {
+                "success": False,
+                "error": "That username is already used by a different sign-in method",
+            }
         if not user:
             user = User(
                 username=username,

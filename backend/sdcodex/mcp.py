@@ -118,6 +118,14 @@ def handle_body(body: bytes, cookie: str = "") -> tuple[bytes, int, bool]:
         )
 
     if isinstance(message, list):
+        # Bound a batch: JSON-RPC allows arrays, but an unbounded one lets a
+        # single request pin a worker thread for a long time.
+        if len(message) > 100:
+            return (
+                json.dumps(_error(None, -32600, "Batch too large")).encode(),
+                400,
+                True,
+            )
         responses = []
         for item in message:
             response = handle_message(item, cookie=cookie)

@@ -22,7 +22,13 @@ class Download(db.Model):
         self.files = json.dumps(files_dict)
 
     def get_files(self):
-        return json.loads(self.files) if self.files else {}
+        if not self.files:
+            return {}
+        try:
+            value = json.loads(self.files)
+        except (TypeError, ValueError):
+            return {}
+        return value if isinstance(value, dict) else {}
 
     @property
     def image_path(self):

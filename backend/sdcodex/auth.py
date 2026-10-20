@@ -40,6 +40,7 @@ SESSION_TIMEOUT_SECONDS = int(os.environ.get("SDCODEX_SESSION_TIMEOUT", "86400")
 # (Mirrors Dockhand's rate-limiter; resets on restart — acceptable for local use.)
 _MAX_ATTEMPTS = 5
 _WINDOW_SECONDS = 300
+_MAX_TRACKED_KEYS = 10_000
 _attempts = {}
 
 
@@ -86,6 +87,10 @@ def _now_ts() -> float:
 def rate_limited(key: str) -> bool:
     window_start = _now_ts() - _WINDOW_SECONDS
     attempts = [t for t in _attempts.get(key, []) if t > window_start]
+    if attempts:
+        _attempts[key] = attempts
+    else:
+        _attempts.pop(key, None)
     return len(attempts) >= _MAX_ATTEMPTS
 
 
@@ -93,9 +98,38 @@ def record_failed(key: str) -> None:
     key = (key or "").strip()
     if not key:
         return
+    if len(_attempts) >= _MAX_TRACKED_KEYS:
+        _prune_attempts()
     window_start = _now_ts() - _WINDOW_SECONDS
     _attempts.setdefault(key, []).append(_now_ts())
     _attempts[key] = [t for t in _attempts[key] if t > window_start]
+
+
+def _prune_attempts() -> None:
+    """Drop stale keys so a spray of usernames cannot grow memory forever."""
+    window_start = _now_ts() - _WINDOW_SECONDS
+    for key in [k for k, values in _attempts.items() if not any(t > window_start for t in values)]:
+        _attempts.pop(key, None)
+    if len(_attempts) >= _MAX_TRACKED_KEYS:
+        # Still saturated (active attack): keep the newest half.
+        keep = sorted(_attempts.items(), key=lambda item: max(item[1] or [0]))[-_MAX_TRACKED_KEYS // 2 :]
+        _attempts.clear()
+        _attempts.update(dict(keep))
+
+
+def login_key(username: str = "") -> str:
+    """Rate-limit key for the caller: client IP + attempted username.
+
+    ``X-Forwarded-For`` is only honored when ``SDCODEX_TRUST_PROXY=1``;
+    otherwise any client could spoof the header and dodge the limiter.
+    """
+    from flask import request
+
+    ip = ""
+    if (os.environ.get("SDCODEX_TRUST_PROXY") or "").strip() in ("1", "true", "yes"):
+        ip = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    ip = ip or request.remote_addr or "unknown"
+    return f"{ip}:{(username or '').strip().lower()[:128]}"
 
 
 def clear_failures(key: str) -> None:
@@ -153,6 +187,31 @@ def _generate_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+_last_session_prune = 0.0
+
+
+def prune_expired_sessions(force: bool = False) -> int:
+    """Delete expired session rows (keeps the table from growing forever)."""
+    global _last_session_prune
+    import time
+
+    now = time.time()
+    if not force and now - _last_session_prune < 3600:
+        return 0
+    _last_session_prune = now
+    try:
+        expired = Session.query.filter(Session.expires_at < datetime.utcnow()).all()
+        for row in expired:
+            db.session.delete(row)
+        if expired:
+            db.session.commit()
+        return len(expired)
+    except Exception:
+        db.session.rollback()
+        logger.warning("Session prune failed", exc_info=True)
+        return 0
+
+
 def cookie_secure_ctx() -> bool:
     """Whether to set Secure on the session cookie.
 
@@ -172,6 +231,7 @@ def cookie_secure_ctx() -> bool:
 
 def create_session(user_id: int, provider: str = "local") -> str:
     """Create a session row and return its token (caller sets the cookie)."""
+    prune_expired_sessions()
     token = _generate_token()
     timeout = session_timeout_seconds()
     expires_at = datetime.utcnow() + timedelta(seconds=timeout)

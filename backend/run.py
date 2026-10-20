@@ -64,7 +64,24 @@ if __name__ == "__main__":
     else:
         # 0.0.0.0 by default so reverse proxies (OIDC redirect URIs) can reach it.
         # Override with HOST=127.0.0.1 for local-only.
-        app.run(
-            host=os.environ.get("HOST", "0.0.0.0"),
-            port=int(os.environ.get("PORT", "5000")),
-        )
+        host = os.environ.get("HOST", "0.0.0.0")
+        port = int(os.environ.get("PORT", "5000"))
+        try:
+            # A production WSGI server. The Flask dev server is single-process
+            # and has no per-connection timeouts, which made long-running
+            # downloads and SSE streams fragile. Waitress keeps one process
+            # (the download/scan workers live in-process by design) with a
+            # thread pool.
+            from waitress import serve
+
+            print(f"Serving with waitress on http://{host}:{port}", flush=True)
+            serve(
+                app,
+                host=host,
+                port=port,
+                threads=int(os.environ.get("SDCODEX_THREADS", "8")),
+                channel_timeout=600,
+                ident="SDCodex",
+            )
+        except ImportError:
+            app.run(host=host, port=port)

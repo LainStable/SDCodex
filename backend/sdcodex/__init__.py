@@ -1,29 +1,133 @@
 """SDCodex backend package (Flask + SQLAlchemy, SQLite)."""
 
 import os
+import secrets
+import sqlite3
 
-from flask import Flask
+from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
-
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool
 
 db = SQLAlchemy()
 
+# Register the SQLite pragma listener once per process (create_app can be
+# called more than once by tests).
+_PRAGMAS_INSTALLED = False
+
+
+def _database_path(db_path: str | None) -> str:
+    default_db = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "data", "sdcodex.db"
+    )
+    if db_path:
+        return os.path.abspath(db_path)
+    configured = (os.environ.get("DATABASE_URL") or "").strip()
+    if configured.startswith("sqlite:///"):
+        return os.path.abspath(configured[len("sqlite:///") :])
+    return os.path.abspath(default_db)
+
+
+def _secret_key(db_file: str) -> str:
+    """Stable secret from the environment, or a generated file beside the DB.
+
+    A hard-coded fallback would let anyone forge session cookies, so when
+    ``SECRET_KEY`` is unset we persist a random key with owner-only permissions.
+    """
+    configured = (os.environ.get("SECRET_KEY") or "").strip()
+    if configured:
+        return configured
+    path = (os.environ.get("SDCODEX_SECRET_FILE") or "").strip()
+    if not path:
+        path = os.path.join(os.path.dirname(db_file) or ".", ".secret_key")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            stored = handle.read().strip()
+        if stored:
+            return stored
+    except FileNotFoundError:
+        pass
+    except (OSError, UnicodeDecodeError):
+        return secrets.token_hex(32)
+    key = secrets.token_hex(32)
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(key)
+    except OSError:
+        # Read-only install: a per-process key still beats a public constant.
+        pass
+    return key
+
+
+def _install_sqlite_pragmas() -> None:
+    global _PRAGMAS_INSTALLED
+    if _PRAGMAS_INSTALLED:
+        return
+    _PRAGMAS_INSTALLED = True
+
+    @event.listens_for(Engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, _connection_record):  # noqa: ANN001
+        if not isinstance(dbapi_connection, sqlite3.Connection):
+            return
+        cursor = dbapi_connection.cursor()
+        try:
+            # WAL keeps readers from blocking the background download/scan
+            # workers, and busy_timeout avoids the transient "database is
+            # locked" 500s under concurrent writes.
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=30000")
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.Error:
+            pass
+        finally:
+            cursor.close()
+
 
 def create_app(db_path: str | None = None) -> Flask:
     app = Flask(__name__)
-    app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY") or "dev-only-change-me"
-    default_db = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "sdcodex.db")
-    os.makedirs(os.path.dirname(os.path.abspath(default_db)), exist_ok=True)
+    db_file = _database_path(db_path)
+    os.makedirs(os.path.dirname(db_file), exist_ok=True)
+
+    app.config["SECRET_KEY"] = _secret_key(db_file)
+    # Bound request bodies so a malformed upload cannot exhaust memory. The
+    # GalleryDL backup restore accepts files up to 200 MB, so this stays above
+    # that; override with SDCODEX_MAX_UPLOAD_MB when needed.
+    try:
+        max_upload_mb = int(os.environ.get("SDCODEX_MAX_UPLOAD_MB", "256"))
+    except (TypeError, ValueError):
+        max_upload_mb = 256
+    app.config["MAX_CONTENT_LENGTH"] = max(1, max_upload_mb) * 1024 * 1024
     app.config["SQLALCHEMY_DATABASE_URI"] = (
-        os.environ.get("DATABASE_URL") or f"sqlite:///{os.path.abspath(db_path or default_db)}"
+        os.environ.get("DATABASE_URL") or f"sqlite:///{db_file}"
     )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
         "poolclass": NullPool,
+        "connect_args": {"timeout": 30, "check_same_thread": False},
     }
 
+    _install_sqlite_pragmas()
     db.init_app(app)
+
+    @app.after_request
+    def _security_headers(response):  # noqa: ANN001
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault(
+            "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
+        )
+        if request.path.startswith(("/api/auth", "/api/profile", "/api/mcp")):
+            response.headers.setdefault("Cache-Control", "no-store")
+        return response
+
+    @app.errorhandler(413)
+    def _too_large(_error):  # noqa: ANN001
+        return jsonify({"error": "request body too large"}), 413
 
     from . import models  # noqa: F401  (register tables)
     from .api_v1 import api_v1

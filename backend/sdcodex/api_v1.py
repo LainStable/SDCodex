@@ -1,13 +1,85 @@
 """JSON API for the React frontend. Mirrors OldCode routes.py semantics."""
 
 import os
+import re
+import threading
+from urllib.parse import urlencode, urljoin, urlparse
 
-from flask import Blueprint, jsonify, make_response, request
+import requests
+from flask import Blueprint, Response, jsonify, make_response, request
 
 from . import auth, db
 from .models import Download, OidcConfig, PluginRepo, Setting, User
 
 api_v1 = Blueprint("api_v1", __name__)
+
+# How long a remote image may be, and how much of it we will buffer.
+_MAX_IMAGE_BYTES = 25 * 1024 * 1024
+_CIVITAI_HOST_SUFFIXES = (".civitai.com", ".civitai.red")
+_CIVITAI_HOSTS = {"civitai.com", "civitai.red"}
+
+
+def _civitai_host_ok(host: str | None) -> bool:
+    host = (host or "").lower().rstrip(".")
+    return host in _CIVITAI_HOSTS or any(host.endswith(s) for s in _CIVITAI_HOST_SUFFIXES)
+
+
+def _civitai_get(url: str, headers: dict, *, timeout=(5, 30), max_redirects: int = 3):
+    """GET a Civitai URL without following redirects to arbitrary hosts.
+
+    The backend is often reachable only from the local network, so blind
+    redirect following turns an image proxy into an SSRF primitive. Validate
+    every hop before connecting.
+    """
+    current = url
+    for _ in range(max_redirects + 1):
+        parsed = urlparse(current)
+        if (
+            parsed.scheme != "https"
+            or not _civitai_host_ok(parsed.hostname)
+            or parsed.port not in (None, 443)
+            or parsed.username
+            or parsed.password
+        ):
+            raise ValueError("URL must be an HTTPS Civitai address")
+        response = requests.get(
+            current, headers=headers, timeout=timeout, stream=True, allow_redirects=False
+        )
+        if response.status_code in (301, 302, 303, 307, 308):
+            location = response.headers.get("Location") or ""
+            response.close()
+            if not location:
+                raise ValueError("Civitai returned an empty redirect")
+            current = urljoin(current, location)
+            continue
+        return response
+    raise ValueError("Too many redirects")
+
+
+def _read_capped(response, limit: int) -> bytes:
+    """Read a streamed response while enforcing an upper bound."""
+    body = bytearray()
+    for chunk in response.iter_content(chunk_size=128 * 1024):
+        if not chunk:
+            continue
+        body.extend(chunk)
+        if len(body) > limit:
+            raise ValueError("upstream response too large")
+    return bytes(body)
+
+
+_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+
+
+def _clean_env_value(value: str) -> str:
+    """Reject values that could inject extra .env / compose lines."""
+    value = (value or "").strip()
+    if any(ch in value for ch in "\r\n\x00"):
+        raise ValueError("value must not contain newlines")
+    if len(value) > 1024:
+        raise ValueError("value is too long")
+    return value
+
 
 
 def _user_json(u: User) -> dict:
@@ -59,11 +131,15 @@ def auth_status():
     )
 
 
+_BOOTSTRAP_LOCK = threading.Lock()
+
+
 @api_v1.post("/auth/bootstrap")
 def auth_bootstrap():
     """Create the first user (admin). Refused once any user exists."""
-    if User.query.count() > 0:
-        return jsonify({"error": "users already exist"}), 403
+    key = auth.login_key("__bootstrap__")
+    if auth.rate_limited(key):
+        return jsonify({"error": "too many attempts, try again later"}), 429
     data = request.get_json(force=True, silent=True) or {}
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
@@ -72,16 +148,27 @@ def auth_bootstrap():
         return jsonify({"error": "username required"}), 400
     if len(password) < 8:
         return jsonify({"error": "password must be at least 8 characters"}), 400
-    user = User(
-        username=username,
-        display_name=display,
-        password_hash=auth.hash_password(password),
-        auth_provider="local",
-        is_admin=True,
-        is_active=True,
-    )
-    db.session.add(user)
-    db.session.commit()
+    # Serialize the check + insert: two simultaneous first-run requests could
+    # otherwise both see an empty users table and create two admins.
+    with _BOOTSTRAP_LOCK:
+        if User.query.count() > 0:
+            return jsonify({"error": "users already exist"}), 403
+        user = User(
+            username=username,
+            display_name=display,
+            password_hash=auth.hash_password(password),
+            auth_provider="local",
+            is_admin=True,
+            is_active=True,
+        )
+        db.session.add(user)
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            auth.record_failed(key)
+            return jsonify({"error": "could not create the first user"}), 500
+    auth.clear_failures(key)
     token = auth.create_session(user.id, "local")
     resp = make_response(jsonify({"ok": True, "user": _user_json(user)}))
     auth.set_session_cookie(resp, token)
@@ -91,9 +178,14 @@ def auth_bootstrap():
 @api_v1.post("/auth/login")
 def auth_login():
     data = request.get_json(force=True, silent=True) or {}
+    key = auth.login_key(str(data.get("username") or ""))
+    if auth.rate_limited(key):
+        return jsonify({"error": "too many attempts, try again later"}), 429
     result = auth.authenticate_local(data.get("username"), data.get("password"))
     if not result.get("success"):
+        auth.record_failed(key)
         return jsonify({"error": result.get("error", "login failed")}), 401
+    auth.clear_failures(key)
     user = result["user"]
     token = auth.create_session(user.id, "local")
     resp = make_response(jsonify({"ok": True, "user": _user_json(user)}))
@@ -124,9 +216,9 @@ def put_profile():
         return err
     data = request.get_json(force=True, silent=True) or {}
     if "displayName" in data:
-        user.display_name = (data.get("displayName") or "").strip() or user.username
+        user.display_name = (data.get("displayName") or "").strip()[:128] or user.username
     if "email" in data:
-        user.email = (data.get("email") or "").strip()
+        user.email = (data.get("email") or "").strip()[:254]
     if "avatar" in data:
         avatar = data.get("avatar") or ""
         if len(avatar) > 300_000:
@@ -144,6 +236,10 @@ def get_settings():
     if err:
         return err
     rows = {s.key: (s.value or "") for s in Setting.query.all()}
+    try:
+        max_parallel = int(rows.get("max_parallel_downloads", "1") or 1)
+    except (TypeError, ValueError):
+        max_parallel = 1
     return jsonify(
         {
             "dirs": {k: v for k, v in rows.items() if k.startswith("dir_")},
@@ -151,7 +247,7 @@ def get_settings():
             "civitaiApiKey": user.api_key or rows.get("civitai_api_key", ""),
             "apiMirror": rows.get("api_mirror", "civitai.com") or "civitai.com",
             "organizeByBase": rows.get("organize_by_base", "0") == "1",
-            "maxParallel": int(rows.get("max_parallel_downloads", "1") or 1),
+            "maxParallel": max(1, min(16, max_parallel)),
         }
     )
 
@@ -162,29 +258,42 @@ def post_settings():
     if err:
         return err
     data = request.get_json(force=True, silent=True) or {}
+    # Per-user values are always allowed; instance-wide configuration is an
+    # admin action (otherwise any account could repoint model directories).
+    # Non-admins keep saving their own API key; global keys are ignored.
+    global_keys = ("dirs", "colors", "apiMirror", "maxParallel", "organizeByBase")
+    if not user.is_admin:
+        data = {k: v for k, v in data.items() if k not in global_keys}
     for key, value in (data.get("dirs") or {}).items():
-        if not key.startswith("dir_"):
+        if not isinstance(key, str) or not key.startswith("dir_") or len(key) > 64:
+            continue
+        if not isinstance(value, str):
             continue
         row = db.session.get(Setting, key)
         if row is None:
             row = Setting(key=key)
             db.session.add(row)
-        row.value = (value or "").strip()
+        row.value = value.strip()[:1024]
     for type_name, value in (data.get("colors") or {}).items():
-        key = f"color_{type_name}"
+        if not isinstance(type_name, str) or not isinstance(value, str):
+            continue
+        key = f"color_{type_name}"[:64]
         row = db.session.get(Setting, key)
         if row is None:
             row = Setting(key=key)
             db.session.add(row)
-        row.value = (value or "").strip()
+        row.value = value.strip()[:32]
     if "civitaiApiKey" in data:
         key = (data.get("civitaiApiKey") or "").strip()
         user.api_key = key  # per-user, mirrors OldCode
-        row = db.session.get(Setting, "civitai_api_key")
-        if row is None:
-            row = Setting(key="civitai_api_key")
-            db.session.add(row)
-        row.value = key
+        # The instance-wide fallback key is admin-owned. A normal account's key
+        # must not silently become the key every download uses.
+        if user.is_admin:
+            row = db.session.get(Setting, "civitai_api_key")
+            if row is None:
+                row = Setting(key="civitai_api_key")
+                db.session.add(row)
+            row.value = key
     if "maxParallel" in data:
         try:
             parallel = max(1, min(8, int(data.get("maxParallel") or 1)))
@@ -227,13 +336,16 @@ def add_download():
     if err:
         return err
     data = request.get_json(force=True, silent=True) or {}
-    if not data.get("modelId") or not data.get("versionId"):
-        return jsonify({"error": "modelId and versionId required"}), 400
+    try:
+        model_id = int(data.get("modelId"))
+        version_id = int(data.get("versionId"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "modelId and versionId must be integers"}), 400
     from .download_manager import download_manager
 
     task = download_manager.add_task(
-        model_id=data["modelId"],
-        version_id=data["versionId"],
+        model_id=model_id,
+        version_id=version_id,
         api_key=user.api_key or None,
     )
     return jsonify(
@@ -361,7 +473,7 @@ def library_set_cover(row_id: int):
     host = (parsed.hostname or "").lower()
     if (
         parsed.scheme != "https"
-        or not (host.endswith(".civitai.com") or host.endswith(".civitai.red"))
+        or not _civitai_host_ok(host)
         or parsed.username
         or parsed.password
     ):
@@ -400,11 +512,10 @@ def library_set_cover(row_id: int):
 
     temporary_path = None
     try:
-        with requests.get(image_url, headers=fetch_headers, stream=True, timeout=(5, 30)) as response:
-            response.raise_for_status()
-            final_host = (urlparse(response.url).hostname or "").lower()
-            if not (final_host.endswith(".civitai.com") or final_host.endswith(".civitai.red")):
-                return jsonify({"error": "Civitai image redirected to an unsupported host"}), 400
+        response = _civitai_get(image_url, fetch_headers)
+        try:
+            if response.status_code != 200:
+                return jsonify({"error": f"Civitai returned {response.status_code}"}), 502
             if not (response.headers.get("Content-Type") or "").lower().startswith("image/"):
                 return jsonify({"error": "Civitai did not return an image"}), 502
             existing_image = bool(image_path and os.path.isfile(image_path))
@@ -422,8 +533,12 @@ def library_set_cover(row_id: int):
                     if total > 20 * 1024 * 1024:
                         return jsonify({"error": "preview image exceeds 20 MB"}), 413
                     output.write(chunk)
+        finally:
+            response.close()
         os.replace(temporary_path, image_path)
         temporary_path = None
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     except requests.RequestException as exc:
         return jsonify({"error": f"image download failed: {exc}"}), 502
     except OSError as exc:
@@ -466,55 +581,85 @@ def serve_file():
         return jsonify({"error": "outside model directories"}), 403
     if not os.path.isfile(real):
         return jsonify({"error": "not found"}), 404
-    return send_file(real)
+    inline = {
+        ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp",
+        ".mp4", ".webm", ".mov", ".mkv",
+        ".safetensors", ".ckpt", ".pt", ".bin", ".json", ".txt",
+    }
+    # Anything else is downloaded rather than rendered: a stray .html file in
+    # a model folder must not become same-origin script.
+    return send_file(real, as_attachment=os.path.splitext(real)[1].lower() not in inline)
 
 
 @api_v1.get("/proxy/image")
 def proxy_image():
-    """Proxy an external image URL for download.
+    """Proxy a Civitai image URL for download.
 
-    Used by the frontend when browser CORS prevents direct fetch.
-    Authed only. Supports GET with ?url= parameter.
+    Used by the frontend when browser CORS prevents direct fetch. Authed only
+    and restricted to Civitai hosts so it cannot be used as an SSRF relay.
     """
-    import requests
-    from urllib.parse import urlparse
-
     user, err = _require_user()
     if err:
         return err
 
     image_url = request.args.get("url")
-    if not image_url or len(image_url) > 2048:
+    if not isinstance(image_url, str) or not image_url or len(image_url) > 2048:
         return jsonify({"error": "valid url required"}), 400
+    if not _civitai_host_ok(urlparse(image_url).hostname):
+        return jsonify({"error": "only Civitai image URLs are supported"}), 400
+
+    headers = {"User-Agent": "SDCodex/1.0 (+https://github.com/LainStable/SDCodex)"}
+    # Never forward a caller-supplied token to an arbitrary upstream; the
+    # server-held account key is the only credential this proxy needs.
+    if user.api_key:
+        headers["Authorization"] = f"Bearer {user.api_key}"
 
     try:
-        parsed = urlparse(image_url)
-        if not parsed.scheme or not parsed.netloc:
-            return jsonify({"error": "invalid url"}), 400
-        if parsed.scheme not in ("http", "https"):
-            return jsonify({"error": "http/https only"}), 400
+        upstream = _civitai_get(image_url, headers)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except requests.RequestException as exc:
+        return jsonify({"error": f"download failed: {exc}"}), 502
+
+    try:
+        if upstream.status_code != 200:
+            status_code = upstream.status_code
+            upstream.close()
+            return jsonify({"error": f"upstream returned {status_code}"}), min(599, max(400, status_code))
+        content_type = (upstream.headers.get("Content-Type") or "").lower()
+        if not content_type.startswith("image/"):
+            upstream.close()
+            return jsonify({"error": "upstream did not return an image"}), 502
+        declared = upstream.headers.get("Content-Length")
+        if declared:
+            try:
+                if int(declared) > _MAX_IMAGE_BYTES:
+                    upstream.close()
+                    return jsonify({"error": "image exceeds 25 MB"}), 413
+            except ValueError:
+                declared = None
     except Exception:
-        return jsonify({"error": "invalid url"}), 400
+        upstream.close()
+        raise
 
-    try:
-        headers = {"User-Agent": "SDCodex/1.0 (+https://github.com/LainStable/SDCodex)"}
-        authorization = (request.headers.get("Authorization") or "").strip()
-        if authorization.lower().startswith("bearer "):
-            headers["Authorization"] = authorization
-        elif user.api_key:
-            headers["Authorization"] = f"Bearer {user.api_key}"
+    def _generate():
+        total = 0
+        try:
+            for chunk in upstream.iter_content(chunk_size=64 * 1024):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > _MAX_IMAGE_BYTES:
+                    break
+                yield chunk
+        finally:
+            upstream.close()
 
-        with requests.get(image_url, headers=headers, stream=True, timeout=(5, 30)) as response:
-            if response.status_code != 200:
-                return jsonify({"error": f"upstream returned {response.status_code}"}), response.status_code
-            content_type = response.headers.get("Content-Type", "application/octet-stream")
-            return Response(
-                response.content,
-                status=200,
-                headers={"Content-Type": content_type},
-            )
-    except Exception as e:
-        return jsonify({"error": f"download failed: {e}"}), 502
+    response = Response(_generate(), status=200, content_type=content_type)
+    if declared:
+        response.headers["Content-Length"] = declared
+    response.headers["Cache-Control"] = "private, max-age=3600"
+    return response
 
 
 @api_v1.post("/scan")
@@ -1140,11 +1285,16 @@ def plugin_volumes_save(plugin_id: str):
     mf = updater_mod.read_manifest(base) or {"id": plugin_id}
     data = request.get_json(force=True, silent=True) or {}
     values = data.get("volumes") or {}
+    if not isinstance(values, dict):
+        return jsonify({"error": "volumes must be an object"}), 400
     resolved = {}
     for v in mf.get("volumes", []):
         if not isinstance(v, dict) or not v.get("env_var"):
             continue
-        val = (values.get(v["env_var"]) or v.get("host_path") or "").strip()
+        try:
+            val = _clean_env_value(values.get(v["env_var"]) or v.get("host_path") or "")
+        except ValueError as exc:
+            return jsonify({"error": f"{v['env_var']}: {exc}"}), 400
         if val:
             resolved[v["env_var"]] = val
     updater_mod.apply_volume_config({"id": mf.get("id", plugin_id), "volumes": mf.get("volumes", [])}, resolved)
@@ -1162,6 +1312,8 @@ def plugins_github_token():
 
     data = request.get_json(force=True, silent=True) or {}
     token = (data.get("token") or "").strip()
+    if token and not re.fullmatch(r"[A-Za-z0-9_-]{1,255}", token):
+        return jsonify({"error": "GitHub token contains invalid characters"}), 400
     try:
         row = db.session.get(Setting, "github_token")
         if row is None:
@@ -1273,6 +1425,8 @@ def civitai_proxy(subpath: str):
     user, err = _require_user()
     if err:
         return err
+    if any(part in ("..", ".") for part in subpath.replace("\\", "/").split("/")):
+        return jsonify({"error": "invalid path"}), 400
     mirror_row = db.session.get(Setting, "api_mirror")
     mirror = (mirror_row.value if mirror_row else "") or "civitai.com"
     if mirror not in ("civitai.com", "civitai.red"):
@@ -1286,17 +1440,25 @@ def civitai_proxy(subpath: str):
         headers["Authorization"] = authorization
     elif user.api_key:
         headers["Authorization"] = f"Bearer {user.api_key}"
+    url = f"https://{mirror}/api/v1/{subpath}"
+    if request.args:
+        url = f"{url}?{urlencode(dict(request.args), doseq=True)}"
     try:
-        resp = requests.get(
-            f"https://{mirror}/api/v1/{subpath}",
-            params=dict(request.args),
-            headers=headers,
-            timeout=30,
-        )
+        resp = _civitai_get(url, headers, timeout=(5, 30))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     except Exception as e:
         return jsonify({"error": f"upstream unreachable: {e}"}), 502
+    try:
+        body = _read_capped(resp, 50 * 1024 * 1024)
+        content_type = resp.headers.get("Content-Type", "application/json")
+        status = resp.status_code
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 502
+    finally:
+        resp.close()
     return (
-        resp.content,
-        resp.status_code,
-        {"Content-Type": resp.headers.get("Content-Type", "application/json")},
+        body,
+        status,
+        {"Content-Type": content_type},
     )

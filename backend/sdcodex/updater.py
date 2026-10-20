@@ -31,6 +31,28 @@ HUB_URL = os.environ.get(
     "https://raw.githubusercontent.com/LainStable/SDCodex-Plugin-Hub/main/plugins.json",
 )
 
+# Short-lived network caches: /api/plugins and /api/updates/check used to run
+# `git ls-remote` + a hub fetch on every request, stalling the UI when GitHub
+# was slow or offline.
+_NET_CACHE: dict = {}
+_NET_CACHE_LOCK = threading.Lock()
+
+
+def _cached(key: str, ttl: float, producer):
+    now = time.time()
+    with _NET_CACHE_LOCK:
+        hit = _NET_CACHE.get(key)
+        if hit and hit[0] > now:
+            return hit[1]
+    value = producer()
+    with _NET_CACHE_LOCK:
+        _NET_CACHE[key] = (now + ttl, value)
+    return value
+
+
+_REPO_PART_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98})$")
+_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+
 
 def root_dir() -> str:
     return os.environ.get("SDCODEX_ROOT") or os.path.abspath(
@@ -119,9 +141,9 @@ def remote_rev(repo_path_or_url: str) -> str:
             # HTTPS first (see _https_url): SSH remotes are unreachable in a
             # minimal image, which used to hide every available update.
             target = _https_github_remote(repo_path_or_url, remote) or remote
-            r = _git(["ls-remote", target, "HEAD"], cwd=repo_path_or_url)
+            r = _git(["ls-remote", target, "HEAD"], cwd=repo_path_or_url, timeout=20)
         else:
-            r = _git(["ls-remote", _https_url(repo_path_or_url), "HEAD"], cwd=root_dir())
+            r = _git(["ls-remote", _https_url(repo_path_or_url), "HEAD"], cwd=root_dir(), timeout=20)
         if r.returncode != 0:
             return ""
         return r.stdout.split()[0]
@@ -322,16 +344,37 @@ def update_core() -> tuple[bool, str]:
 # --------------------------------------------------------------- plugins ---
 
 def normalize_github_url(url: str) -> tuple[str, str]:
-    """Return (owner/repo short name, canonical https url)."""
-    u = (url or "").strip().rstrip("/").removesuffix(".git")
-    m = re.search(r"github\.com/([^/]+/[^/]+)", u)
-    if m:
-        short = m.group(1)
-        return short, f"https://github.com/{short}"
-    m = re.match(r"([^/]+/[^/]+)$", u)
-    if m:
-        return m.group(1), f"https://github.com/{m.group(1)}"
-    return u, u
+    """Return (owner/repo short name, canonical https url).
+
+    Only plain GitHub repositories are accepted. Anything containing shell
+    metacharacters, traversal segments or a non-GitHub transport is rejected so
+    a crafted install URL cannot become a git argument (`--upload-pack=…`) or
+    write outside the plugins directory.
+    """
+    value = (url or "").strip().rstrip("/")
+    match = re.match(
+        r"^(?:https?://)?(?:www\.)?github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?/?$",
+        value,
+        re.IGNORECASE,
+    )
+    if match:
+        owner, repo = match.group(1), match.group(2)
+    else:
+        match = re.fullmatch(r"([^/\s]+)/([^/\s]+?)(?:\.git)?", value)
+        if not match:
+            return "", ""
+        owner, repo = match.group(1), match.group(2)
+    if not _REPO_PART_RE.match(owner) or not _REPO_PART_RE.match(repo):
+        return "", ""
+    short = f"{owner}/{repo}"
+    return short, f"https://github.com/{short}"
+
+
+def safe_plugin_dirname(repo_name: str) -> str:
+    """Filesystem-safe plugin folder name (no traversal / leading dots)."""
+    name = re.sub(r"[^A-Za-z0-9._-]", "-", repo_name or "").strip(".-")
+    name = name.lstrip(".")
+    return (name[:100] or "plugin").lower()
 
 
 def read_manifest(path: str) -> dict | None:
@@ -437,16 +480,20 @@ def load_plugins(app) -> list:
 
 
 def check_plugin_updates() -> list:
-    """Compare each git-backed plugin against its remote HEAD."""
-    updates = []
-    for p in list_installed():
-        path = p["path"]
-        if not os.path.isdir(os.path.join(path, ".git")):
-            continue
-        remote = remote_rev(path)
-        if remote and p["local_sha"] and remote != p["local_sha"]:
-            updates.append({**p, "remote_sha": remote, "has_update": True})
-    return updates
+    """Compare each git-backed plugin against its remote HEAD (cached 60 s)."""
+
+    def _check():
+        updates = []
+        for p in list_installed():
+            path = p["path"]
+            if not os.path.isdir(os.path.join(path, ".git")):
+                continue
+            remote = remote_rev(path)
+            if remote and p["local_sha"] and remote != p["local_sha"]:
+                updates.append({**p, "remote_sha": remote, "has_update": True})
+        return updates
+
+    return _cached("plugin_updates", 60, _check)
 
 
 def update_plugin(plugin_id: str) -> tuple[bool, str]:
@@ -471,6 +518,7 @@ def update_plugin(plugin_id: str) -> tuple[bool, str]:
             r = _git(["pull", "--ff-only", remote] + ([branch] if branch else []), cwd=target)
         if r.returncode != 0:
             return False, (r.stderr or r.stdout).strip()[:500]
+        _NET_CACHE.pop("plugin_updates", None)
         return True, (r.stdout or "Already up to date.").strip()[:500]
     except Exception as e:
         return False, str(e)
@@ -540,8 +588,10 @@ def install_plugin(
 ) -> tuple[bool, str | dict]:
     """Clone a plugin, merge requirements, configure volumes. Returns manifest."""
     short, canonical = normalize_github_url(repo_url)
-    repo_name = short.split("/")[-1] if "/" in short else short
-    target = os.path.join(plugins_dir(), repo_name.lower())
+    if not short or not canonical:
+        return False, "Only GitHub repository URLs (owner/repo) are supported."
+    repo_name = short.split("/")[-1]
+    target = os.path.join(plugins_dir(), safe_plugin_dirname(repo_name))
     token = _github_token()
 
     if os.path.isdir(os.path.join(target, ".git")):
@@ -555,7 +605,9 @@ def install_plugin(
         # repos — a stale/invalid token must never break public clones.
         r = _git(["clone", canonical, target], cwd=root_dir())
         if r.returncode != 0 and token:
-            clone_url = f"https://x-access-token:{token}@github.com/{short}.git"
+            from urllib.parse import quote
+
+            clone_url = f"https://x-access-token:{quote(token, safe='')}@github.com/{short}.git"
             r = _git(["clone", clone_url, target], cwd=root_dir())
         if r.returncode != 0:
             r = _git(["clone", "-b", "master", canonical, target], cwd=root_dir())
@@ -613,6 +665,7 @@ def install_plugin(
     from . import rebuilder as rebuilder_mod
 
     rebuilder_mod.mark_rebuild(f"install {plugin_id}")
+    _NET_CACHE.pop("plugin_updates", None)
     return True, {"id": plugin_id, "name": manifest.get("name", plugin_id), "volumes": needed}
 
 
@@ -637,6 +690,7 @@ def uninstall_plugin(plugin_id: str, install_mode: str | None = None) -> tuple[b
         rebuilder_mod.mark_rebuild(f"uninstall {plugin_id}")
     except Exception as e:
         return False, str(e)
+    _NET_CACHE.pop("plugin_updates", None)
     # Drop its requirements block.
     req_file = os.path.join(root_dir(), "plugin-requirements.txt")
     if os.path.exists(req_file):
@@ -691,12 +745,23 @@ def apply_volume_config(manifest: dict, volume_values: dict) -> None:
     * Rewrites are idempotent per plugin (``# [id]`` tagged lines).
     """
     plugin_id = manifest.get("id", "plugin")
-    volumes = [v for v in manifest.get("volumes", []) if isinstance(v, dict) and v.get("env_var")]
+    volumes = []
+    for volume in manifest.get("volumes", []):
+        if not isinstance(volume, dict):
+            continue
+        env_var = str(volume.get("env_var") or "").strip()
+        container_path = str(volume.get("container_path") or "").strip()
+        if not _ENV_KEY_RE.match(env_var) or not container_path.startswith("/"):
+            logger.warning("Ignoring invalid volume entry for %s", plugin_id)
+            continue
+        if any(ch in container_path for ch in "\r\n"):
+            continue
+        volumes.append({**volume, "env_var": env_var, "container_path": container_path})
 
     env_updates = {}
     for v in volumes:
         host_path = ((volume_values or {}).get(v["env_var"]) or v.get("host_path") or "").strip()
-        if host_path:
+        if host_path and not any(ch in host_path for ch in "\r\n"):
             env_updates[v["env_var"]] = host_path
     if env_updates:
         update_env_file(env_updates)
@@ -771,7 +836,18 @@ def remove_env_keys(keys: list) -> None:
 
 
 def update_env_file(updates: dict) -> None:
-    if not updates:
+    clean = {}
+    for key, value in (updates or {}).items():
+        key = str(key).strip()
+        value = str(value or "").strip()
+        if not _ENV_KEY_RE.match(key):
+            logger.warning("Ignoring invalid env key %r", key[:80])
+            continue
+        if any(ch in value for ch in "\r\n\x00"):
+            logger.warning("Ignoring multi-line value for env key %s", key)
+            continue
+        clean[key] = value
+    if not clean:
         return
     path = os.path.join(root_dir(), ".env")
     lines: list = []
@@ -784,14 +860,14 @@ def update_env_file(updates: dict) -> None:
         if os.path.exists(example):
             with open(example, encoding="utf-8") as f:
                 lines = f.readlines()
-    keys = set(updates)
+    keys = set(clean)
     out = []
     for line in lines:
         s = line.strip()
         if s and not s.startswith("#") and "=" in s and s.split("=", 1)[0].strip() in keys:
             continue
         out.append(line)
-    for k, v in updates.items():
+    for k, v in clean.items():
         out.append(f"{k}={v}\n")
     with open(path, "w", encoding="utf-8") as f:
         f.writelines(out)
@@ -799,12 +875,16 @@ def update_env_file(updates: dict) -> None:
 
 def fetch_store_catalog() -> dict:
     """Fetch the hub catalog (plugins + core versions for update badges)."""
-    try:
-        r = requests.get(HUB_URL, timeout=15)
-        if r.ok:
-            data = r.json()
-            if isinstance(data, dict) and isinstance(data.get("plugins"), list):
-                return data
-    except Exception as e:
-        logger.warning("Store catalog fetch failed: %s", e)
-    return {"plugins": []}
+
+    def _fetch():
+        try:
+            r = requests.get(HUB_URL, timeout=10)
+            if r.ok:
+                data = r.json()
+                if isinstance(data, dict) and isinstance(data.get("plugins"), list):
+                    return data
+        except Exception as e:
+            logger.warning("Store catalog fetch failed: %s", e)
+        return {"plugins": []}
+
+    return _cached("store_catalog", 120, _fetch)
