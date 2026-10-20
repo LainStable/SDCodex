@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import threading
 import time
 from contextlib import contextmanager
 
@@ -109,36 +110,55 @@ def mcp_token_valid(token: str) -> bool:
 
 # -------------------------------------------------------- plugin tasks ---
 
+_PLUGIN_TASK_CACHE: dict = {"cookie": None, "ts": 0.0, "data": []}
+_PLUGIN_TASK_PROBE_LOCK = threading.Lock()
+
+
 def plugin_tasks(cookie: str = "") -> list[dict]:
-    """Running background tasks reported by installed plugins."""
+    """Running background tasks reported by installed plugins.
+
+    The floating panel polls every couple of seconds. Reuse a very short
+    cache and never stack probe cycles: if one plugin's status route hangs,
+    later polls get the previous snapshot instead of blocking another
+    waitress thread (a hung route used to exhaust the whole connection pool).
+    """
     from . import updater as updater_mod
 
-    tasks = []
-    with _plugin_session(cookie) as probe_cookie:
-        for plugin in updater_mod.list_installed():
-            meta = plugin.get("task_status") or {}
-            route = (meta.get("path") or "").strip()
-            if not route.startswith("/"):
-                continue
-            _, payload = _probe(route, probe_cookie)
-            if not isinstance(payload, dict) or not payload.get("active"):
-                continue
-            current = payload.get("current")
-            total = payload.get("total")
-            tasks.append(
-                {
-                    "pluginId": plugin["id"],
-                    "pluginName": meta.get("label") or plugin.get("name") or plugin["id"],
-                    "page": meta.get("page") or plugin.get("entry_page") or "",
-                    "state": str(payload.get("state") or "running"),
-                    "current": current if isinstance(current, int) else 0,
-                    "total": total if isinstance(total, int) else 0,
-                    "detail": str(payload.get("detail") or ""),
-                    "message": str(payload.get("message") or ""),
-                    "startedAt": payload.get("started_at") or 0,
-                }
-            )
-    return tasks
+    now = time.time()
+    if _PLUGIN_TASK_CACHE["cookie"] == cookie and now - _PLUGIN_TASK_CACHE["ts"] < 1.5:
+        return list(_PLUGIN_TASK_CACHE["data"])
+    if not _PLUGIN_TASK_PROBE_LOCK.acquire(blocking=False):
+        return list(_PLUGIN_TASK_CACHE["data"]) if _PLUGIN_TASK_CACHE["cookie"] == cookie else []
+    try:
+        tasks = []
+        with _plugin_session(cookie) as probe_cookie:
+            for plugin in updater_mod.list_installed():
+                meta = plugin.get("task_status") or {}
+                route = (meta.get("path") or "").strip()
+                if not route.startswith("/"):
+                    continue
+                _, payload = _probe(route, probe_cookie)
+                if not isinstance(payload, dict) or not payload.get("active"):
+                    continue
+                current = payload.get("current")
+                total = payload.get("total")
+                tasks.append(
+                    {
+                        "pluginId": plugin["id"],
+                        "pluginName": meta.get("label") or plugin.get("name") or plugin["id"],
+                        "page": meta.get("page") or plugin.get("entry_page") or "",
+                        "state": str(payload.get("state") or "running"),
+                        "current": current if isinstance(current, int) else 0,
+                        "total": total if isinstance(total, int) else 0,
+                        "detail": str(payload.get("detail") or ""),
+                        "message": str(payload.get("message") or ""),
+                        "startedAt": payload.get("started_at") or 0,
+                    }
+                )
+        _PLUGIN_TASK_CACHE.update(cookie=cookie, ts=time.time(), data=tasks)
+        return tasks
+    finally:
+        _PLUGIN_TASK_PROBE_LOCK.release()
 
 
 @contextmanager
