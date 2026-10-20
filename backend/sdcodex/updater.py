@@ -11,6 +11,7 @@ Slim port of OldCode plugin_manager.py flows, adapted to the new layout:
   (both git-ignored, so pulls never clobber them).
 """
 
+import base64
 import codecs
 import functools
 import json
@@ -31,6 +32,7 @@ HUB_URL = os.environ.get(
     "PLUGIN_HUB_URL",
     "https://raw.githubusercontent.com/LainStable/SDCodex-Plugin-Hub/main/plugins.json",
 )
+HUB_API_URL = os.environ.get("PLUGIN_HUB_API_URL", "").strip()
 
 # Short-lived network caches: /api/plugins and /api/updates/check used to run
 # `git ls-remote` + a hub fetch on every request, stalling the UI when GitHub
@@ -285,6 +287,56 @@ def _git_pull_with_progress(args: list[str], cwd: str, timeout: int = 300) -> su
 
 # ------------------------------------------------------------------ core ---
 
+def _hub_api_endpoint() -> str:
+    """GitHub contents API URL for the hub catalog, or "" for custom hubs."""
+    if HUB_API_URL:
+        return HUB_API_URL
+    prefix = "https://raw.githubusercontent.com/"
+    if not HUB_URL.startswith(prefix):
+        return ""
+    parts = HUB_URL[len(prefix) :].split("/", 3)
+    if len(parts) != 4 or not all(parts):
+        return ""
+    owner, repo, ref, path = parts
+    return f"https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={ref}"
+
+
+def _fetch_hub_catalog(timeout: int = 15) -> dict:
+    """Fetch the hub catalog, preferring the uncached GitHub contents API.
+
+    raw.githubusercontent.com serves a 5-minute CDN cache, so a freshly
+    published core version stayed invisible to the update checker (and the
+    toast/badge) until the cache expired. The contents API is immediate; raw
+    remains the fallback for self-hosted or offline setups.
+    """
+    api = _hub_api_endpoint()
+    if api:
+        headers = {"Accept": "application/vnd.github+json"}
+        token = _github_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        try:
+            r = requests.get(api, headers=headers, timeout=timeout)
+            if r.ok:
+                payload = r.json()
+                content = payload.get("content") if isinstance(payload, dict) else None
+                if payload.get("encoding") == "base64" and content:
+                    data = json.loads(base64.b64decode(content))
+                    if isinstance(data, dict) and isinstance(data.get("plugins"), list):
+                        return data
+        except Exception as e:
+            logger.warning("Hub API fetch failed: %s", e)
+    try:
+        r = requests.get(HUB_URL, timeout=timeout)
+        if r.ok:
+            data = r.json()
+            if isinstance(data, dict) and isinstance(data.get("plugins"), list):
+                return data
+    except Exception as e:
+        logger.warning("Store catalog fetch failed: %s", e)
+    return {}
+
+
 def check_core() -> dict:
     """Compare the local VERSION file against the hub's core version.
 
@@ -294,9 +346,8 @@ def check_core() -> dict:
     local = local_core_version()
     remote = ""
     try:
-        r = requests.get(HUB_URL, timeout=15)
-        if r.ok:
-            remote = ((r.json().get("core") or {}).get("version") or "").strip()
+        data = _fetch_hub_catalog()
+        remote = ((data.get("core") or {}).get("version") or "").strip()
     except Exception as e:
         logger.warning("Core update check failed: %s", e)
     return {
@@ -963,14 +1014,6 @@ def fetch_store_catalog() -> dict:
     """Fetch the hub catalog (plugins + core versions for update badges)."""
 
     def _fetch():
-        try:
-            r = requests.get(HUB_URL, timeout=10)
-            if r.ok:
-                data = r.json()
-                if isinstance(data, dict) and isinstance(data.get("plugins"), list):
-                    return data
-        except Exception as e:
-            logger.warning("Store catalog fetch failed: %s", e)
-        return {"plugins": []}
+        return _fetch_hub_catalog(timeout=10) or {"plugins": []}
 
     return _cached("store_catalog", 120, _fetch)
