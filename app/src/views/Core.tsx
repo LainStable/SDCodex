@@ -816,6 +816,7 @@ function ProgressBar() {
    the log underneath is actually doing. */
 const SELF_UPDATE_DOCKER_STEPS: Array<{ label: string; match: RegExp }> = [
   { label: 'Pulling code from GitHub', match: /Core update requested|Running git pull|^\s*\d{4}-.*\bgit:/im },
+  { label: 'Updating plugins', match: /Plugin updates:/ },
   { label: 'Building new image', match: /image build started|^\s*\d{4}-.*\bbuild:/im },
   { label: 'Resolving container config', match: /\b(binds|ports):/i },
   { label: 'Creating new container', match: /creating sibling|removed stale|sibling create/i },
@@ -827,6 +828,7 @@ const SELF_UPDATE_DOCKER_STEPS: Array<{ label: string; match: RegExp }> = [
 
 const SELF_UPDATE_LOCAL_STEPS: Array<{ label: string; match: RegExp }> = [
   { label: 'Pulling code from GitHub', match: /Core update requested|Running git pull|^.*\bgit:/i },
+  { label: 'Updating plugins', match: /Plugin updates:/ },
   { label: 'Restarting app', match: /local restart started|Restarting backend/i },
   { label: 'Waiting for app', match: /swap done|answers health/i },
 ];
@@ -929,13 +931,16 @@ export function Plugins() {
     const logPolling = pollLogs();
     try {
       const { apiPost } = await import('../lib/backend');
-      const r = await apiPost<{ ok: boolean; message?: string }>('/updates/core', {});
+      // Core + every installed plugin are pulled server-side; allow well past
+      // the default request ceiling when several remotes are slow.
+      const r = await apiPost<{ ok: boolean; message?: string }>('/updates/core', {}, 15 * 60_000);
       if (!r.ok) {
         setUpdateMsg(r.message ?? 'Update failed.');
         return;
       }
       setUpdateMsg(r.message ?? 'Updated.');
       await check();
+      await refreshInstalled();
     } catch (e) {
       setUpdateMsg(e instanceof Error ? e.message : 'Update failed');
       return;
@@ -1178,8 +1183,8 @@ export function Plugins() {
         )}
         {(updates?.plugins ?? []).length > 0 && (
           <div className="mt-2 font-mono text-[11px] text-ink-muted">
-            Plugin updates: {(updates?.plugins ?? []).map((p) => p.name ?? p.id).join(', ')} — use
-            the Update button on each card below.
+            Plugin updates: {(updates?.plugins ?? []).map((p) => p.name ?? p.id).join(', ')} — the
+            Update button above pulls these too, or use each card below.
           </div>
         )}
         {updates?.rebuild_required && (

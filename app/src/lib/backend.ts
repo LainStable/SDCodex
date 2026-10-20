@@ -57,8 +57,16 @@ export async function apiGet<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const res = await call(path, { method: 'POST', body: JSON.stringify(body ?? {}) });
+export async function apiPost<T>(
+  path: string,
+  body: unknown,
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+): Promise<T> {
+  const res = await call(path, {
+    method: 'POST',
+    body: JSON.stringify(body ?? {}),
+    signal: timeoutSignal(timeoutMs),
+  });
   if (!res.ok) {
     let detail = `backend ${res.status}`;
     try {

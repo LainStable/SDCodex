@@ -345,17 +345,33 @@ def update_core() -> tuple[bool, str]:
             _update_log(f"Git pull failed: {error}")
             return False, error
         out = (r.stdout or "Already up to date.").strip()[:500]
-        if "already up to date" in out.lower():
-            # Nothing moved — don't raise a spurious rebuild-required badge.
-            # (If the hub still shows a newer version, the git remote is
-            # behind the hub; fetch/mirror lag, not a local problem.)
-            _update_log("Git pull complete: already up to date")
-            return True, out
-        from . import rebuilder as rebuilder_mod
+        core_changed = "already up to date" not in out.lower()
+        _update_log(
+            "Git pull complete"
+            if core_changed
+            else "Git pull complete: core already up to date"
+        )
 
-        rebuilder_mod.mark_rebuild("core update")
-        _update_log("Git pull complete; preparing application rebuild/restart")
-        return True, out
+        # One Update click also refreshes every installed plugin, so the
+        # rebuild/restart that follows loads core + plugin changes together.
+        updated, failed, plugins_changed = update_installed_plugins()
+
+        summary = out
+        if plugins_changed:
+            summary += f" · {updated} plugin(s) updated"
+        if failed:
+            summary += f" · {len(failed)} plugin(s) skipped"
+
+        if core_changed or plugins_changed:
+            from . import rebuilder as rebuilder_mod
+
+            rebuilder_mod.mark_rebuild(
+                "core and plugin update" if plugins_changed else "core update"
+            )
+            _update_log("Git pull complete; preparing application rebuild/restart")
+        else:
+            _update_log("Everything already up to date; no rebuild required")
+        return True, summary
     except Exception as e:
         _update_log(f"Core update failed: {e}")
         return False, str(e)
@@ -518,6 +534,11 @@ def check_plugin_updates() -> list:
 
 @_serialized
 def update_plugin(plugin_id: str) -> tuple[bool, str]:
+    return _update_plugin_unlocked(plugin_id)
+
+
+def _update_plugin_unlocked(plugin_id: str) -> tuple[bool, str]:
+    """Pull one plugin; caller must already hold ``_OP_LOCK``."""
     target = plugin_path(plugin_id)
     if not target or not os.path.isdir(os.path.join(target, ".git")):
         return False, "Not a git checkout — reinstall the plugin."
@@ -543,6 +564,48 @@ def update_plugin(plugin_id: str) -> tuple[bool, str]:
         return True, (r.stdout or "Already up to date.").strip()[:500]
     except Exception as e:
         return False, str(e)
+
+
+def _log_first_line(text: str, limit: int = 180) -> str:
+    lines = (text or "").strip().splitlines()
+    return lines[0][:limit] if lines else ""
+
+
+def update_installed_plugins() -> tuple[int, list[str], bool]:
+    """Pull every installed git-backed plugin (caller holds ``_OP_LOCK``).
+
+    Returns ``(updated_count, failed_ids, changed)``. One plugin's local
+    changes or broken remote must never abort the others.
+    """
+    plugins = [
+        p for p in list_installed()
+        if os.path.isdir(os.path.join(p["path"], ".git"))
+    ]
+    _update_log(f"Plugin updates: checking {len(plugins)} installed plugin(s)")
+    updated = 0
+    failed: list[str] = []
+    changed = False
+    for plugin in plugins:
+        ok, output = _update_plugin_unlocked(plugin["id"])
+        if not ok:
+            failed.append(plugin["id"])
+            _update_log(
+                f"Plugin update skipped: {plugin['name']} ({plugin['id']}): "
+                f"{_log_first_line(output)}"
+            )
+            continue
+        if "already up to date" in output.lower():
+            _update_log(f"Plugin up to date: {plugin['name']}")
+        else:
+            updated += 1
+            changed = True
+            _update_log(f"Plugin updated: {plugin['name']} ({plugin['id']})")
+    _update_log(
+        f"Plugin updates complete: {updated} updated, "
+        f"{len(plugins)} checked, {len(failed)} skipped"
+    )
+    _NET_CACHE.pop("plugin_updates", None)
+    return updated, failed, changed
 
 
 def _github_token() -> str:
