@@ -84,7 +84,10 @@ if __name__ == "__main__":
                 host=host,
                 port=port,
                 threads=threads,
-                channel_timeout=600,
+                # A core+plugin update runs synchronously and can stay quiet
+                # for a while on slow remotes; keep the channel alive well past
+                # the client's own 30-minute ceiling.
+                channel_timeout=2400,
                 ident="SDCodex",
             )
         except ImportError:

@@ -933,7 +933,7 @@ export function Plugins() {
       const { apiPost } = await import('../lib/backend');
       // Core + every installed plugin are pulled server-side; allow well past
       // the default request ceiling when several remotes are slow.
-      const r = await apiPost<{ ok: boolean; message?: string }>('/updates/core', {}, 15 * 60_000);
+      const r = await apiPost<{ ok: boolean; message?: string }>('/updates/core', {}, 30 * 60_000);
       if (!r.ok) {
         setUpdateMsg(r.message ?? 'Update failed.');
         return;
