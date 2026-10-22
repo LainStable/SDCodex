@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   DangerButton,
-  FilterPills,
   GhostButton,
   PageHeader,
   PrimaryButton,
-  SearchInput,
   Stat,
 } from '../components/chrome';
 import { isPaused, setPaused, type QueueItem } from '../lib/queue';
@@ -1171,9 +1169,7 @@ function selfUpdateProgress(lines: string[], isLocal: boolean): {
 }
 
 export function Plugins() {
-  const [q, setQ] = useState('');  const [filter, setFilter] = useState<'all' | 'official'>('all');
   const [catalog, setCatalog] = useState<HubCatalog | null>(null);
-  const [live, setLive] = useState(false);
   const [installed, setInstalled] = useState<
     Record<string, { name?: string; version?: string; has_update?: boolean }>
   >({});
@@ -1354,11 +1350,8 @@ export function Plugins() {
     const refreshUpdates = () => void check();
     window.addEventListener('sdcodex:install-mode-changed', refreshUpdates);
     void (async () => {
-      const { catalog: c, live: ok } = await fetchCatalog();
-      if (on) {
-        setCatalog(c);
-        setLive(ok);
-      }
+      const { catalog: c } = await fetchCatalog();
+      if (on) setCatalog(c);
     })();
     void refreshInstalled();
     void check();
@@ -1423,124 +1416,52 @@ export function Plugins() {
   };
 
   const list = catalog?.plugins ?? [];
-  const shown = list.filter((p) => p.name.toLowerCase().includes(q.trim().toLowerCase()));
+  const core = catalog?.core;
+  const coreNeedsUpdate = Boolean(updates?.core?.has_update);
 
   return (
     <div>
-      <PageHeader
-        title="Plugin Hub"
-        subtitle="Install and manage application extensions."
-        meta={`${list.length} plugins · ${live ? 'live hub catalog' : 'hub unavailable'}${catalog?.core ? ` · core ${catalog.core.version}` : ''}`}
-      />
-      {catalog?.core && (
-        <div className="glass-l1 mt-4 flex flex-wrap items-center gap-3 rounded-lg p-4">
-          <div className="min-w-0 flex-1">
-            <div className="font-display text-base font-semibold">{catalog.core.name}</div>
-            <div className="mt-0.5 font-mono text-[11px] text-ink-muted">{catalog.core.description}</div>
+      <PageHeader title="Plugin Hub" subtitle="Install and manage application extensions." />
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <GhostButton disabled={checking} onClick={() => void check()}>
+          {checking ? 'Checking…' : 'Check now'}
+        </GhostButton>
+        <PrimaryButton
+          disabled={checking || applying || rebuilding || updateUnavailable}
+          onClick={() => void updateAll()}
+        >
+          {applying || rebuilding ? 'Updating…' : 'Update'}
+        </PrimaryButton>
+        {applying && (
+          <div className="min-w-40 flex-1">
+            <ProgressBar />
           </div>
-          <span className="rounded border border-primary/50 bg-primary/20 px-2 py-0.5 font-mono text-[11px] text-white">
-            v{catalog.core.version}
+        )}
+      </div>
+      {updates?.rebuild?.mode === 'mismatch' && (
+        <p role="alert" className="mt-2 font-mono text-[11px] text-[#fcd34d]">
+          Selected install mode ({updates.rebuild.install_mode}) differs from the running app
+          ({updates.rebuild.runtime_mode}). Restart it externally in the selected mode before updating.
+        </p>
+      )}
+      {updates?.rebuild?.mode === 'docker-nosocket' && (
+        <p role="status" className="mt-2 font-mono text-[11px] text-ink-faint">
+          Docker self-update is unavailable in this setup. Update or restart the app from the host.
+        </p>
+      )}
+      {updates?.rebuild_required && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-status-warning/30 bg-status-warning/[0.07] px-2 py-1.5 font-mono text-[11px]">
+          <span className="text-[#fcd34d]">Restart required</span>
+          <span className="text-ink-faint">
+            {updates.rebuild?.mode === 'docker'
+              ? 'press Update above (pulls latest code, then rebuilds)'
+              : updates.rebuild?.mode === 'local'
+                ? 'press Update above (pulls latest code, then restarts)'
+                : 'see the deployment notice above'}
           </span>
         </div>
       )}
-      <div className="glass-l1 edge-shimmer mt-4 flex flex-wrap items-center gap-2 rounded-lg p-3">
-        <SearchInput value={q} onChange={setQ} placeholder="Search plugins…  ( / )" />
-        <FilterPills
-          options={[
-            { id: 'all', label: 'All' },
-            { id: 'official', label: 'Official & verified' },
-          ]}
-          active={filter}
-          onPick={setFilter}
-        />
-      </div>
-      <div className="glass-l1 mt-4 rounded-lg p-4">
-        <div className="flex items-center gap-2">
-          <h3 className="font-display text-sm font-semibold">Updates</h3>
-          {updates && (updates.total ?? 0) > 0 && (
-            <span className="rounded border border-status-warning/40 bg-status-warning/10 px-2 py-0.5 font-mono text-[10px] uppercase text-[#fcd34d]">
-              {updates.total} available
-            </span>
-          )}
-          <GhostButton className="ml-auto" disabled={checking} onClick={() => void check()}>
-            {checking ? 'Checking…' : 'Check now'}
-          </GhostButton>
-        </div>
-        {updates?.rebuild?.mode === 'mismatch' && (
-          <p role="alert" className="mt-2 font-mono text-[11px] text-[#fcd34d]">
-            Selected install mode ({updates.rebuild.install_mode}) differs from the running app
-            ({updates.rebuild.runtime_mode}). Restart it externally in the selected mode before updating.
-          </p>
-        )}
-        {updates?.rebuild?.mode === 'docker-nosocket' && (
-          <p role="status" className="mt-2 font-mono text-[11px] text-ink-faint">
-            Docker self-update is unavailable in this setup. Update or restart the app from the host.
-          </p>
-        )}
-        {updates?.core && (
-          <div
-            className={`mt-2 flex flex-wrap items-center gap-2 rounded border px-2 py-1.5 font-mono text-[11px] ${
-              updates.core.has_update
-                ? 'border-status-warning/50 ring-1 ring-inset ring-status-warning/30'
-                : 'border-white/[0.06]'
-            }`}
-          >
-            <span className="text-ink">Core</span>
-            <span className="flex flex-wrap items-center gap-1.5">
-              <span className="rounded border border-status-active/40 bg-status-active/10 px-2 py-0.5 font-mono text-[10px] uppercase text-status-active">
-                installed{updates.core.local_version ? ` v${updates.core.local_version}` : ''}
-              </span>
-              {updates.core.has_update ? (
-                <span className="rounded border border-status-warning/50 bg-status-warning/15 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-[#fcd34d]">
-                  update → v{updates.core.remote_version || '?'}
-                </span>
-              ) : (
-                <span className="rounded border border-white/15 bg-white/5 px-2 py-0.5 font-mono text-[10px] uppercase text-ink-muted">
-                  v{updates.core.local_version || '?'}
-                </span>
-              )}
-            </span>
-            {applying ? (
-              <div className="min-w-40 flex-1"><ProgressBar /></div>
-            ) : (
-              <PrimaryButton
-                className="ml-auto"
-                disabled={checking || applying || rebuilding || updateUnavailable}
-                onClick={() => void updateAll()}
-              >
-                {rebuilding ? 'Rebuilding…' : 'Update'}
-              </PrimaryButton>
-            )}
-          </div>
-        )}
-        {!updates?.core && (
-          <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-white/[0.06] px-2 py-1.5 font-mono text-[11px]">
-            <span className="flex-1 text-ink-muted">Core update</span>
-            <PrimaryButton disabled={checking || applying || rebuilding || updateUnavailable} onClick={() => void updateAll()}>
-              {applying || rebuilding ? 'Updating…' : 'Update'}
-            </PrimaryButton>
-          </div>
-        )}
-        {(updates?.plugins ?? []).length > 0 && (
-          <div className="mt-2 font-mono text-[11px] text-ink-muted">
-            Plugin updates: {(updates?.plugins ?? []).map((p) => p.name ?? p.id).join(', ')} — the
-            Update button above pulls these too.
-          </div>
-        )}
-        {updates?.rebuild_required && (
-          <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-status-warning/30 bg-status-warning/[0.07] px-2 py-1.5 font-mono text-[11px]">
-            <span className="text-[#fcd34d]">Restart required</span>
-            <span className="text-ink-faint">
-              {updates.rebuild?.mode === 'docker'
-                ? 'press Update above (pulls latest code, then rebuilds)'
-                : updates.rebuild?.mode === 'local'
-                  ? 'press Update above (pulls latest code, then restarts)'
-                  : 'see the deployment notice above'}
-            </span>
-          </div>
-        )}
-        {updateMsg && <p className="mt-2 font-mono text-[11px] text-ink-muted">{updateMsg}</p>}
-      </div>
+      {updateMsg && <p className="mt-2 font-mono text-[11px] text-ink-muted">{updateMsg}</p>}
       {showRebuildLog &&
         (() => {
           const isLocal = updates?.rebuild?.mode === 'local';
@@ -1642,7 +1563,32 @@ export function Plugins() {
           );
         })()}
       <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {shown.map((p) => {
+        {core && (
+          <article
+            className={`glass-l1 rounded-lg p-4 ${
+              coreNeedsUpdate ? 'border-status-warning/50 ring-1 ring-inset ring-status-warning/30' : ''
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-display text-base font-semibold">{core.name}</h2>
+              <span className="flex items-center gap-1.5">
+                <span className="rounded border border-status-active/40 bg-status-active/10 px-2 py-0.5 font-mono text-[10px] uppercase text-status-active">
+                  installed{updates?.core?.local_version ? ` v${updates.core.local_version}` : ''}
+                </span>
+                {coreNeedsUpdate ? (
+                  <span className="rounded border border-status-warning/50 bg-status-warning/15 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-[#fcd34d]">
+                    update → v{updates?.core?.remote_version || core.version}
+                  </span>
+                ) : (
+                  <span className="rounded border border-white/15 bg-white/5 px-2 py-0.5 font-mono text-[10px] uppercase text-ink-muted">
+                    v{core.version}
+                  </span>
+                )}
+              </span>
+            </div>
+          </article>
+        )}
+        {list.map((p) => {
           const inst = installed[p.id];
           const needsUpdate = Boolean(inst?.has_update);
           return (

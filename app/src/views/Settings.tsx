@@ -1407,7 +1407,7 @@ export default function Settings({
     ...(installed ?? []).flatMap((p) =>
       (p.settings ?? []).map((s, i) => ({ id: `plugin:${p.id}:${i}`, label: s.label })),
     ),
-    { id: 'plugins', label: 'Plugins' },
+    { id: 'plugins', label: 'Plugins & updates' },
     { id: 'api', label: 'API keys' },
     { id: 'auth', label: 'Profile' },
     { id: 'system', label: 'System' },
