@@ -1562,7 +1562,7 @@ export function Plugins() {
             </div>
           );
         })()}
-      <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         {core && (
           <article
             className={`glass-l1 rounded-lg p-4 ${
