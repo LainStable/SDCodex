@@ -52,6 +52,16 @@ export function upsertScanned(entry: ScannedModel): ScannedModel[] {
   return next;
 }
 
+/** Fill in the architecture after reading it from the weights on disk. */
+export function setScannedBaseModel(modelId: number, versionId: number, baseModel: string): boolean {
+  const list = loadScanned();
+  const index = list.findIndex((e) => e.modelId === modelId && e.versionId === versionId);
+  if (index < 0 || list[index].baseModel) return false;
+  list[index] = { ...list[index], baseModel };
+  persist(list);
+  return true;
+}
+
 export function setScannedImageName(dirKey: string, filename: string, imageName: string): boolean {
   const list = loadScanned();
   const index = list.findIndex((e) => e.dirKey === dirKey && e.filename === filename);

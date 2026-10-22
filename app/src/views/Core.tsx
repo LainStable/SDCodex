@@ -788,7 +788,7 @@ export function DownloadFloat({ go }: { go: (v: 'queue') => void }) {
   if (!state || dismissed) return null;
 
   return (
-    <div className="glass-l2 fixed right-3 top-3 z-[55] w-[min(360px,92vw)] rounded-lg p-3">
+    <div className="glass-l2 rounded-lg p-3">
       <div className="flex items-center gap-2">
         <h2 className="font-display text-sm font-semibold">Downloads & Queue</h2>
         <span className="rounded border border-status-active/40 bg-status-active/10 px-1.5 py-0.5 font-mono text-[9px] uppercase text-status-active">
@@ -1478,16 +1478,36 @@ export function Plugins() {
           </p>
         )}
         {updates?.core && (
-          <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-white/[0.06] px-2 py-1.5 font-mono text-[11px]">
+          <div
+            className={`mt-2 flex flex-wrap items-center gap-2 rounded border px-2 py-1.5 font-mono text-[11px] ${
+              updates.core.has_update
+                ? 'border-status-warning/50 ring-1 ring-inset ring-status-warning/30'
+                : 'border-white/[0.06]'
+            }`}
+          >
             <span className="text-ink">Core</span>
-            <span className="text-ink-faint">
-              v{updates.core.local_version || '?'} → v{updates.core.remote_version || '?'}
+            <span className="flex flex-wrap items-center gap-1.5">
+              <span className="rounded border border-status-active/40 bg-status-active/10 px-2 py-0.5 font-mono text-[10px] uppercase text-status-active">
+                installed{updates.core.local_version ? ` v${updates.core.local_version}` : ''}
+              </span>
+              {updates.core.has_update ? (
+                <span className="rounded border border-status-warning/50 bg-status-warning/15 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-[#fcd34d]">
+                  update → v{updates.core.remote_version || '?'}
+                </span>
+              ) : (
+                <span className="rounded border border-white/15 bg-white/5 px-2 py-0.5 font-mono text-[10px] uppercase text-ink-muted">
+                  v{updates.core.local_version || '?'}
+                </span>
+              )}
             </span>
-            {!updates.core.has_update && <span className="text-status-active">up to date</span>}
             {applying ? (
               <div className="min-w-40 flex-1"><ProgressBar /></div>
             ) : (
-              <PrimaryButton disabled={checking || applying || rebuilding || updateUnavailable} onClick={() => void updateAll()}>
+              <PrimaryButton
+                className="ml-auto"
+                disabled={checking || applying || rebuilding || updateUnavailable}
+                onClick={() => void updateAll()}
+              >
                 {rebuilding ? 'Rebuilding…' : 'Update'}
               </PrimaryButton>
             )}

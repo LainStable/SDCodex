@@ -529,8 +529,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-obsidian-bg text-ink">
-      <DownloadFloat go={() => go('queue')} />
       <div className="fixed bottom-3 right-3 z-[55] flex w-[min(360px,92vw)] flex-col gap-2">
+        <DownloadFloat go={() => go('queue')} />
         <ScanFloat onOpen={() => goSettings('dirs')} />
         <PluginTaskFloat onOpen={openPluginTask} />
       </div>

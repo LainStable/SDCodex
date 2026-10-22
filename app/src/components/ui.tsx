@@ -40,7 +40,8 @@ export function TypeBadge({ type, color }: { type: string; color?: string }) {
 
 /** Base-model chip: the architecture a weight targets (SDXL 1.0, Illustrious,
     Flux.1 D…). Local cards use this in place of the old socket pill, and the
-    Explorer / Home cards show the same chip so every model card reads alike. */
+    Explorer / Home cards show the same chip so every model card reads alike.
+    Styled like the filter blocks — same radius, size and hues. */
 export function BaseModelBadge({
   baseModel,
   className = '',
@@ -51,12 +52,11 @@ export function BaseModelBadge({
   const value = (baseModel ?? '').trim();
   return (
     <span
-      className={`inline-flex max-w-full items-center gap-1.5 rounded-[3px] border border-obsidian-high/70 bg-obsidian-lowest/60 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
+      className={`inline-flex max-w-full items-center rounded border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
         value ? 'text-ink-muted' : 'text-ink-faint'
       } ${className}`}
       title={value ? `Base model: ${value}` : 'Base model unknown'}
     >
-      <span className="shrink-0 text-[9px] font-medium text-ink-faint">base</span>
       <span className="truncate">{value || 'unknown'}</span>
     </span>
   );

@@ -60,6 +60,47 @@ async function writeBytesFile(
   await w.close();
 }
 
+/** Map safetensors `__metadata__` keys (modelspec / A1111) to a Civitai base
+    model label. Used when the hash has no Civitai match, so unidentified files
+    still show their architecture instead of "unknown". */
+export function baseModelFromMetadata(meta: Record<string, unknown>): string {
+  const text = [
+    'modelspec.architecture',
+    'modelspec.base_model',
+    'modelspec.title',
+    'ss_base_model_version',
+    'ss_sd_model_name',
+  ]
+    .map((key) => String(meta[key] ?? ''))
+    .join(' ')
+    .toLowerCase();
+  if (!text.trim()) return '';
+  if (/flux/.test(text)) return 'Flux.1 D';
+  if (/pony/.test(text)) return 'Pony';
+  if (/illustrious/.test(text)) return 'Illustrious';
+  if (/noobai/.test(text)) return 'NoobAI';
+  if (/sdxl|sd_xl|xl_base|stable-diffusion-xl/.test(text)) return 'SDXL 1.0';
+  if (/sd_?3|stable-diffusion-3/.test(text)) return 'SD 3';
+  if (/sd15|sd_v1|stable-diffusion-v1/.test(text)) return 'SD 1.5';
+  if (/sd_?2|stable-diffusion-2/.test(text)) return 'SD 2.1';
+  return '';
+}
+
+/** Read just the safetensors header (8-byte length + JSON) from a File. */
+export async function inferBaseModel(file: File): Promise<string> {
+  if (!file.name.toLowerCase().endsWith('.safetensors')) return '';
+  try {
+    const length = Number(new DataView(await file.slice(0, 8).arrayBuffer()).getBigUint64(0, true));
+    if (!length || length > 100 * 1024 * 1024) return '';
+    const header = JSON.parse(new TextDecoder().decode(await file.slice(8, 8 + length).arrayBuffer())) as {
+      __metadata__?: Record<string, unknown>;
+    };
+    return baseModelFromMetadata(header.__metadata__ ?? {});
+  } catch {
+    return '';
+  }
+}
+
 async function fileExists(dir: FileSystemDirectoryHandle, name: string): Promise<boolean> {
   try {
     await dir.getFileHandle(name);
@@ -165,7 +206,8 @@ export async function scanDir(
         name: version.model?.name ?? name,
         // Folder category, not the API taxonomy — sections follow Settings.
         type,
-        baseModel: version.baseModel ?? '',
+        // Civitai's answer, or the architecture embedded in the weights.
+        baseModel: version.baseModel || (await inferBaseModel(file)),
         dirKey: `dir_${type}`,
         dirPath: getDirectories()[`dir_${type}`] ?? '',
         filename: f.rel,
@@ -187,6 +229,12 @@ export async function scanDir(
         /* unreadable — list by name only */
       }
       const base = (f.rel.split('/').pop() ?? f.rel).replace(/\.[^.]+$/, '');
+      let inferred = '';
+      try {
+        inferred = await inferBaseModel(await f.handle.getFile());
+      } catch {
+        /* unreadable header — leave the chip unknown */
+      }
       let sidecar: string | null = null;
       for (const ext of ['.png', '.jpg', '.jpeg', '.webp']) {
         if (await fileExists(f.dir, `${base}${ext}`)) {
@@ -199,7 +247,7 @@ export async function scanDir(
         versionId: pathId(`${type}/${f.rel}`),
         name: base,
         type,
-        baseModel: '',
+        baseModel: inferred,
         dirKey: `dir_${type}`,
         dirPath: getDirectories()[`dir_${type}`] ?? '',
         filename: f.rel,

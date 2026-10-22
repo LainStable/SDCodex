@@ -39,6 +39,59 @@ def _cached_sha256(filepath):
     return digest
 
 
+def infer_base_model(filepath):
+    """Read the architecture embedded in a safetensors header.
+
+    Files that Civitai cannot match still carry modelspec / A1111 metadata; use
+    it so the Library shows e.g. "SDXL 1.0" instead of "unknown".
+    """
+    if not str(filepath).lower().endswith('.safetensors'):
+        return ''
+    try:
+        with open(filepath, 'rb') as handle:
+            raw = handle.read(8)
+            if len(raw) < 8:
+                return ''
+            length = int.from_bytes(raw, 'little')
+            if not length or length > 100 * 1024 * 1024:
+                return ''
+            header = json.loads(handle.read(length).decode('utf-8', 'ignore'))
+    except (OSError, ValueError):
+        return ''
+    meta = header.get('__metadata__') if isinstance(header, dict) else None
+    if not isinstance(meta, dict):
+        return ''
+    text = ' '.join(
+        str(meta.get(key) or '')
+        for key in (
+            'modelspec.architecture',
+            'modelspec.base_model',
+            'modelspec.title',
+            'ss_base_model_version',
+            'ss_sd_model_name',
+        )
+    ).lower()
+    if not text.strip():
+        return ''
+    if 'flux' in text:
+        return 'Flux.1 D'
+    if 'pony' in text:
+        return 'Pony'
+    if 'illustrious' in text:
+        return 'Illustrious'
+    if 'noobai' in text:
+        return 'NoobAI'
+    if any(token in text for token in ('sdxl', 'sd_xl', 'xl_base', 'stable-diffusion-xl')):
+        return 'SDXL 1.0'
+    if any(token in text for token in ('sd_3', 'sd3', 'stable-diffusion-3')):
+        return 'SD 3'
+    if any(token in text for token in ('sd15', 'sd_v1', 'stable-diffusion-v1')):
+        return 'SD 1.5'
+    if any(token in text for token in ('sd_2', 'sd2', 'stable-diffusion-2')):
+        return 'SD 2.1'
+    return ''
+
+
 def _version_from_metadata(data, filename):
     """Identify a version from our saved metadata without hashing the model."""
     if not isinstance(data, dict):
@@ -157,6 +210,7 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
                 downloaded_files['image'] = sidecar_image
             stand_in = zlib.crc32(f"{model_type}/{filepath}".encode()) & 0x7FFFFFFF
             existing = Download.query.filter_by(model_id=0, version_id=stand_in).first()
+            inferred_base = infer_base_model(filepath)
             if not existing:
                 download = Download(
                     model_id=0,
@@ -165,10 +219,12 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
                     type=model_type,
                 )
                 download.set_files(downloaded_files)
+                download.base_model = inferred_base or None
                 db.session.add(download)
                 updated_count += 1
             else:
                 existing.set_files(downloaded_files)
+                existing.base_model = inferred_base or existing.base_model
             db.session.commit()
             found_ids.append((0, stand_in))
             continue
@@ -233,7 +289,7 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
         else:
             existing.set_files(downloaded_files)
             download = existing
-        download.base_model = model_version.get('baseModel') or download.base_model
+        download.base_model = model_version.get('baseModel') or infer_base_model(filepath) or download.base_model
 
         db.session.commit()
         found_ids.append((model_id, version_id))

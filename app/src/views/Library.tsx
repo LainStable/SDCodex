@@ -43,8 +43,10 @@ let savedScrollY = 0;
 export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }) {
   const [query, setQuery] = useState('');
   const [bases, setBases] = useState<string[]>([]);
-  const [scanned] = useState<ScannedModel[]>(loadScanned);
+  const [scanned, setScanned] = useState<ScannedModel[]>(loadScanned);
   const [serverRows, setServerRows] = useState<ServerRow[]>([]);
+  // Newer Civitai versions for identified local models, keyed modelId-versionId.
+  const [updates, setUpdates] = useState<Record<string, { id: number; name?: string }>>({});
   const [colors] = useState<Record<string, string>>(getDirColors);
   const [activeTab, setActiveTab] = useState<string | null>(null);
   // Object URLs for browser-scanned previews (resolved via bound handles).
@@ -114,33 +116,84 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
       const rows = await fetchServerRows();
       if (live) setServerRows(rows);
     })();
-    // Resolve browser-scanned preview images through their bound folders.
+    // Resolve browser-scanned preview images through their bound folders, and
+    // backfill the architecture for records scanned before it was inferred.
     void (async () => {
       if (typeof (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker !== 'function') {
         return;
       }
       const { getHandle } = await import('../lib/idb');
+      const { inferBaseModel } = await import('../lib/scan');
+      const { setScannedBaseModel } = await import('../lib/library');
       const found: Record<string, string> = {};
+      let patched = false;
       for (const s of loadScanned()) {
-        if (!s.imageName) continue;
-        const key = `${s.dirKey}/${s.filename}`;
+        let dir: FileSystemDirectoryHandle | null = null;
         try {
-          const dir = await getHandle(s.dirKey);
-          if (!dir) continue;
-          const fh = await dir.getFileHandle(s.imageName);
-          const file = await fh.getFile();
-          if (!file.type.startsWith('image/')) continue;
-          found[key] = URL.createObjectURL(file);
+          dir = await getHandle(s.dirKey);
         } catch {
-          /* unlinked or missing — card keeps its placeholder */
+          dir = null;
+        }
+        if (!dir) continue;
+        if (s.imageName) {
+          const key = `${s.dirKey}/${s.filename}`;
+          try {
+            const fh = await dir.getFileHandle(s.imageName);
+            const file = await fh.getFile();
+            if (file.type.startsWith('image/')) found[key] = URL.createObjectURL(file);
+          } catch {
+            /* unlinked or missing — card keeps its placeholder */
+          }
+        }
+        const parts = s.filename.split('/').filter(Boolean);
+        if (s.baseModel || parts.length === 0) continue;
+        try {
+          let cur = dir;
+          for (const part of parts.slice(0, -1)) cur = await cur.getDirectoryHandle(part);
+          const file = await (await cur.getFileHandle(parts[parts.length - 1])).getFile();
+          const inferred = await inferBaseModel(file);
+          if (inferred && setScannedBaseModel(s.modelId, s.versionId, inferred)) patched = true;
+        } catch {
+          /* header unreadable — chip stays unknown */
         }
       }
-      if (live && Object.keys(found).length > 0) setLocalPreviews(found);
+      if (!live) return;
+      if (Object.keys(found).length > 0) setLocalPreviews(found);
+      if (patched) setScanned(loadScanned());
     })();
     return () => {
       live = false;
     };
   }, []);
+
+  // Ask the backend which installed models have a newer Civitai version.
+  useEffect(() => {
+    const items = [
+      ...scanned.map((s) => ({ modelId: s.modelId, versionId: s.versionId })),
+      ...serverRows.map((r) => ({ modelId: r.modelId, versionId: r.versionId })),
+    ].filter((s) => s.modelId > 0 && s.versionId > 0);
+    if (items.length === 0) return;
+    let live = true;
+    void (async () => {
+      try {
+        const { apiPost, backendAvailable } = await import('../lib/backend');
+        if (!(await backendAvailable())) return;
+        const r = await apiPost<{ updates?: Record<string, { id: number; name?: string }> }>(
+          '/library/updates',
+          { items },
+        );
+        if (live) setUpdates(r.updates ?? {});
+      } catch {
+        /* offline — no update badges */
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [scanned, serverRows]);
+
+  const updateFor = (modelId?: number, versionId?: number) =>
+    modelId && versionId ? updates[`${modelId}-${versionId}`] : undefined;
 
   const q = query.trim().toLowerCase();
   const matches = (hay: string) => !q || hay.toLowerCase().includes(q);
@@ -223,7 +276,9 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                 </p>
               ) : (
                 <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-                {remote.map((r) => (
+                {remote.map((r) => {
+                  const up = updateFor(r.modelId, r.versionId);
+                  return (
                   <article
                     key={`srv-${r.modelId}-${r.versionId}`}
                     className="glass-l1 overflow-hidden rounded-lg transition-colors hover:border-primary/40"
@@ -262,6 +317,14 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                         <div className="absolute left-2 top-2">
                           <TypeBadge type={r.type} color={colors[r.type]} />
                         </div>
+                        {up && (
+                          <span
+                            className="absolute right-2 top-2 rounded border border-status-warning/50 bg-status-warning/15 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-[#fcd34d]"
+                            title={`Civitai has v${up.name || up.id} available`}
+                          >
+                            update → v{up.name || up.id}
+                          </span>
+                        )}
                       </div>
                       <div className="p-3">
                         <h2 className="truncate font-display text-base font-semibold" title={r.name}>
@@ -273,8 +336,11 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                       </div>
                     </button>
                   </article>
-                ))}
-                {local.map((s) => (
+                  );
+                })}
+                {local.map((s) => {
+                  const up = updateFor(s.modelId, s.versionId);
+                  return (
                   <article
                     key={`${s.modelId}-${s.versionId}`}
                     className="glass-l1 overflow-hidden rounded-lg ring-1 ring-inset ring-status-active/20 transition-colors hover:border-primary/40"
@@ -322,6 +388,14 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                         <div className="absolute left-2 top-2">
                           <TypeBadge type={s.type} color={colors[s.type]} />
                         </div>
+                        {up && (
+                          <span
+                            className="absolute right-2 top-2 rounded border border-status-warning/50 bg-status-warning/15 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-[#fcd34d]"
+                            title={`Civitai has v${up.name || up.id} available`}
+                          >
+                            update → v{up.name || up.id}
+                          </span>
+                        )}
                       </div>
                       <div className="p-3">
                         <h2 className="truncate font-display text-base font-semibold" title={s.name}>
@@ -342,7 +416,8 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                       </div>
                     </button>
                   </article>
-                ))}
+                  );
+                })}
                 </div>
               )}
             </section>

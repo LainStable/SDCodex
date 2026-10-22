@@ -4,6 +4,8 @@ import os
 import re
 import threading
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlencode, urljoin, urlparse
 
 import requests
@@ -492,6 +494,85 @@ def library():
             ]
         }
     )
+
+
+# Latest Civitai version per model id, reused across library views so opening
+# the Library does not hammer the API. 10 minutes is short enough that a fresh
+# release shows up soon after the user refreshes.
+_LIBRARY_UPDATE_TTL = 600
+_LIBRARY_UPDATE_CACHE: dict = {}
+_LIBRARY_UPDATE_LOCK = threading.Lock()
+
+
+def _latest_civitai_version(model_id: int, api_key: str | None):
+    now = time.time()
+    with _LIBRARY_UPDATE_LOCK:
+        hit = _LIBRARY_UPDATE_CACHE.get(model_id)
+        if hit and now - hit[0] < _LIBRARY_UPDATE_TTL:
+            return hit[1]
+    from . import api as civitai_api
+
+    try:
+        full = civitai_api.get_model(model_id, api_key)
+    except Exception as error:
+        print(f"Library update check failed for model {model_id}: {error}")
+        return None
+    versions = full.get("modelVersions") or []
+    latest = versions[0] if versions else None
+    if not isinstance(latest, dict):
+        return None
+    info = {
+        "id": latest.get("id"),
+        "name": latest.get("name") or "",
+        "baseModel": latest.get("baseModel") or "",
+        "publishedAt": latest.get("publishedAt") or latest.get("createdAt") or "",
+    }
+    with _LIBRARY_UPDATE_LOCK:
+        _LIBRARY_UPDATE_CACHE[model_id] = (now, info)
+    return info
+
+
+@api_v1.post("/library/updates")
+def library_updates():
+    """Report a newer Civitai version for installed models.
+
+    The Library sends the identified rows it shows; each distinct model id is
+    checked once (cached, four at a time) and only models whose current version
+    is not the newest one come back.
+    """
+    user, err = _require_user()
+    if err:
+        return err
+    data = request.get_json(force=True, silent=True) or {}
+    items = data.get("items") or []
+    wanted: dict[int, list[int]] = {}
+    for raw in items if isinstance(items, list) else []:
+        try:
+            model_id = int(raw.get("modelId") or 0)
+            version_id = int(raw.get("versionId") or 0)
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if model_id <= 0 or version_id <= 0:
+            continue
+        wanted.setdefault(model_id, []).append(version_id)
+    model_ids = list(wanted)[:60]
+    if not model_ids:
+        return jsonify({"updates": {}})
+
+    api_key = user.api_key or None
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        latest_by_model = dict(zip(model_ids, pool.map(lambda mid: _latest_civitai_version(mid, api_key), model_ids)))
+
+    updates = {}
+    for model_id in model_ids:
+        latest = latest_by_model.get(model_id)
+        latest_id = latest.get("id") if isinstance(latest, dict) else None
+        if not latest_id:
+            continue
+        for version_id in wanted[model_id]:
+            if int(latest_id) != version_id:
+                updates[f"{model_id}-{version_id}"] = latest
+    return jsonify({"updates": updates, "truncated": len(wanted) > len(model_ids)})
 
 
 @api_v1.put("/library/<int:row_id>/identify")
