@@ -36,15 +36,35 @@ function readRoute(): AppRoute {
   const params = new URLSearchParams(window.location.search);
   const requestedView = params.get('view') as ViewId | null;
   const pluginId = params.get('plugin');
+  let savedView: ViewId | null = null;
+  try {
+    const raw = localStorage.getItem('sdcodex.last-route.v1');
+    if (raw) {
+      const saved = JSON.parse(raw) as { view?: string; plugin?: string; page?: string | null; tab?: string };
+      if (saved.view && viewIds.includes(saved.view as ViewId)) savedView = saved.view as ViewId;
+    }
+  } catch {
+    /* ignore */
+  }
   return {
-    view: requestedView && viewIds.includes(requestedView) ? requestedView : 'models',
+    view: requestedView && viewIds.includes(requestedView) ? requestedView : (savedView ?? 'models'),
     space: pluginId ? { kind: 'plugin', id: pluginId } : { kind: 'core' },
-    pluginPage: params.get('page'),
-    settingsTab: params.get('tab') || 'dirs',
+    pluginPage: params.get('page') ?? (pluginId ? (JSON.parse(localStorage.getItem('sdcodex.last-route.v1') || '{}') as Record<string, unknown>).page as string | null ?? null : null),
+    settingsTab: params.get('tab') || (JSON.parse(localStorage.getItem('sdcodex.last-route.v1') || '{}') as Record<string, unknown>).tab as string ?? 'dirs',
   };
 }
 
 function writeRoute(route: AppRoute, replace = false) {
+  try {
+    localStorage.setItem('sdcodex.last-route.v1', JSON.stringify({
+      view: route.view,
+      plugin: route.space.kind === 'plugin' ? route.space.id : undefined,
+      page: route.pluginPage,
+      tab: route.settingsTab,
+    }));
+  } catch {
+    /* ignore */
+  }
   const params = new URLSearchParams();
   params.set('view', route.view);
   if (route.space.kind === 'plugin') {
