@@ -1479,15 +1479,15 @@ export function Plugins() {
                   ? 'Preparing…'
                   : 'Preparing…';
           return (
-            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 p-4">
-              <div className="w-full max-w-2xl overflow-hidden rounded-xl border border-white/10 bg-[#2c2e33]">
+            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+              <div className="glass-l2 w-full max-w-2xl overflow-hidden rounded-xl border border-white/10">
                 <div className="flex items-center justify-between px-5 py-4">
                   <img src="/codex.svg" alt="SDCodex" className="h-40 w-full object-fill" />
                   <button
                     type="button"
                     onClick={() => setShowRebuildLog(false)}
                     aria-label="Close self-update dialog"
-                    className="text-2xl leading-none text-ink-faint hover:text-white"
+                    className="rounded-lg border border-white/10 bg-obsidian-low px-3 py-2 text-sm font-semibold text-ink hover:text-white hover:border-white/20"
                   >
                     ✕
                   </button>
@@ -1502,12 +1502,12 @@ export function Plugins() {
                         : done
                           ? 'bg-status-active'
                           : current
-                            ? 'bg-[#5b5bd6] animate-pulse'
-                            : 'bg-[#5f636e]';
+                            ? 'bg-primary animate-pulse'
+                            : 'bg-ink-faint/40';
                       return (
                         <li key={label} className="flex items-center gap-3">
                           <span className={`h-3 w-3 shrink-0 rounded-full ${dot}`} aria-hidden="true" />
-                          <span className={`text-[15px] ${done || current ? 'text-white' : 'text-[#c9cdd6]'}`}>
+                          <span className={`text-[15px] ${done || current ? 'text-ink' : 'text-ink-muted'}`}>
                             {label}
                           </span>
                         </li>
@@ -1518,20 +1518,20 @@ export function Plugins() {
                     type="button"
                     onClick={() => setLogOpen((open) => !open)}
                     aria-expanded={logOpen}
-                    className="mt-5 flex w-full items-center justify-between gap-2 rounded-lg px-1 py-1 text-left text-[15px] font-semibold text-white hover:text-[#c9d1d9]"
+                    className="mt-5 flex w-full items-center justify-between gap-2 rounded-lg px-1 py-1 text-left text-[15px] font-semibold text-ink hover:text-ink-muted"
                   >
                     <span>Updater log</span>
                     <span
                       aria-hidden="true"
-                      className={`shrink-0 text-xs text-[#8b93a5] transition-transform ${logOpen ? 'rotate-90' : ''}`}
+                      className={`shrink-0 text-xs text-ink-faint transition-transform ${logOpen ? 'rotate-90' : ''}`}
                     >
                       ▶
                     </span>
                   </button>
                   {logOpen && (
-                    <div className="mt-2 max-h-72 overflow-y-auto rounded-lg border border-white/10 bg-[#0b1020] p-4 font-mono text-[13px] leading-relaxed text-[#c9d1d9]">
+                    <div className="mt-2 max-h-72 overflow-y-auto rounded-lg border border-white/10 bg-obsidian-lowest p-4 font-mono text-[13px] leading-relaxed text-ink-muted">
                       {rebuildLog.length === 0 ? (
-                        <p className="text-[#8b93a5]">
+                        <p className="text-ink-faint">
                           {applying
                             ? 'waiting for git pull output…'
                             : isLocal

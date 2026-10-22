@@ -135,11 +135,6 @@ function ColorMenu({
       ctx.closePath();
       ctx.fill();
     }
-    // White dot at center
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius * 0.18, 0, Math.PI * 2);
-    ctx.fill();
   }, [open]);
 
   const onWheelClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -195,9 +190,6 @@ function ColorMenu({
             onClick={onWheelClick}
           />
           <div className="mt-2 flex items-center gap-2 w-full justify-center">
-            <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
-              Color:
-            </span>
             <input
               value={hexValue}
               onChange={onHexChange}

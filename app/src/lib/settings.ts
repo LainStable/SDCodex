@@ -7,19 +7,14 @@ export const MODEL_TYPES = [
   'Checkpoint',
   'Embedding',
   'Hypernetwork',
-  'AestheticGradient',
   'LORA',
   'LyCORIS',
-  'DoRA',
   'Controlnet',
   'Upscaler',
   'Motion',
   'VAE',
-  'Poses',
-  'Wildcards',
   'Workflows',
   'Detection',
-  'Other',
 ] as const;
 
 const API_KEY = 'sdcodex.apiKey.v1';
