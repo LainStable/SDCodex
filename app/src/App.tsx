@@ -50,7 +50,7 @@ function readRoute(): AppRoute {
     view: requestedView && viewIds.includes(requestedView) ? requestedView : (savedView ?? 'models'),
     space: pluginId ? { kind: 'plugin', id: pluginId } : { kind: 'core' },
     pluginPage: params.get('page') ?? (pluginId ? (JSON.parse(localStorage.getItem('sdcodex.last-route.v1') || '{}') as Record<string, unknown>).page as string | null ?? null : null),
-    settingsTab: params.get('tab') || (JSON.parse(localStorage.getItem('sdcodex.last-route.v1') || '{}') as Record<string, unknown>).tab as string ?? 'dirs',
+    settingsTab: ((params.get('tab') || (JSON.parse(localStorage.getItem('sdcodex.last-route.v1') || '{}') as Record<string, unknown>).tab) as string | undefined) ?? 'dirs',
   };
 }
 
