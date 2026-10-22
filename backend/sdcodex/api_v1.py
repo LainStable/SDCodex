@@ -3,6 +3,7 @@
 import os
 import re
 import threading
+import json
 from urllib.parse import urlencode, urljoin, urlparse
 
 import requests
@@ -484,6 +485,7 @@ def library():
                     "versionId": d.version_id,
                     "name": d.name,
                     "type": d.type,
+                    "baseModel": d.base_model or "",
                     "files": d.get_files(),
                 }
                 for d in rows
@@ -522,6 +524,7 @@ def library_identify(row_id: int):
     row.version_id = version_id
     row.name = full.get("name", row.name)
     row.type = full.get("type", row.type)
+    row.base_model = version.get("baseModel") or row.base_model
     db.session.commit()
     return jsonify(
         {
@@ -532,6 +535,7 @@ def library_identify(row_id: int):
                 "versionId": row.version_id,
                 "name": row.name,
                 "type": row.type,
+                "baseModel": row.base_model or "",
                 "files": row.get_files(),
             },
         }
@@ -1436,6 +1440,97 @@ _MISSING_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"/>
 <p>Ship <code>pages/{name}.html</code> in the plugin repo to fill this slot.</p></body></html>"""
 
 
+# --- plugin button kit ---------------------------------------------------
+# Plugin pages cannot import the React components, so the core injects the
+# same button shapes it renders itself (app/src/components/chrome.tsx:
+# PrimaryButton / GhostButton / DangerButton plus the filter pills). Plugin
+# pages opt in with `sd-btn` + a variant class; colours resolve through the
+# theme variables the bridge below installs, so addons follow the active theme.
+_PLUGIN_UI_CSS = """<style id="sdcodex-plugin-ui">
+.sd-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 6px 12px; border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px; background-color: transparent; background-image: none;
+  color: rgb(var(--c-ink-muted, 199 196 215));
+  font-family: Inter, system-ui, sans-serif; font-size: 12px; font-weight: 500;
+  line-height: 16px; white-space: nowrap; text-decoration: none;
+  cursor: pointer; box-shadow: none;
+  transition: background-color .15s ease, border-color .15s ease,
+              color .15s ease, opacity .15s ease;
+}
+.sd-btn:hover:not(:disabled):not([aria-disabled="true"]) {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: rgb(var(--c-ink, 223 226 239));
+}
+.sd-btn:focus-visible {
+  outline: none; border-color: rgb(var(--c-primary, 99 102 241));
+  box-shadow: 0 0 0 2px rgb(var(--c-primary, 99 102 241) / 0.25);
+}
+.sd-btn:disabled, .sd-btn[aria-disabled="true"] { opacity: 0.4; cursor: not-allowed; }
+.sd-btn .material-symbols-outlined { font-size: 16px; }
+
+.sd-btn-primary {
+  border-color: rgb(var(--c-primary, 99 102 241) / 0.5);
+  background-color: rgb(var(--c-primary, 99 102 241) / 0.2);
+  color: rgb(var(--c-ink, 223 226 239)); font-weight: 600;
+}
+.sd-btn-primary:hover:not(:disabled):not([aria-disabled="true"]) {
+  border-color: rgb(var(--c-primary, 99 102 241) / 0.65);
+  background-color: rgb(var(--c-primary, 99 102 241) / 0.3);
+  color: rgb(var(--c-ink, 223 226 239));
+}
+
+.sd-btn-danger {
+  border-color: rgb(239 68 68 / 0.4); color: #f87171;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px; font-weight: 500;
+}
+.sd-btn-danger:hover:not(:disabled):not([aria-disabled="true"]) {
+  border-color: rgb(239 68 68 / 0.55);
+  background-color: rgb(239 68 68 / 0.1); color: #fca5a5;
+}
+
+.sd-btn-sm {
+  padding: 4px 8px; font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
+}
+
+/* Filter / segmented pill — core FilterPills: inactive white/5, active primary/20. */
+.sd-btn-pill {
+  padding: 4px 10px; border-color: rgba(255, 255, 255, 0.1);
+  background-color: rgba(255, 255, 255, 0.05);
+  color: rgb(var(--c-ink-muted, 199 196 215));
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.sd-btn-pill:hover:not(:disabled):not([aria-disabled="true"]) {
+  border-color: rgba(255, 255, 255, 0.2);
+  background-color: rgba(255, 255, 255, 0.08);
+}
+.sd-btn-pill[aria-pressed="true"], .sd-btn-pill.is-active {
+  border-color: rgb(var(--c-primary, 99 102 241) / 0.5);
+  background-color: rgb(var(--c-primary, 99 102 241) / 0.2);
+  color: rgb(var(--c-ink, 223 226 239));
+}
+
+/* Pressed toggle (segmented mode switches, format pickers). */
+.sd-btn[aria-pressed="true"], .sd-btn.is-active {
+  border-color: rgb(var(--c-primary, 99 102 241) / 0.5);
+  background-color: rgb(var(--c-primary, 99 102 241) / 0.2);
+  color: rgb(var(--c-ink, 223 226 239)); font-weight: 600;
+}
+
+/* Icon-only action — square ghost that grows a border on hover. */
+.sd-btn-icon { width: 28px; height: 28px; padding: 0; border-color: transparent; }
+.sd-btn-icon:hover:not(:disabled):not([aria-disabled="true"]) {
+  border-color: rgba(255, 255, 255, 0.15);
+  background-color: rgba(255, 255, 255, 0.05);
+}
+.sd-btn-icon .material-symbols-outlined { font-size: 18px; }
+</style>"""
+
+
 # --- plugin theme bridge -------------------------------------------------
 # Plugin pages are standalone documents (their own <head>, Tailwind Play CDN,
 # hardcoded Stitch palette). They cannot inherit the core's CSS variables, so
@@ -1476,6 +1571,10 @@ _THEME_BRIDGE = """<script id="sdcodex-theme-bridge">
     ring: '--tw-ring-color', fill: 'fill', stroke: 'stroke',
     divide: 'border-color', placeholder: 'color', shadow: '--tw-shadow-color'
   };
+  // Opacity variants actually used by this page, scanned server-side:
+  // [token, prop, "20", state]. Tailwind's own `/20` utility keeps the alpha,
+  // so the bridge must re-tint with the same alpha instead of painting solid.
+  var ALPHA = __SD_TOKEN_ALPHA__;
   function rules() {
     var out = [];
     TOKENS.forEach(function (pair) {
@@ -1484,15 +1583,26 @@ _THEME_BRIDGE = """<script id="sdcodex-theme-bridge">
         // Word-scoped exact match: e.g. "bg-surface-container-low"
         out.push('[class~="' + prop + '-' + token + '"]{' +
                  PROP_CSS[prop] + ':rgb(var(' + v + '))!important}');
-        // Tailwind opacity variant: e.g. "bg-surface-container-low/30"
-        out.push('[class^="' + prop + '-' + token + '/"], [class*=" ' + prop + '-' + token + '/"]{' +
-                 PROP_CSS[prop] + ':rgb(var(' + v + '))!important}');
-        // Pseudo-classes hover: and focus:
+        // Pseudo-class solid variants: hover:bg-primary, focus:border-primary
         out.push('[class*="hover\\:' + prop + '-' + token + '"]:hover{' +
                  PROP_CSS[prop] + ':rgb(var(' + v + '))!important}');
         out.push('[class*="focus\\:' + prop + '-' + token + '"]:focus{' +
                  PROP_CSS[prop] + ':rgb(var(' + v + '))!important}');
       });
+    });
+    ALPHA.forEach(function (entry) {
+      var token = entry[0], prop = entry[1], frac = entry[2], state = entry[3];
+      var v = null;
+      TOKENS.forEach(function (pair) { if (pair[0] === token) v = pair[1]; });
+      if (!v || !PROP_CSS[prop]) return;
+      var alpha = Math.min(100, Math.max(0, Number(frac))) / 100;
+      var cls = prop + '-' + token + '/' + frac;
+      var value = PROP_CSS[prop] + ':rgb(var(' + v + ') / ' + alpha + ')!important';
+      if (!state) {
+        out.push('[class~="' + cls + '"]{' + value + '}');
+      } else {
+        out.push('[class*="' + state + '\\:' + cls + '"]:' + state + '{' + value + '}');
+      }
     });
     // Baseline styling for inputs, selects, textareas matching Screenshot 3
     out.push('input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]), select, textarea {' +
@@ -1522,13 +1632,13 @@ _THEME_BRIDGE = """<script id="sdcodex-theme-bridge">
              'color: #ffffff !important;' +
              '}');
     out.push('button.btn-primary, .btn-primary, .warning-actions .btn-primary {' +
-             'border-color: rgba(var(--c-primary), 0.5) !important;' +
-             'background-color: rgba(var(--c-primary), 0.2) !important;' +
-             'color: #ffffff !important;' +
+             'border-color: rgb(var(--c-primary) / 0.5) !important;' +
+             'background-color: rgb(var(--c-primary) / 0.2) !important;' +
+             'color: rgb(var(--c-ink)) !important;' +
              'border-radius: 4px !important;' +
              '}');
     out.push('button.btn-primary:hover:not(:disabled), .btn-primary:hover:not(:disabled), .warning-actions .btn-primary:hover:not(:disabled) {' +
-             'background-color: rgba(var(--c-primary), 0.3) !important;' +
+             'background-color: rgb(var(--c-primary) / 0.3) !important;' +
              '}');
     out.push('#info-panel, aside.info-panel, #gallery-wrapper.viewer-open #info-panel {' +
              'background-color: rgb(var(--c-obsidian)) !important;' +
@@ -1607,14 +1717,66 @@ _THEME_BRIDGE = """<script id="sdcodex-theme-bridge">
 </script>"""
 
 
+_THEME_TOKEN_NAMES = (
+    "surface",
+    "surface-container",
+    "surface-container-low",
+    "surface-container-lowest",
+    "surface-container-high",
+    "surface-container-highest",
+    "slate-surface",
+    "background",
+    "primary",
+    "secondary",
+    "tertiary",
+    "on-surface",
+    "on-surface-variant",
+    "outline",
+    "outline-variant",
+    "badge-checkpoint",
+    "badge-sdxl",
+    "badge-lora",
+    "badge-flux",
+)
+
+_TOKEN_ALPHA_RE = re.compile(
+    r"(?:(hover|focus|focus-visible|active):)?"
+    r"(bg|text|border|from|via|to|ring|fill|stroke|divide|placeholder|shadow)-"
+    r"(" + "|".join(sorted(_THEME_TOKEN_NAMES, key=len, reverse=True)) + r")/"
+    r"(\d{1,3})"
+)
+
+
+def _token_alpha_variants(html: str) -> list[list[str]]:
+    """Collect the themed `/opacity` utility classes a page actually uses.
+
+    The bridge can't read Tailwind's generated alpha from a class name, so it
+    only needs rules for the combinations present in this document. Emitting a
+    rule per found combination keeps the sheet small and preserves translucency
+    instead of flattening e.g. `bg-badge-checkpoint/15` into a solid fill.
+    """
+    seen: list[list[str]] = []
+    for match in _TOKEN_ALPHA_RE.finditer(html or ""):
+        state, prop, token, frac = match.groups()
+        if state == "group-hover":
+            continue
+        entry = [token, prop, str(int(frac)), state or ""]
+        if entry not in seen:
+            seen.append(entry)
+    return seen
+
+
 def _inject_theme_bridge(html: str) -> str:
-    """Inject the theme bridge into a plugin page (before </head> when seen)."""
+    """Inject the button kit + theme bridge into a plugin page (before </head>)."""
     if 'sdcodex-theme-bridge' in html:
         return html
+    entries = _token_alpha_variants(html)
+    bridge = _THEME_BRIDGE.replace("__SD_TOKEN_ALPHA__", json.dumps(entries))
+    payload = _PLUGIN_UI_CSS + bridge
     idx = html.lower().rfind('</head>')
     if idx == -1:
-        return _THEME_BRIDGE + html
-    return html[:idx] + _THEME_BRIDGE + html[idx:]
+        return payload + html
+    return html[:idx] + payload + html[idx:]
 
 
 def _plugin_page_file(plugin_id: str, name: str) -> str | None:

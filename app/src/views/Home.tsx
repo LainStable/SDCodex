@@ -12,7 +12,7 @@ import { loadScanned } from '../lib/library';
 import { GhostButton, PrimaryButton } from '../components/chrome';
 import { getDirColors } from '../lib/settings';
 import { accentColor } from '../lib/categories';
-import { Stars, TypeBadge } from '../components/ui';
+import { BaseModelBadge, Stars, TypeBadge } from '../components/ui';
 
 interface Rail {
   hero: CivitaiModel | null;
@@ -121,6 +121,7 @@ export default function Home({ goModels, onOpen, onQueue, queuedIds, ownedIds }:
                     {heroVersion.name}
                   </span>
                 )}
+                <BaseModelBadge baseModel={heroVersion?.baseModel} />
               </div>
               <h1 className="mt-2 font-display text-2xl font-semibold tracking-tight">{hero.name}</h1>
               <div className="mt-1 flex items-center gap-2 font-mono text-[11px] text-ink-muted">
@@ -239,6 +240,9 @@ export default function Home({ goModels, onOpen, onQueue, queuedIds, ownedIds }:
                     <h3 className="truncate font-display text-sm font-semibold" title={m.name}>
                       {m.name}
                     </h3>
+                    <div className="mt-1">
+                      <BaseModelBadge baseModel={v?.baseModel} />
+                    </div>
                   </div>
                 </button>
                 <div className="flex items-center gap-2 p-3 pt-1.5">

@@ -232,6 +232,8 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
             updated_count += 1
         else:
             existing.set_files(downloaded_files)
+            download = existing
+        download.base_model = model_version.get('baseModel') or download.base_model
 
         db.session.commit()
         found_ids.append((model_id, version_id))

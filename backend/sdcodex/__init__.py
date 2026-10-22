@@ -102,6 +102,21 @@ def _ensure_user_theme_column(app) -> None:
         app.logger.warning("Could not add users.theme column", exc_info=True)
 
 
+def _ensure_download_base_model_column(app) -> None:
+    """Same idea for Download rows: the library card shows the base model
+    (SDXL, Illustrious, Flux…) instead of the old socket state."""
+    try:
+        from sqlalchemy import inspect, text
+
+        columns = {c["name"] for c in inspect(db.engine).get_columns("download")}
+        if "base_model" in columns:
+            return
+        with db.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE download ADD COLUMN base_model VARCHAR(64)"))
+    except Exception:
+        app.logger.warning("Could not add download.base_model column", exc_info=True)
+
+
 def create_app(db_path: str | None = None) -> Flask:
     app = Flask(__name__)
     db_file = _database_path(db_path)
@@ -178,6 +193,7 @@ def create_app(db_path: str | None = None) -> Flask:
     with app.app_context():
         db.create_all()
         _ensure_user_theme_column(app)
+        _ensure_download_base_model_column(app)
 
     # Installed plugins (entrypoint init is optional; page-only plugins skip).
     try:

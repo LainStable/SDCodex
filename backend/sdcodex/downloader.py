@@ -270,6 +270,7 @@ def download_model(model_id, version_id, api_key=None, progress_callback=None, i
             db.session.add(download)
         download.name = model_name
         download.type = model_type
+        download.base_model = version.get('baseModel') or download.base_model
         download.set_files(downloaded_files)
         db.session.commit()
 

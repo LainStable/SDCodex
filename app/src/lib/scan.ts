@@ -82,6 +82,7 @@ export async function scanDir(
   resolveAll: (type: string) => Promise<FileSystemDirectoryHandle[]>,
   seen: Set<string>,
   onMsg: (msg: string) => void,
+  onProgress?: (done: number, total: number, message: string) => void,
 ): Promise<number> {
   const roots = await resolveAll(type);
   if (roots.length === 0) return 0;
@@ -113,10 +114,13 @@ export async function scanDir(
 
   let updated = 0;
   let done = 0;
+  onProgress?.(0, files.length, `${type}: ${files.length} file${files.length === 1 ? '' : 's'} found`);
   for (const f of files) {
     const name = f.rel.split('/').pop() ?? f.rel;
     done += 1;
-    onMsg(`${type}: Scanning ${f.rel}... (${done}/${files.length})`);
+    const progressMsg = `${type}: Scanning ${f.rel}... (${done}/${files.length})`;
+    onMsg(progressMsg);
+    onProgress?.(done, files.length, progressMsg);
     seen.add(`dir_${type}/${f.rel}`);
     try {
       const file = await f.handle.getFile();
@@ -209,6 +213,7 @@ export async function scanDir(
     }
   }
   onMsg(`${type}: scanned ${files.length} files, updated ${updated} models.`);
+  onProgress?.(files.length, files.length, `${type}: scanned ${files.length} files, updated ${updated} models.`);
   return updated;
 }
 

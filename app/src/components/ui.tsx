@@ -1,5 +1,3 @@
-import type { SocketState } from '../data/models';
-
 const TYPE_BADGE: Record<string, string> = {
   Checkpoint: 'bg-badge-checkpoint/15 border-badge-checkpoint/30 text-[#818cf8]',
   LORA: 'bg-badge-lora/15 border-badge-lora/30 text-[#a78bfa]',
@@ -40,23 +38,26 @@ export function TypeBadge({ type, color }: { type: string; color?: string }) {
   );
 }
 
-const SOCKET_STYLE: Record<SocketState, { dot: string; text: string; label: string }> = {
-  rw: { dot: 'bg-status-active', text: 'text-status-active', label: 'socket: rw' },
-  ro: { dot: 'bg-status-warning', text: 'text-[#fcd34d]', label: 'socket: ro' },
-  missing: { dot: 'bg-status-alert', text: 'text-[#f87171]', label: 'socket: missing' },
-};
-
-export function SocketPill({ socket }: { socket: SocketState }) {
-  const s = SOCKET_STYLE[socket];
+/** Base-model chip: the architecture a weight targets (SDXL 1.0, Illustrious,
+    Flux.1 D…). Local cards use this in place of the old socket pill, and the
+    Explorer / Home cards show the same chip so every model card reads alike. */
+export function BaseModelBadge({
+  baseModel,
+  className = '',
+}: {
+  baseModel?: string | null;
+  className?: string;
+}) {
+  const value = (baseModel ?? '').trim();
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-[3px] border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${s.text}`}
+      className={`inline-flex max-w-full items-center gap-1.5 rounded-[3px] border border-obsidian-high/70 bg-obsidian-lowest/60 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
+        value ? 'text-ink-muted' : 'text-ink-faint'
+      } ${className}`}
+      title={value ? `Base model: ${value}` : 'Base model unknown'}
     >
-      <span
-        className={`h-1.5 w-1.5 rounded-full ${s.dot}`}
-        style={socket === 'rw' ? { boxShadow: '0 0 8px rgba(16,185,129,0.5)' } : undefined}
-      />
-      {s.label}
+      <span className="shrink-0 text-[9px] font-medium text-ink-faint">base</span>
+      <span className="truncate">{value || 'unknown'}</span>
     </span>
   );
 }

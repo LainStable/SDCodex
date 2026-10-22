@@ -4,7 +4,7 @@ import Library from './views/Library';
 import Settings from './views/Settings';
 import PluginView from './views/PluginView';
 import ModelModal, { type ModalTarget } from './components/ModelModal';
-import { Queue, BootstrapCard, DownloadFloat, PluginTaskFloat } from './views/Core';
+import { Queue, BootstrapCard, DownloadFloat, PluginTaskFloat, ScanFloat } from './views/Core';
 import Home from './views/Home';
 import { MobileNav, Sidebar, Topbar, type UpdateState, type ViewId } from './components/chrome';
 import {
@@ -530,7 +530,10 @@ export default function App() {
   return (
     <div className="min-h-screen bg-obsidian-bg text-ink">
       <DownloadFloat go={() => go('queue')} />
-      <PluginTaskFloat onOpen={openPluginTask} />
+      <div className="fixed bottom-3 right-3 z-[55] flex w-[min(360px,92vw)] flex-col gap-2">
+        <ScanFloat onOpen={() => goSettings('dirs')} />
+        <PluginTaskFloat onOpen={openPluginTask} />
+      </div>
       {callbackMsg && (
         <div className="fixed left-1/2 top-4 z-[70] -translate-x-1/2 rounded-lg border border-status-alert/40 bg-status-alert/15 px-4 py-2 font-mono text-xs text-[#f87171]">
           SSO: {callbackMsg}

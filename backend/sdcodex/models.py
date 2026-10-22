@@ -15,6 +15,7 @@ class Download(db.Model):
     version_id = db.Column(db.Integer, nullable=False)
     name = db.Column(db.String(256), nullable=False)
     type = db.Column(db.String(64))
+    base_model = db.Column(db.String(64))
     files = db.Column(db.Text) # JSON string of file paths
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 

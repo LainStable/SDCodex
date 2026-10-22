@@ -14,6 +14,7 @@ import { adoptServerUser, fetchPublicProviders, type ServerAuthState } from '../
 import { apiPost, mirrorAuth } from '../lib/backend';
 import { fetchCatalog, type HubCatalog } from '../lib/plugins';
 import { loadTheme, saveTheme, THEMES } from '../lib/themes';
+import { getScanState, subscribeScanState, type LocalScanState } from '../lib/scanstate';
 
 /** Blocking auth gate (mirrors OldCode bootstrap + login). No session, no app:
     first-ever user sets a password and becomes admin; returning users sign in. */
@@ -908,10 +909,10 @@ export function PluginTaskFloat({
   };
 
   return (
-    <div className="glass-l2 fixed bottom-3 right-3 z-[55] w-[min(360px,92vw)] rounded-lg p-3">
+    <div className="glass-l2 rounded-lg p-3">
       <div className="flex items-center gap-2">
         <h2 className="font-display text-sm font-semibold">Plugin Tasks</h2>
-        <span className="rounded border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] uppercase text-[#a5b4fc]">
+        <span className="rounded border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] uppercase text-primary">
           {tasks.length} running
         </span>
         <button
@@ -935,7 +936,7 @@ export function PluginTaskFloat({
                   {task.current}/{task.total || '?'}
                 </span>
               </div>
-              <div className="mt-1.5 h-1.5 overflow-hidden rounded-sm bg-white/10">
+              <div className="mt-1.5 h-1.5 overflow-hidden rounded-sm bg-obsidian-high/60">
                 <div
                   className={`h-full rounded-sm bg-gradient-to-r from-primary to-secondary transition-all ${
                     task.state === 'cancelling' ? 'animate-pulse' : ''
@@ -961,6 +962,156 @@ export function PluginTaskFloat({
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+/** Floating scan panel (bottom right, stacked under plugin tasks). Server
+    scans run inside the download worker and are polled from
+    /downloads/status; browser (folder-linked) scans report through
+    lib/scanstate. Both keep progress visible while the user browses. */
+export function ScanFloat({ onOpen }: { onOpen: () => void }) {
+  type ServerScan = { percent: number; message: string; queued: number; startedAt: number };
+  const [local, setLocal] = useState<LocalScanState | null>(getScanState);
+  const [server, setServer] = useState<ServerScan | null>(null);
+  const [now, setNow] = useState(() => Date.now() / 1000);
+  const [dismissed, setDismissed] = useState(false);
+  const serverStart = useRef(0);
+  const lastRun = useRef('');
+
+  useEffect(
+    () =>
+      subscribeScanState((next) => {
+        setLocal(next);
+        setNow(Date.now() / 1000);
+      }),
+    [],
+  );
+
+  useEffect(() => {
+    let live = true;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const poll = async () => {
+      try {
+        const { apiGet, backendAvailable } = await import('../lib/backend');
+        if (!(await backendAvailable())) {
+          if (live) setServer(null);
+          return;
+        }
+        const st = await apiGet<{
+          active_tasks?: Array<{ type?: string; progress?: number; message?: string }>;
+          scan_queued?: number;
+        }>('/downloads/status');
+        if (!live) return;
+        const scan = (st.active_tasks ?? []).find((t) => t.type === 'scan');
+        if (!scan) {
+          serverStart.current = 0;
+          setServer(null);
+          return;
+        }
+        if (!serverStart.current) serverStart.current = Date.now() / 1000;
+        setServer({
+          percent: Math.max(0, Math.min(100, Number(scan.progress ?? 0))),
+          message: scan.message || 'Scanning…',
+          queued: st.scan_queued ?? 0,
+          startedAt: serverStart.current,
+        });
+        setNow(Date.now() / 1000);
+      } catch {
+        if (live) setServer(null);
+      }
+    };
+    void poll();
+    timer = setInterval(() => void poll(), 2000);
+    return () => {
+      live = false;
+      if (timer) clearInterval(timer);
+    };
+  }, []);
+
+  const view = local
+    ? {
+        run: `local-${local.startedAt}`,
+        label: local.label,
+        percent: local.total > 0 ? (local.current / local.total) * 100 : 0,
+        count: `${local.current}/${local.total || '?'}`,
+        message: local.message,
+        queued: 0,
+        startedAt: local.startedAt,
+      }
+    : server
+      ? {
+          run: `server-${server.startedAt}`,
+          label: 'all folders',
+          percent: server.percent,
+          count: `${Math.round(server.percent)}%`,
+          message: server.message,
+          queued: server.queued,
+          startedAt: server.startedAt,
+        }
+      : null;
+
+  useEffect(() => {
+    if (!view || view.run === lastRun.current) return;
+    lastRun.current = view.run;
+    setDismissed(false);
+    // Re-run only when a different scan starts, not on every progress tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view?.run]);
+
+  if (!view || dismissed) return null;
+
+  const seconds = Math.max(0, Math.round(now - view.startedAt));
+  const elapsed = view.startedAt
+    ? seconds < 60
+      ? `${seconds}s`
+      : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`
+    : '';
+
+  return (
+    <div className="glass-l2 rounded-lg p-3">
+      <div className="flex items-center gap-2">
+        <h2 className="font-display text-sm font-semibold">Model Scan</h2>
+        <span className="rounded border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] uppercase text-primary">
+          {view.count}
+        </span>
+        <button
+          type="button"
+          onClick={() => setDismissed(true)}
+          className="ml-auto rounded px-1.5 font-mono text-xs text-ink-faint hover:text-white"
+          title="Dismiss (reappears when a new scan starts)"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="mt-2 rounded border border-white/[0.06] p-2">
+        <div className="flex items-center justify-between gap-2 font-mono text-[11px]">
+          <span className="min-w-0 flex-1 truncate text-ink">Scanning {view.label}</span>
+          <span className="shrink-0 text-ink-muted">{Math.round(view.percent)}%</span>
+        </div>
+        <div className="mt-1.5 h-1.5 overflow-hidden rounded-sm bg-obsidian-high/60">
+          <div
+            className="h-full rounded-sm bg-gradient-to-r from-primary to-secondary transition-all"
+            style={{ width: `${Math.max(2, view.percent)}%` }}
+          />
+        </div>
+        <div className="mt-1 flex items-center justify-between gap-2 font-mono text-[10px] text-ink-faint">
+          <span className="min-w-0 flex-1 truncate">
+            {view.message}
+            {view.queued > 0 ? ` · ${view.queued} queued` : ''}
+          </span>
+          <span className="shrink-0">{elapsed}</span>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onOpen}
+        className="mt-2 w-full rounded border border-white/15 py-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-muted hover:bg-white/5 hover:text-white"
+      >
+        Open Model dirs →
+      </button>
     </div>
   );
 }

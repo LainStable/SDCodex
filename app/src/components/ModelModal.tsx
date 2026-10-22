@@ -2,7 +2,7 @@
    viewer shows: tags, version pills, image gallery, details table, files with
    hashes, description, and embedded generation data when present. */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   fetchModel,
   fetchModels,
@@ -396,6 +396,10 @@ export default function ModelModal({
   const [savingCover, setSavingCover] = useState(false);
   const [coverMessage, setCoverMessage] = useState<string | null>(null);
   const mainRef = useRef<HTMLDivElement>(null);
+  // The modal body scrolls; switching gallery image/version must not send it
+  // back to the top (embedded data and description change height).
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const bodyScroll = useRef(0);
 
   const baseModelId = target.kind === 'civitai' ? target.modelId : (target.modelId ?? 0);
   // Adopted via Update-metadata: flips an unknown entry into the full view.
@@ -443,12 +447,27 @@ export default function ModelModal({
   const version = model?.modelVersions.find((v) => v.id === versionId) ?? model?.modelVersions[0];
   const images: CivitaiImage[] = version?.images ?? [];
 
+  // Keep the modal where it was when a new image/version is selected. The
+  // scroll position is captured on the interaction itself: a reflow can drop
+  // the element back to 0 before its scroll event reaches us.
+  const rememberScroll = () => {
+    bodyScroll.current = bodyRef.current?.scrollTop ?? 0;
+  };
+
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const target = bodyScroll.current;
+    if (Math.abs(el.scrollTop - target) > 2) el.scrollTop = target;
+  }, [imgIdx, versionId]);
+
   // Wheel over the main image cycles through all images (non-passive listener).
   useEffect(() => {
     const el = mainRef.current;
     if (!el || images.length < 2) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      rememberScroll();
       setImgIdx((i) => (i + (e.deltaY > 0 ? 1 : images.length - 1)) % images.length);
     };
     el.addEventListener('wheel', onWheel, { passive: false });
@@ -549,7 +568,13 @@ export default function ModelModal({
 
   return (
     <Overlay onClose={onClose}>
-      <div className="glass-l2 modal-pop noscroll max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-lg p-4 md:p-5">
+      <div
+        ref={bodyRef}
+        onScroll={(e) => {
+          bodyScroll.current = e.currentTarget.scrollTop;
+        }}
+        className="glass-l2 modal-pop noscroll max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-lg p-4 md:p-5"
+      >
         {error && (
           <div className="rounded border border-status-alert/40 bg-status-alert/10 p-4 text-sm">
             <span className="font-semibold text-[#f87171]">Model unavailable:</span> {error}
@@ -577,6 +602,7 @@ export default function ModelModal({
                   key={v.id}
                   type="button"
                   onClick={() => {
+                    rememberScroll();
                     setVersionId(v.id);
                     setImgIdx(0);
                   }}
@@ -652,7 +678,10 @@ export default function ModelModal({
                       <button
                         key={i}
                         type="button"
-                        onClick={() => setImgIdx(i)}
+                        onClick={() => {
+                          rememberScroll();
+                          setImgIdx(i);
+                        }}
                         className={`h-14 w-14 shrink-0 overflow-hidden rounded border ${
                           i === imgIdx ? 'border-primary/70' : 'border-white/10 opacity-60 hover:opacity-100'
                         }`}

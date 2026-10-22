@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { BASE_MODELS } from '../lib/civitai';
 import { MODEL_TYPES, getDirectories, getDirColors } from '../lib/settings';
 import { folderForModelType } from '../lib/categories';
 import { loadScanned, type ScannedModel } from '../lib/library';
 import type { ModalTarget } from '../components/ModelModal';
-import { SocketPill, TypeBadge } from '../components/ui';
+import { BaseModelBadge, TypeBadge } from '../components/ui';
 import { BaseCloud, FilterPills, PageHeader, SearchInput } from '../components/chrome';
 
 function formatBytes(n: number): string {
@@ -19,6 +19,7 @@ interface ServerRow {
   versionId: number;
   name: string;
   type: string;
+  baseModel?: string;
   files?: { image?: string; model?: string; metadata?: string };
 }
 
@@ -35,6 +36,10 @@ async function fetchServerRows(): Promise<ServerRow[]> {
 
 const fileUrl = (absPath: string) => `/api/files?path=${encodeURIComponent(absPath)}`;
 
+/* Replacing a cover image (or a scan finishing) remounts this view through
+   `key`. Keep the grid where the user left it instead of jumping to the top. */
+let savedScrollY = 0;
+
 export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }) {
   const [query, setQuery] = useState('');
   const [bases, setBases] = useState<string[]>([]);
@@ -44,6 +49,51 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
   const [activeTab, setActiveTab] = useState<string | null>(null);
   // Object URLs for browser-scanned previews (resolved via bound handles).
   const [localPreviews, setLocalPreviews] = useState<Record<string, string>>({});
+
+  // Remember/replay the grid scroll position across remounts.
+  useEffect(() => {
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        savedScrollY = window.scrollY;
+      });
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const target = savedScrollY;
+    if (target <= 0) return;
+    let active = true;
+    const stop = () => {
+      active = false;
+    };
+    // Server rows arrive after mount, so replay the position a few times
+    // until the grid is tall enough to hold it.
+    const apply = () => {
+      if (active && Math.abs(window.scrollY - target) > 2) window.scrollTo(0, target);
+    };
+    apply();
+    const timers = [80, 250, 600].map((ms) => window.setTimeout(apply, ms));
+    window.addEventListener('wheel', stop, { passive: true, once: true });
+    window.addEventListener('pointerdown', stop, { passive: true, once: true });
+    window.addEventListener('touchstart', stop, { passive: true, once: true });
+    window.addEventListener('keydown', stop, { once: true });
+    return () => {
+      active = false;
+      timers.forEach(clearTimeout);
+      window.removeEventListener('wheel', stop);
+      window.removeEventListener('pointerdown', stop);
+      window.removeEventListener('touchstart', stop);
+      window.removeEventListener('keydown', stop);
+    };
+  }, []);
 
   // Sections follow Settings: only configured categories appear.
   const sections: string[] = useMemo(() => {
@@ -217,9 +267,8 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                         <h2 className="truncate font-display text-base font-semibold" title={r.name}>
                           {r.name}
                         </h2>
-                        <div className="mt-1 flex items-center justify-between">
-                          <SocketPill socket="rw" />
-                          <span className="font-mono text-[10px] text-status-active">✓ on server</span>
+                        <div className="mt-1.5">
+                          <BaseModelBadge baseModel={r.baseModel} />
                         </div>
                       </div>
                     </button>
@@ -278,9 +327,11 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                         <h2 className="truncate font-display text-base font-semibold" title={s.name}>
                           {s.name}
                         </h2>
-                        <div className="mt-1 flex items-center justify-between font-mono text-[11px] text-ink-muted">
-                          <SocketPill socket="rw" />
-                          <span>{formatBytes(s.size)}</span>
+                        <div className="mt-1.5 flex items-center justify-between gap-2">
+                          <BaseModelBadge baseModel={s.baseModel} />
+                          <span className="shrink-0 font-mono text-[10px] text-ink-muted">
+                            {formatBytes(s.size)}
+                          </span>
                         </div>
                         <div className="mt-1 truncate font-mono text-[10px] text-ink-faint">
                           {s.dirPath}/{s.filename}

@@ -12,7 +12,7 @@ import {
 import { getDirColors } from '../lib/settings';
 import type { AssistantSearchParams } from '../lib/assistant';
 import { accentColor } from '../lib/categories';
-import { Stars, TypeBadge } from '../components/ui';
+import { BaseModelBadge, Stars, TypeBadge } from '../components/ui';
 import {
   BaseCloud,
   CivitaiAccountStatus,
@@ -415,6 +415,9 @@ export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchT
                     <h2 className="truncate font-display text-sm font-semibold group-hover:text-white" title={m.name}>
                       {m.name}
                     </h2>
+                    <div className="mt-1">
+                      <BaseModelBadge baseModel={v?.baseModel} />
+                    </div>
                   </div>
                 </button>
                 <div className="flex items-center gap-2 p-3 pt-1.5">

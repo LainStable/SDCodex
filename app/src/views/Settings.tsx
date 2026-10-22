@@ -51,6 +51,7 @@ import {
 import { BootstrapCard, Plugins } from './Core';
 import AvatarCrop from '../components/AvatarCrop';
 import { clearScanLog, getScanLog, pushScanLog, subscribeScanLog } from '../lib/scanlog';
+import { beginScan, finishScan, updateScan } from '../lib/scanstate';
 import { loadTheme, saveTheme, THEMES } from '../lib/themes';
 
 
@@ -322,9 +323,19 @@ function Dirs() {
     }
     try {
       const seen = new Set(loadScanned().map((e) => `${e.dirKey}/${e.filename}`));
-      await scanDir(type, resolveAll, seen, (msg) =>
-        setMsgs((m) => ({ ...m, [type]: msg })),
-      );
+      beginScan(type);
+      try {
+        await scanDir(
+          type,
+          resolveAll,
+          seen,
+          (msg) => setMsgs((m) => ({ ...m, [type]: msg })),
+          (done, total, message) => updateScan({ label: type, current: done, total, message }),
+        );
+        finishScan(`${type}: scan complete.`);
+      } catch (err) {
+        finishScan(`${type}: scan failed — ${err instanceof Error ? err.message : 'unknown error'}`);
+      }
     } finally {
       setScanning(false);
     }
@@ -366,15 +377,27 @@ function Dirs() {
     }
     try {
       const seen = new Set<string>();
-      for (const t of MODEL_TYPES) {
-        if (!(dirs[`dir_${t}`] ?? '').trim()) continue;
-        await scanDir(t, resolveAll, seen, (msg) => {
-          say(msg);
-          setMsgs((m) => ({ ...m, [t]: msg }));
-        });
+      beginScan('all folders');
+      try {
+        for (const t of MODEL_TYPES) {
+          if (!(dirs[`dir_${t}`] ?? '').trim()) continue;
+          await scanDir(
+            t,
+            resolveAll,
+            seen,
+            (msg) => {
+              say(msg);
+              setMsgs((m) => ({ ...m, [t]: msg }));
+            },
+            (done, total, message) => updateScan({ label: t, current: done, total, message }),
+          );
+        }
+        const { removed } = pruneScanned(seen);
+        say(removed > 0 ? `Removed ${removed} missing models.` : 'Scan complete.');
+        finishScan(removed > 0 ? `Scan complete. Removed ${removed} missing models.` : 'Scan complete.');
+      } catch (err) {
+        finishScan(`Scan failed — ${err instanceof Error ? err.message : 'unknown error'}`);
       }
-      const { removed } = pruneScanned(seen);
-      say(removed > 0 ? `Removed ${removed} missing models.` : 'Scan complete.');
     } finally {
       setScanning(false);
     }
