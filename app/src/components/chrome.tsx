@@ -803,7 +803,7 @@ export function BaseCloud({
     <div>
       <div className="mb-1.5 flex items-center gap-2">
         <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
-          {active.length > 0 ? `(${active.length})` : ''}:
+          {active.length > 0 ? `(${active.length})` : ''}
         </span>
         {active.length > 0 && (
           <button
