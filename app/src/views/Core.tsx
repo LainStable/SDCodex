@@ -1426,12 +1426,13 @@ export function Plugins() {
         <GhostButton disabled={checking} onClick={() => void check()}>
           {checking ? 'Checking…' : 'Check now'}
         </GhostButton>
-        <PrimaryButton
+        <GhostButton
           disabled={checking || applying || rebuilding || updateUnavailable}
           onClick={() => void updateAll()}
+          className={coreNeedsUpdate ? 'border-status-warning/50 bg-status-warning/15 text-[#fcd34d] hover:bg-status-warning/25' : updates?.plugins && updates.plugins.length > 0 ? 'border-secondary/50 bg-secondary/15 text-[#22d3ee] hover:bg-secondary/25' : ''}
         >
           {applying || rebuilding ? 'Updating…' : 'Update'}
-        </PrimaryButton>
+        </GhostButton>
         {applying && (
           <div className="min-w-40 flex-1">
             <ProgressBar />
