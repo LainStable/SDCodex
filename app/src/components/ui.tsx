@@ -44,20 +44,23 @@ export function TypeBadge({ type, color }: { type: string; color?: string }) {
     Styled like the filter blocks — same radius, size and hues. */
 export function BaseModelBadge({
   baseModel,
+  fallback,
   className = '',
 }: {
   baseModel?: string | null;
+  fallback?: string;
   className?: string;
 }) {
   const value = (baseModel ?? '').trim();
+  const display = value || (fallback ?? '').trim() || 'unknown';
   return (
     <span
       className={`inline-flex max-w-full items-center rounded border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
-        value ? 'text-ink-muted' : 'text-ink-faint'
+        display !== 'unknown' ? 'text-ink-muted' : 'text-ink-faint'
       } ${className}`}
-      title={value ? `Base model: ${value}` : 'Base model unknown'}
+      title={display !== 'unknown' ? display : 'Unknown'}
     >
-      <span className="truncate">{value || 'unknown'}</span>
+      <span className="truncate">{display}</span>
     </span>
   );
 }

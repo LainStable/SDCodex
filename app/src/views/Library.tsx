@@ -331,7 +331,7 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                           {r.name}
                         </h2>
                         <div className="mt-1.5">
-                          <BaseModelBadge baseModel={r.baseModel} />
+                          <BaseModelBadge baseModel={r.baseModel} fallback={r.type} />
                         </div>
                       </div>
                     </button>
@@ -402,7 +402,7 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                           {s.name}
                         </h2>
                         <div className="mt-1.5 flex items-center justify-between gap-2">
-                          <BaseModelBadge baseModel={s.baseModel} />
+                          <BaseModelBadge baseModel={s.baseModel} fallback={s.type} />
                           <span className="shrink-0 font-mono text-[10px] text-ink-muted">
                             {formatBytes(s.size)}
                           </span>
