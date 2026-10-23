@@ -1357,6 +1357,8 @@ def plugins_install():
     repo_url = (data.get("repo_url") or "").strip()
     if not repo_url:
         return jsonify({"error": "repo_url required"}), 400
+    repo_url, _branch = updater_mod.split_repo_ref(repo_url)
+    requested_id = (data.get("plugin_id") or "").strip() or None
     mode_error = _mode_mismatch(rebuilder_mod)
     if mode_error:
         return mode_error
@@ -1366,6 +1368,7 @@ def plugins_install():
         repo_url,
         data.get("volumes") or {},
         install_mode=install_mode,
+        plugin_id=requested_id,
     )
     if not ok:
         return jsonify({"error": result}), 502

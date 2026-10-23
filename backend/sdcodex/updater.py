@@ -154,15 +154,31 @@ def _https_github_remote(path: str, remote: str) -> str:
         return ""
 
 
+def _current_branch(path: str) -> str:
+    """Branch checked out in a plugin clone ('' for detached HEAD)."""
+    try:
+        r = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
+        name = (r.stdout or "").strip()
+        return name if r.returncode == 0 and name and name != "HEAD" else ""
+    except Exception:
+        return ""
+
+
 def remote_rev(repo_path_or_url: str, timeout: int = 20) -> str:
-    """Remote HEAD sha via the local remote (no API tokens needed)."""
+    """Remote sha of the tracked ref via the local remote (no tokens needed).
+
+    Beta plugins are pinned to a non-default branch, so compare against that
+    branch's head instead of the repository's default HEAD.
+    """
     try:
         if os.path.isdir(os.path.join(repo_path_or_url, ".git")):
             remote = _detect_remote(repo_path_or_url)
             # HTTPS first (see _https_url): SSH remotes are unreachable in a
             # minimal image, which used to hide every available update.
             target = _https_github_remote(repo_path_or_url, remote) or remote
-            r = _git(["ls-remote", target, "HEAD"], cwd=repo_path_or_url, timeout=timeout)
+            branch = _current_branch(repo_path_or_url)
+            ref = f"refs/heads/{branch}" if branch else "HEAD"
+            r = _git(["ls-remote", target, ref], cwd=repo_path_or_url, timeout=timeout)
         else:
             r = _git(["ls-remote", _https_url(repo_path_or_url), "HEAD"], cwd=root_dir(), timeout=timeout)
         if r.returncode != 0:
@@ -429,6 +445,25 @@ def update_core() -> tuple[bool, str]:
 
 
 # --------------------------------------------------------------- plugins ---
+
+def split_repo_ref(url: str) -> tuple[str, str]:
+    """Split ``https://github.com/owner/repo#branch`` into (url, branch).
+
+    Hub entries for beta plugins point at a non-default branch; the fragment is
+    stripped before URL validation so the branch never reaches git as an
+    argument.
+    """
+    value = (url or "").strip()
+    if "#" not in value:
+        return value, ""
+    base, _, branch = value.partition("#")
+    branch = branch.strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,120}", branch or ""):
+        return value, ""
+    if ".." in branch or branch.endswith("/"):
+        return value, ""
+    return base.strip(), branch
+
 
 def normalize_github_url(url: str) -> tuple[str, str]:
     """Return (owner/repo short name, canonical https url).
@@ -799,16 +834,37 @@ def install_plugin(
     repo_url: str,
     volume_paths: dict | None = None,
     install_mode: str | None = None,
+    plugin_id: str | None = None,
 ) -> tuple[bool, str | dict]:
-    """Clone a plugin, merge requirements, configure volumes. Returns manifest."""
+    """Clone a plugin, merge requirements, configure volumes. Returns manifest.
+
+    ``repo_url`` may carry a ``#branch`` suffix for beta channels. ``plugin_id``
+    selects the install directory (so the same repository can be installed on
+    several branches side by side) and is validated against the manifest.
+    """
+    repo_url, branch = split_repo_ref(repo_url)
     short, canonical = normalize_github_url(repo_url)
     if not short or not canonical:
         return False, "Only GitHub repository URLs (owner/repo) are supported."
     repo_name = short.split("/")[-1]
-    target = os.path.join(plugins_dir(), safe_plugin_dirname(repo_name))
+    # Only channel installs (``#branch``) take the plugin id as their folder:
+    # stable plugins keep their historical repo-named directory so existing
+    # installs are never duplicated (two dirs with the same manifest id would
+    # both register the same routes).
+    wanted_id = safe_plugin_dirname(plugin_id) if (plugin_id and branch) else ""
+    target = os.path.join(plugins_dir(), wanted_id or safe_plugin_dirname(repo_name))
     token = _github_token()
+    clone_args = ["clone", "--single-branch"] + (["--branch", branch] if branch else []) + [canonical, target]
 
     if os.path.isdir(os.path.join(target, ".git")):
+        # Keep an existing checkout on the requested channel.
+        if branch:
+            current = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=target)
+            if current.returncode == 0 and current.stdout.strip() != branch:
+                _git(["fetch", "origin", branch], cwd=target)
+                fetch_head = _git(["rev-parse", f"origin/{branch}"], cwd=target)
+                if fetch_head.returncode == 0:
+                    _git(["checkout", "-B", branch, f"origin/{branch}"], cwd=target)
         r = _git(["pull", "--ff-only"], cwd=target)
         if r.returncode != 0:
             return False, f"Update failed: {(r.stderr or r.stdout).strip()[:300]}"
@@ -817,22 +873,31 @@ def install_plugin(
             shutil.rmtree(target)
         # Anonymous first (public repos); token only as fallback for private
         # repos — a stale/invalid token must never break public clones.
-        r = _git(["clone", canonical, target], cwd=root_dir())
+        r = _git(clone_args, cwd=root_dir())
         if r.returncode != 0 and token:
             from urllib.parse import quote
 
             clone_url = f"https://x-access-token:{quote(token, safe='')}@github.com/{short}.git"
-            r = _git(["clone", clone_url, target], cwd=root_dir())
-        if r.returncode != 0:
+            r = _git(["clone", "--single-branch"] + (["--branch", branch] if branch else []) + [clone_url, target], cwd=root_dir())
+        if r.returncode != 0 and not branch:
             r = _git(["clone", "-b", "master", canonical, target], cwd=root_dir())
-            if r.returncode != 0:
-                msg = f"Clone failed: {(r.stderr or r.stdout).strip()[:300]}"
-                if not token:
-                    msg += " Private repo? Set GITHUB_TOKEN."
-                return False, msg
+        if r.returncode != 0:
+            msg = f"Clone failed: {(r.stderr or r.stdout).strip()[:300]}"
+            if not token:
+                msg += " Private repo? Set GITHUB_TOKEN."
+            return False, msg
 
     manifest = read_manifest(target) or {"id": repo_name.lower(), "name": repo_name}
-    plugin_id = manifest.get("id", repo_name.lower())
+    actual_id = manifest.get("id", repo_name.lower())
+    if wanted_id and actual_id != plugin_id:
+        # A branch that does not declare the hub id would register other routes
+        # (or collide with the stable plugin); refuse instead of half-installing.
+        shutil.rmtree(target, ignore_errors=True)
+        return False, (
+            f"Repository branch '{branch or 'default'}' declares plugin id "
+            f"'{actual_id}', expected '{plugin_id}'."
+        )
+    plugin_id = actual_id
     root = root_dir()
 
     # Default host paths come from the manifest (OldCode convention); explicit

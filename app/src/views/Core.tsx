@@ -1701,7 +1701,7 @@ export function Plugins() {
                       void runAction(p.id, async (api) => {
                         const r = await api.apiPost<{ ok: boolean; plugin?: { name?: string }; error?: string }>(
                           '/plugins/install',
-                          { repo_url: p.repository },
+                          { repo_url: p.repository, plugin_id: p.id },
                         );
                         return `installed ${r.plugin?.name ?? p.id} — ${
                           updates?.install_mode?.mode === 'local'
