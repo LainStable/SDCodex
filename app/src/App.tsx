@@ -564,14 +564,15 @@ export default function App() {
         </div>
       )}
       {!authReady && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
+        <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-3 bg-obsidian-bg/90 p-4 backdrop-blur-md">
+          <img src="/sdcodex.svg" alt="" className="h-10 w-10 animate-pulse object-contain" />
           <p className="font-mono text-xs text-ink-faint">Checking session…</p>
         </div>
       )}
       {authReady && !authed && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-          <div className="glass-l2 edge-shimmer w-full max-w-md rounded-lg p-5">
-            <div className="mt-2">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-obsidian-bg/80 p-4 backdrop-blur-md">
+          <div className="w-full max-w-sm">
+            <div className="glass-l2 edge-shimmer max-h-[calc(100dvh-4rem)] overflow-y-auto rounded-lg p-5">
               <BootstrapCard
                 existing={serverAuth && !serverAuth.bootstrap ? profile : serverAuth ? null : profile}
                 serverMode={serverAuth !== null}
@@ -583,6 +584,10 @@ export default function App() {
                   void handleAuthed(p);
                 }}
               />
+            </div>
+            <div className="mt-3 flex items-center justify-between px-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+              <span>SDCodex · self-hosted</span>
+              <span className="rounded border border-ink/15 px-1.5 py-0.5">{installMode}</span>
             </div>
           </div>
         </div>

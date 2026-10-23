@@ -702,7 +702,7 @@ export function PrimaryButton({
     <button
       type="button"
       {...rest}
-      className={`rounded border border-primary/50 bg-primary/20 px-4 py-2 text-sm font-semibold text-white hover:bg-primary/30 disabled:opacity-50 ${rest.className ?? ''}`}
+      className={`rounded border border-primary/50 bg-primary/20 px-4 py-2 text-sm font-semibold text-ink hover:bg-primary/30 disabled:opacity-50 ${rest.className ?? ''}`}
     >
       {children}
     </button>
@@ -717,7 +717,7 @@ export function GhostButton({
     <button
       type="button"
       {...rest}
-      className={`rounded border border-white/15 px-3 py-1.5 text-xs text-ink-muted hover:bg-white/5 hover:text-white disabled:opacity-40 ${rest.className ?? ''}`}
+      className={`rounded border border-ink/15 px-3 py-1.5 text-xs text-ink-muted hover:bg-ink/5 hover:text-ink disabled:opacity-40 ${rest.className ?? ''}`}
     >
       {children}
     </button>

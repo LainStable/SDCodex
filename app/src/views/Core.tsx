@@ -196,45 +196,86 @@ export function BootstrapCard({
     if (existing) setUsername((u) => u || existing.username);
   }, [existing]);
 
+  const fieldClass =
+    'rounded border border-ink/10 bg-obsidian-lowest px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-faint transition-colors focus:border-primary focus:ring-1 focus:ring-primary/30';
+
   return (
     <div onKeyDown={onKey}>
-      <div className="flex flex-col items-center px-2 pb-1">
-        <img src="/codex.svg" alt="SDCodex" className="h-40 w-full object-contain" />
+      <div className="flex flex-col items-center text-center">
+        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
+          {isCreate ? 'First run setup' : 'Secure access'}
+        </span>
+        <div className="relative mt-4 flex h-16 w-16 items-center justify-center rounded-lg border border-ink/10 bg-obsidian-lowest">
+          <img src="/sdcodex.svg" alt="SDCodex" className="h-12 w-12 object-contain" />
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-2 -bottom-px h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent"
+          />
+        </div>
+        <h1 className="mt-4 font-display text-xl font-semibold tracking-tight">
+          {isCreate ? 'Create administrator' : 'Welcome back'}
+        </h1>
+        <p className="mt-1 text-xs text-ink-muted">
+          {isCreate
+            ? 'Set up the first account for this workstation.'
+            : 'Sign in to your SDCodex workspace.'}
+        </p>
       </div>
-      <div className="mt-3 flex flex-col gap-2">
-        <input
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder="Username"
-          autoComplete="username"
-          className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
-        />
-        {isCreate && (
+
+      <div className="mt-5 flex flex-col gap-3">
+        <label className="flex flex-col gap-1">
+          <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+            Username
+          </span>
           <input
-            value={display}
-            onChange={(e) => setDisplay(e.target.value)}
-            placeholder="Display name (optional)"
-            autoComplete="nickname"
-            className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="username"
+            autoComplete="username"
+            className={fieldClass}
           />
+        </label>
+        {isCreate && (
+          <label className="flex flex-col gap-1">
+            <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+              Display name <span className="normal-case tracking-normal">(optional)</span>
+            </span>
+            <input
+              value={display}
+              onChange={(e) => setDisplay(e.target.value)}
+              placeholder="Your name"
+              autoComplete="nickname"
+              className={fieldClass}
+            />
+          </label>
         )}
-        <input
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder={existing || !isCreate ? 'Password' : 'Password (min 8 characters)'}
-          type="password"
-          autoComplete={existing || !isCreate ? 'current-password' : 'new-password'}
-          className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
-        />
-        {isCreate && (
+        <label className="flex flex-col gap-1">
+          <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+            Password
+          </span>
           <input
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            placeholder="Confirm password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={isCreate ? 'Min 8 characters' : 'Enter password'}
             type="password"
-            autoComplete="new-password"
-            className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+            autoComplete={isCreate ? 'new-password' : 'current-password'}
+            className={fieldClass}
           />
+        </label>
+        {isCreate && (
+          <label className="flex flex-col gap-1">
+            <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+              Confirm password
+            </span>
+            <input
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              placeholder="Repeat password"
+              type="password"
+              autoComplete="new-password"
+              className={fieldClass}
+            />
+          </label>
         )}
         {isCreate && (
           <label className="flex flex-col gap-1">
@@ -248,7 +289,7 @@ export function BootstrapCard({
                 saveTheme(e.target.value);
                 setThemeSlug(loadTheme());
               }}
-              className="rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none focus:border-primary"
+              className={fieldClass}
             >
               {THEMES.map((t) => (
                 <option key={t.slug} value={t.slug}>
@@ -258,46 +299,64 @@ export function BootstrapCard({
             </select>
           </label>
         )}
-        {error && <p className="font-mono text-[11px] text-status-alert">{error}</p>}
+        {error && (
+          <p
+            role="alert"
+            className="rounded border border-status-alert/40 bg-status-alert/10 px-2.5 py-1.5 font-mono text-[11px] text-status-alert"
+          >
+            {error}
+          </p>
+        )}
         <PrimaryButton
-          className="mx-6"
+          className="mt-1 w-full py-2.5"
           disabled={busy || !username.trim()}
           onClick={() => void submit()}
         >
           {busy ? 'Working…' : !isCreate ? 'Sign in' : 'Create administrator'}
         </PrimaryButton>
-        {sso.map((p) => (
-          <GhostButton
-            key={p.id}
-            className="mx-6"
-            disabled={busy}
-            onClick={() =>
-              void (async () => {
-                setError(null);
-                setBusy(true);
-                try {
-                  const { serverLoginUrl } = await import('../lib/auth');
-                  window.location.href = await serverLoginUrl(String(p.id));
-                } catch (e) {
-                  setError(e instanceof Error ? e.message : 'SSO failed.');
-                  setBusy(false);
+        {sso.length > 0 && (
+          <>
+            <div className="flex items-center gap-2 pt-1" aria-hidden="true">
+              <span className="h-px flex-1 bg-ink/10" />
+              <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+                or continue with
+              </span>
+              <span className="h-px flex-1 bg-ink/10" />
+            </div>
+            {sso.map((p) => (
+              <GhostButton
+                key={p.id}
+                className="w-full"
+                disabled={busy}
+                onClick={() =>
+                  void (async () => {
+                    setError(null);
+                    setBusy(true);
+                    try {
+                      const { serverLoginUrl } = await import('../lib/auth');
+                      window.location.href = await serverLoginUrl(String(p.id));
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : 'SSO failed.');
+                      setBusy(false);
+                    }
+                  })()
                 }
-              })()
-            }
-          >
-            <span className="inline-flex items-center gap-2">
-              {faviconFor(p) && (
-                <img
-                  src={faviconFor(p)!}
-                  alt=""
-                  className="h-4 w-4 rounded-sm"
-                  onError={() => setFaviconSrc((f) => ({ ...f, [p.id]: (f[p.id] ?? 0) + 1 }))}
-                />
-              )}
-              Sign in with {p.name}
-            </span>
-          </GhostButton>
-        ))}
+              >
+                <span className="inline-flex items-center gap-2">
+                  {faviconFor(p) && (
+                    <img
+                      src={faviconFor(p)!}
+                      alt=""
+                      className="h-4 w-4 rounded-sm"
+                      onError={() => setFaviconSrc((f) => ({ ...f, [p.id]: (f[p.id] ?? 0) + 1 }))}
+                    />
+                  )}
+                  Sign in with {p.name}
+                </span>
+              </GhostButton>
+            ))}
+          </>
+        )}
       </div>
     </div>
   );
@@ -1480,20 +1539,57 @@ export function Plugins() {
                   ? 'Preparing…'
                   : 'Preparing…';
           return (
-            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-              <div className="glass-l2 w-full max-w-2xl overflow-hidden rounded-xl border border-white/10">
-                <div className="flex items-center justify-between px-5 py-4">
-                  <img src="/codex.svg" alt="SDCodex" className="h-40 w-full object-fill" />
+            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-obsidian-bg/80 p-4 backdrop-blur-md">
+              <div className="glass-l2 edge-shimmer w-full max-w-2xl overflow-hidden rounded-lg border border-ink/10">
+                <div className="flex items-start justify-between gap-3 border-b border-ink/10 px-5 py-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <img src="/sdcodex.svg" alt="" className="h-10 w-10 shrink-0 object-contain" />
+                    <div className="min-w-0">
+                      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
+                        System update
+                      </div>
+                      <h2 className="truncate font-display text-lg font-semibold tracking-tight">
+                        {finished
+                          ? 'Update complete'
+                          : failed
+                            ? 'Update failed'
+                            : running
+                              ? 'Updating SDCodex'
+                              : 'Ready to update'}
+                      </h2>
+                    </div>
+                  </div>
                   <button
                     type="button"
                     onClick={() => setShowRebuildLog(false)}
                     aria-label="Close self-update dialog"
-                    className="rounded-lg border border-white/10 bg-obsidian-low px-3 py-2 text-sm font-semibold text-ink hover:text-white hover:border-white/20"
+                    className="shrink-0 rounded border border-ink/10 bg-obsidian-low px-2.5 py-1.5 text-sm text-ink-muted transition-colors hover:border-ink/20 hover:text-ink"
                   >
                     ✕
                   </button>
                 </div>
+
                 <div className="px-5 py-4">
+                  <div className="mb-4 flex flex-wrap items-center gap-2">
+                    <span className="rounded border border-primary/40 bg-primary/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em] text-ink">
+                      {isLocal ? 'local' : 'docker'}
+                    </span>
+                    <span
+                      className={`rounded border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em] ${
+                        failed
+                          ? 'border-status-alert/40 bg-status-alert/10 text-status-alert'
+                          : finished
+                            ? 'border-status-active/40 bg-status-active/10 text-status-active'
+                            : 'border-status-warning/40 bg-status-warning/10 text-status-warning'
+                      }`}
+                    >
+                      {failed ? 'failed' : finished ? 'complete' : running ? 'running' : 'ready'}
+                    </span>
+                    <span className="ml-auto font-mono text-[10px] text-ink-faint">
+                      {finished ? 'reloading…' : running ? 'do not close this window' : ''}
+                    </span>
+                  </div>
+
                   <ol className="flex flex-col gap-2.5">
                     {steps.map((label, i) => {
                       const done = finished || i < active;
@@ -1508,7 +1604,7 @@ export function Plugins() {
                       return (
                         <li key={label} className="flex items-center gap-3">
                           <span className={`h-3 w-3 shrink-0 rounded-full ${dot}`} aria-hidden="true" />
-                          <span className={`text-[15px] ${done || current ? 'text-ink' : 'text-ink-muted'}`}>
+                          <span className={`text-sm ${done || current ? 'text-ink' : 'text-ink-muted'}`}>
                             {label}
                           </span>
                         </li>
@@ -1519,7 +1615,7 @@ export function Plugins() {
                     type="button"
                     onClick={() => setLogOpen((open) => !open)}
                     aria-expanded={logOpen}
-                    className="mt-5 flex w-full items-center justify-between gap-2 rounded-lg px-1 py-1 text-left text-[15px] font-semibold text-ink hover:text-ink-muted"
+                    className="mt-5 flex w-full items-center justify-between gap-2 rounded px-1 py-1 text-left text-sm font-semibold text-ink transition-colors hover:text-ink-muted"
                   >
                     <span>Updater log</span>
                     <span
@@ -1530,7 +1626,7 @@ export function Plugins() {
                     </span>
                   </button>
                   {logOpen && (
-                    <div className="mt-2 max-h-72 overflow-y-auto rounded-lg border border-white/10 bg-obsidian-lowest p-4 font-mono text-[13px] leading-relaxed text-ink-muted">
+                    <div className="mt-2 max-h-72 overflow-y-auto rounded border border-ink/10 bg-obsidian-lowest p-4 font-mono text-[12px] leading-relaxed text-ink-muted">
                       {rebuildLog.length === 0 ? (
                         <p className="text-ink-faint">
                           {applying
@@ -1549,13 +1645,17 @@ export function Plugins() {
                       <div ref={rebuildLogEndRef} />
                     </div>
                   )}
-                  <p className="mt-3 text-[14px] text-ink-faint">{statusText}</p>
+                  <p className="mt-3 font-mono text-[11px] text-ink-faint">{statusText}</p>
                 </div>
-                <div className="flex justify-end px-5 py-3">
+
+                <div className="flex items-center justify-between gap-3 border-t border-ink/10 px-5 py-3">
+                  <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+                    {updates?.rebuild?.mode ? `${updates.rebuild.mode} · self-updater` : 'self-updater'}
+                  </span>
                   <button
                     type="button"
                     onClick={() => setShowRebuildLog(false)}
-                    className="rounded-lg bg-obsidian-high px-6 py-2 text-sm font-semibold text-ink hover:bg-obsidian-highest hover:border-white/20 border border-white/10"
+                    className="rounded border border-ink/10 bg-obsidian-high px-4 py-1.5 text-sm font-semibold text-ink transition-colors hover:border-ink/20 hover:bg-obsidian-highest"
                   >
                     Close
                   </button>
