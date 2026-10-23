@@ -168,9 +168,18 @@ export function Sidebar({
             <nav className="space-y-1 text-sm">
               {activePlugin ? (
                 <>
-                  <div className={`px-3 pb-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint transition-opacity duration-150 ${open ? 'opacity-100' : 'opacity-0'}`}>
-                    {activePlugin.name}
-                    {activePlugin.version ? ` · v${activePlugin.version}` : ''}
+                  <div className={`flex items-center gap-2 px-3 pb-1 transition-opacity duration-150 ${open ? 'opacity-100' : 'opacity-0'}`}>
+                    <span className="min-w-0 truncate font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+                      {activePlugin.name}
+                    </span>
+                    {activePlugin.version && (
+                      <span
+                        className="shrink-0 rounded border border-primary/40 bg-primary/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold leading-none text-[#b9baff]"
+                        title={`Installed version ${activePlugin.version}`}
+                      >
+                        v{activePlugin.version}
+                      </span>
+                    )}
                   </div>
                   {activePlugin.nav_items.length > 0 && activePlugin.nav_items.map((item) => (
                     <button

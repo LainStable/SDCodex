@@ -75,9 +75,13 @@ if __name__ == "__main__":
             from waitress import serve
 
             try:
-                threads = max(4, min(64, int(os.environ.get("SDCODEX_THREADS", "8"))))
+                # Plugin pages (SSE streams, thumbnails, task polls) plus the
+                # core's own polling can easily exceed a small pool: with 8
+                # threads waitress logged "Task queue depth is 58" and pages
+                # stalled. Default higher; SDCODEX_THREADS still overrides.
+                threads = max(8, min(128, int(os.environ.get("SDCODEX_THREADS", "24"))))
             except (TypeError, ValueError):
-                threads = 8
+                threads = 24
             print(f"Serving with waitress on http://{host}:{port}", flush=True)
             serve(
                 app,

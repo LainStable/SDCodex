@@ -121,11 +121,7 @@ export default function Home({ goModels, onOpen, onQueue, queuedIds, ownedIds }:
                     {heroVersion.name}
                   </span>
                 )}
-                <BaseModelBadge
-                  baseModel={heroVersion?.baseModel}
-                  type={hero.type}
-                  color={accentColor(colors, hero.type)}
-                />
+                <BaseModelBadge baseModel={heroVersion?.baseModel} />
               </div>
               <h1 className="mt-2 font-display text-2xl font-semibold tracking-tight">{hero.name}</h1>
               <div className="mt-1 flex items-center gap-2 font-mono text-[11px] text-ink-muted">
@@ -245,11 +241,7 @@ export default function Home({ goModels, onOpen, onQueue, queuedIds, ownedIds }:
                       {m.name}
                     </h3>
                     <div className="mt-1">
-                      <BaseModelBadge
-                        baseModel={v?.baseModel}
-                        type={m.type}
-                        color={accentColor(colors, m.type)}
-                      />
+                      <BaseModelBadge baseModel={v?.baseModel} />
                     </div>
                   </div>
                 </button>

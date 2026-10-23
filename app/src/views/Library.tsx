@@ -49,6 +49,9 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
   const [updates, setUpdates] = useState<Record<string, { id: number; name?: string }>>({});
   const [colors] = useState<Record<string, string>>(getDirColors);
   const [activeTab, setActiveTab] = useState<string | null>(null);
+  // Civitai answers for rows stored before the architecture was recorded,
+  // keyed `modelId-versionId` (works without any folder permission).
+  const [remoteBases, setRemoteBases] = useState<Record<string, string>>({});
   // Object URLs for browser-scanned previews (resolved via bound handles).
   const [localPreviews, setLocalPreviews] = useState<Record<string, string>>({});
 
@@ -183,8 +186,61 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
     };
   }, [scanned, serverRows]);
 
+  // Records stored before the architecture was captured: ask Civitai once per
+  // model id. The version row carries `baseModel`, so this needs no folder
+  // permission and covers .ckpt files the header reader cannot parse.
+  useEffect(() => {
+    const want = new Map<number, Set<number>>();
+    const add = (modelId?: number, versionId?: number, base?: string) => {
+      if (!modelId || !versionId || (base ?? '').trim()) return;
+      const set = want.get(modelId) ?? new Set<number>();
+      set.add(versionId);
+      want.set(modelId, set);
+    };
+    scanned.forEach((s) => add(s.modelId, s.versionId, s.baseModel));
+    serverRows.forEach((r) => add(r.modelId, r.versionId, r.baseModel));
+    // Keep the burst small; the rest fills in on the next visit.
+    const ids = [...want.keys()].slice(0, 8);
+    if (ids.length === 0) return;
+    let live = true;
+    void (async () => {
+      const { fetchModel } = await import('../lib/civitai');
+      const found: Record<string, string> = {};
+      for (const modelId of ids) {
+        try {
+          const model = await fetchModel(modelId);
+          for (const v of model.modelVersions ?? []) {
+            if (!want.get(modelId)?.has(v.id)) continue;
+            if ((v.baseModel ?? '').trim()) found[`${modelId}-${v.id}`] = v.baseModel.trim();
+          }
+        } catch {
+          /* offline or removed — chip keeps its fallback */
+        }
+      }
+      if (live && Object.keys(found).length > 0) {
+        setRemoteBases((current) => ({ ...found, ...current }));
+        // Persist for scan records so a reload does not need the API again.
+        const { setScannedBaseModelByFile } = await import('../lib/library');
+        let patched = false;
+        for (const s of loadScanned()) {
+          const hit = found[`${s.modelId}-${s.versionId}`];
+          if (!hit || s.baseModel) continue;
+          if (setScannedBaseModelByFile(s.dirKey, s.filename, hit)) patched = true;
+        }
+        if (patched) setScanned(loadScanned());
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [scanned, serverRows]);
+
   const updateFor = (modelId?: number, versionId?: number) =>
     modelId && versionId ? updates[`${modelId}-${versionId}`] : undefined;
+
+  /** Architecture fetched from Civitai for rows stored without one. */
+  const remoteBase = (modelId?: number, versionId?: number) =>
+    modelId && versionId ? remoteBases[`${modelId}-${versionId}`] : undefined;
 
   const q = query.trim().toLowerCase();
   const matches = (hay: string) => !q || hay.toLowerCase().includes(q);
@@ -323,9 +379,7 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                         </h2>
                         <div className="mt-1.5">
                           <BaseModelBadge
-                            baseModel={r.baseModel}
-                            type={r.type}
-                            color={colors[r.type]}
+                            baseModel={r.baseModel || remoteBase(r.modelId, r.versionId)}
                           />
                         </div>
                       </div>
@@ -398,9 +452,7 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                         </h2>
                         <div className="mt-1.5 flex items-center justify-between gap-2">
                           <BaseModelBadge
-                            baseModel={s.baseModel}
-                            type={s.type}
-                            color={colors[s.type]}
+                            baseModel={s.baseModel || remoteBase(s.modelId, s.versionId)}
                           />
                           <span className="shrink-0 font-mono text-[10px] text-ink-muted">
                             {formatBytes(s.size)}

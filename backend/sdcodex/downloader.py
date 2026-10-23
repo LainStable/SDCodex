@@ -4,6 +4,7 @@ import hashlib
 import json
 import stat
 import tempfile
+from datetime import datetime, timezone
 
 import requests
 from flask import current_app
@@ -105,12 +106,85 @@ def download_file(url, path, api_key=None, progress_callback=None, is_cancelled=
                 pass
 
 
-def _atomic_write_json(path, payload):
+def _stj_escape(text):
+    """Escape a string the way .NET's System.Text.Json default encoder does.
+
+    StabilityMatrix is a .NET app and re-reads these sidecars with
+    System.Text.Json, whose default JavaScriptEncoder escapes HTML characters,
+    quotes, '+', '`' and every non-ASCII code point (uppercase hex).
+    """
+    out = []
+    for ch in text:
+        code = ord(ch)
+        if ch == '"':
+            out.append('\\u0022')
+        elif ch == "\\":
+            out.append("\\\\")
+        elif ch == "&":
+            out.append("\\u0026")
+        elif ch == "'":
+            out.append("\\u0027")
+        elif ch == "<":
+            out.append("\\u003C")
+        elif ch == ">":
+            out.append("\\u003E")
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ch == "\t":
+            out.append("\\t")
+        elif ch == "\b":
+            out.append("\\b")
+        elif ch == "\f":
+            out.append("\\f")
+        elif code < 0x20:
+            out.append(f"\\u{code:04X}")
+        elif code > 0x7E:
+            # Surrogate pairs come out as two uppercase escapes, like .NET.
+            encoded = ch.encode("utf-16-be")
+            for i in range(0, len(encoded), 2):
+                out.append(f"\\u{int.from_bytes(encoded[i:i + 2], 'big'):04X}")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _stj_dumps(value):
+    """Compact, System.Text.Json-compatible JSON (no spaces, escaped keys)."""
+    if value is None:
+        return "null"
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, (int, float)):
+        if isinstance(value, float):
+            if value != value or value in (float("inf"), float("-inf")):
+                return "null"
+            text = repr(value)
+            # .NET writes integral doubles without the trailing ".0".
+            return text[:-2] if text.endswith(".0") else text
+        return str(value)
+    if isinstance(value, str):
+        return '"' + _stj_escape(value) + '"'
+    if isinstance(value, (list, tuple)):
+        return "[" + ",".join(_stj_dumps(item) for item in value) + "]"
+    if isinstance(value, dict):
+        return (
+            "{"
+            + ",".join(f"{_stj_dumps(str(k))}:{_stj_dumps(v)}" for k, v in value.items())
+            + "}"
+        )
+    return _stj_dumps(str(value))
+
+
+def _atomic_write_text(path, text):
     directory = os.path.dirname(path) or "."
     fd, temporary = tempfile.mkstemp(prefix=".sdcodex-meta-", suffix=".json", dir=directory)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=4)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
         os.replace(temporary, path)
     except Exception:
         try:
@@ -119,6 +193,85 @@ def _atomic_write_json(path, payload):
             pass
         raise
 
+
+def _atomic_write_json(path, payload):
+    _atomic_write_text(path, json.dumps(payload, indent=4))
+
+
+def _file_format(filename):
+    ext = os.path.splitext(filename)[1].lower()
+    if ext == ".safetensors":
+        return "SafeTensor"
+    if ext in (".ckpt", ".pt", ".pth", ".bin"):
+        return "PickleTensor"
+    if ext == ".gguf":
+        return "GGUF"
+    if ext == ".onnx":
+        return "Onnx"
+    return "Other"
+
+
+def _tag_names(tags):
+    out = []
+    for tag in tags or []:
+        name = tag.get("name") if isinstance(tag, dict) else tag
+        if isinstance(name, str) and name.strip():
+            out.append(name.strip())
+    return out
+
+
+def _cm_info(model, version, model_id, version_id, model_name, model_type, primary_file):
+    """StabilityMatrix ``.cm-info.json`` payload (ConnectedModelInfo record).
+
+    Field-for-field what StabilityMatrix writes when it imports a Civitai
+    model, so its "already imported" detection and metadata panel line up with
+    files SDCodex downloaded.
+    """
+    hashes = primary_file.get("hashes") or {}
+    stats = model.get("stats") or {}
+    creator = model.get("creator") or {}
+    remote_name = primary_file.get("name") or ""
+    return {
+        "ModelId": int(model.get("id") or model_id or 0),
+        "ModelName": model.get("name") or model_name or "",
+        "ModelDescription": model.get("description") or "",
+        "Nsfw": bool(model.get("nsfw", False)),
+        "Tags": _tag_names(model.get("tags")),
+        "ModelType": model.get("type") or model_type or "",
+        "VersionId": int(version.get("id") or version_id or 0),
+        "VersionName": version.get("name") or "",
+        "VersionDescription": version.get("description"),
+        "AuthorUsername": creator.get("username"),
+        "BaseModel": version.get("baseModel") or "",
+        "RemoteFileName": remote_name,
+        "RemoteFileId": primary_file.get("id"),
+        "FileMetadata": {
+            "fp": None,
+            "size": None,
+            "format": _file_format(remote_name),
+        },
+        "ImportedAt": datetime.now(timezone.utc).isoformat(),
+        "Hashes": {
+            "SHA256": str(hashes.get("SHA256") or "").upper(),
+            "CRC32": str(hashes.get("CRC32") or "").upper(),
+            "BLAKE3": str(hashes.get("BLAKE3") or "").upper(),
+        },
+        "TrainedWords": list(version.get("trainedWords") or []),
+        "Stats": {
+            "favoriteCount": int(stats.get("favoriteCount") or 0),
+            "commentCount": int(stats.get("commentCount") or 0),
+            "thumbsUpCount": int(stats.get("thumbsUpCount") or 0),
+            "downloadCount": int(stats.get("downloadCount") or 0),
+            "ratingCount": int(stats.get("ratingCount") or 0),
+            "rating": float(stats.get("rating") or 0),
+        },
+        "UserTitle": None,
+        "ThumbnailImageUrl": None,
+        "InferenceDefaults": None,
+        # ConnectedModelSource.Civitai
+        "Source": 0,
+        "SourceUrl": None,
+    }
 
 def _preview_extension(url):
     lowered = (url or "").lower()
@@ -268,12 +421,12 @@ def download_model(model_id, version_id, api_key=None, progress_callback=None, i
         stability_row = db.session.get(Setting, "stabilitymatrix")
         if stability_row and (stability_row.value or "") == "1":
             cm_info_path = os.path.join(base_dir, f"{safe_base_name}.cm-info.json")
-            cm_data = {
-                "ModelId": model_id,
-                "ModelName": model_name,
-                "ModelDescription": model.get('description', ''),
-            }
-            _atomic_write_json(cm_info_path, cm_data)
+            cm_data = _cm_info(
+                model, version, model_id, version_id, model_name, model_type, primary_file
+            )
+            # Compact, System.Text.Json-escaped: StabilityMatrix (a .NET app)
+            # writes and re-reads these itself.
+            _atomic_write_text(cm_info_path, _stj_dumps(cm_data))
             downloaded_files['cm_info'] = cm_info_path
 
         # 5. Record in DB (update the row on re-download instead of adding a
