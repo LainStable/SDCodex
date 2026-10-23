@@ -231,7 +231,7 @@ export function Sidebar({
         }
       </nav>
         </div>
-        <div className={`shrink-0 border-t border-white/[0.06] ${collapsed ? 'p-2' : 'p-3'}`}>
+        <div className={`shrink-0 ${collapsed ? 'p-2' : 'p-3'}`}>
           {!collapsed ? (
             <div className="space-y-2.5">
               <div className="font-mono text-[10px] leading-relaxed text-ink-faint">
