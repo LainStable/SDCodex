@@ -68,6 +68,15 @@ import {
   THEME_VAR_LABELS,
   type ThemeDef,
 } from '../lib/themes';
+import {
+  LOGIN_BG_EVENT,
+  clearLoginBackground,
+  loadLoginBackground,
+  loginBackgroundBytes,
+  prepareLoginBackground,
+  saveLoginBackground,
+  type LoginBackground,
+} from '../lib/loginBackground';
 
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {  return (
@@ -1246,6 +1255,114 @@ function hexToRgbTriplet(hex: string): string {
   return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`;
 }
 
+function LoginBackgroundField() {
+  const [background, setBackground] = useState<LoginBackground | null>(() => loadLoginBackground());
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const sync = () => setBackground(loadLoginBackground());
+    window.addEventListener(LOGIN_BG_EVENT, sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener(LOGIN_BG_EVENT, sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
+
+  const pick = async (file: File | undefined) => {
+    if (!file) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const prepared = await prepareLoginBackground(file);
+      saveLoginBackground(prepared);
+      setBackground(prepared);
+      setMessage({ ok: true, text: `Login background set from ${file.name}.` });
+    } catch (error) {
+      setMessage({
+        ok: false,
+        text: error instanceof Error ? error.message : 'Could not use that image.',
+      });
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  const remove = () => {
+    clearLoginBackground();
+    setBackground(null);
+    setMessage({ ok: true, text: 'Login background removed.' });
+  };
+
+  const sizeLabel = background
+    ? `${background.width}×${background.height} · ${Math.round(loginBackgroundBytes(background) / 1024)} KB`
+    : '';
+
+  return (
+    <div className="mt-4 rounded border border-white/[0.06] bg-white/[0.02] p-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-ink">Login background</h3>
+          <p className="mt-0.5 text-xs text-ink-muted">
+            Image shown behind the sign-in card. Uploads are scaled to fit 1920×1080 and stored in
+            this browser, so they also apply on a fresh login.
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(event) => void pick(event.target.files?.[0])}
+          />
+          <GhostButton disabled={busy} onClick={() => fileRef.current?.click()}>
+            {busy ? 'Processing…' : background ? 'Replace image' : 'Upload image'}
+          </GhostButton>
+          {background && (
+            <GhostButton
+              className="border-status-alert/40 text-[#f87171]"
+              onClick={remove}
+              title="Remove the login background"
+            >
+              Remove
+            </GhostButton>
+          )}
+        </div>
+      </div>
+
+      {background ? (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <img
+            src={background.dataUrl}
+            alt="Login background preview"
+            className="h-20 w-32 shrink-0 rounded border border-white/10 object-cover"
+          />
+          <div className="min-w-0 font-mono text-[10px] text-ink-faint">
+            <p className="truncate text-ink-muted">{background.name}</p>
+            <p className="mt-0.5">{sizeLabel}</p>
+          </div>
+        </div>
+      ) : (
+        <p className="mt-3 font-mono text-[10px] text-ink-faint">
+          No background set — the login gate uses the theme background.
+        </p>
+      )}
+
+      {message && (
+        <p
+          className={`mt-2 font-mono text-[11px] ${message.ok ? 'text-status-active' : 'text-[#f87171]'}`}
+        >
+          {message.text}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Themes() {
   const [library, setLibrary] = useState<ThemeDef[]>(() => allThemes());
   const [slug, setSlug] = useState<string>(() => loadTheme());
@@ -1411,6 +1528,8 @@ function Themes() {
           {message.text}
         </p>
       )}
+
+      <LoginBackgroundField />
     </div>
   );
 }
