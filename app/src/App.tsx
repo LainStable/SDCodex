@@ -118,9 +118,10 @@ export default function App() {
   const [space, setSpace] = useState<AppRoute['space']>(() => readRoute().space);
   const [installed, setInstalled] = useState<InstalledPlugin[]>([]);
   const [pluginPage, setPluginPage] = useState<string | null>(() => readRoute().pluginPage);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+  // The sidebar is a hover-expanding icon rail; pinning keeps it open.
+  const [sidebarPinned, setSidebarPinned] = useState(() => {
     try {
-      return localStorage.getItem('sdcodex.sidebar-collapsed.v1') === 'true';
+      return localStorage.getItem('sdcodex.sidebar-pinned.v1') === 'true';
     } catch {
       return false;
     }
@@ -269,11 +270,11 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('sdcodex.sidebar-collapsed.v1', String(sidebarCollapsed));
+      localStorage.setItem('sdcodex.sidebar-pinned.v1', String(sidebarPinned));
     } catch {
       /* ignore */
     }
-  }, [sidebarCollapsed]);
+  }, [sidebarPinned]);
 
   useEffect(() => {
     const onPopState = () => {
@@ -590,7 +591,8 @@ export default function App() {
         <Sidebar
           view={view}
           go={go}
-          collapsed={sidebarCollapsed}
+          pinned={sidebarPinned}
+          onTogglePin={() => setSidebarPinned((pinned) => !pinned)}
           queueCount={queue.length}
           version={appVersion}
           updates={updates}
@@ -606,8 +608,6 @@ export default function App() {
           <Topbar
             installMode={installMode}
             go={go}
-            onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
-            sidebarCollapsed={sidebarCollapsed}
             profileLabel={initials(profile)}
             avatarUrl={profile?.avatar ?? ''}
             signedIn={authed}

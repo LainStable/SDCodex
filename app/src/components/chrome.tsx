@@ -35,7 +35,8 @@ export interface UpdateState {
 export function Sidebar({
   view,
   go,
-  collapsed,
+  pinned,
+  onTogglePin,
   queueCount,
   version,
   updates,
@@ -47,7 +48,9 @@ export function Sidebar({
 }: {
   view: ViewId;
   go: (v: ViewId) => void;
-  collapsed: boolean;
+  /** Pinned open with the pin button; unpinned the rail expands on hover. */
+  pinned: boolean;
+  onTogglePin: () => void;
   queueCount: number;
   version: string;
   updates: UpdateState;
@@ -70,6 +73,11 @@ export function Sidebar({
 
   const [gallerySources, setGallerySources] = useState<Array<{ id: string; label: string }>>([]);
   const [activeGallerySource, setActiveGallerySource] = useState<string>('media');
+  // OldCode main-menu behaviour: the bar is a narrow icon rail that widens on
+  // hover, with the labels already laid out behind the clipped edge. Pinning
+  // keeps it open and reserves the expanded width in the page flow.
+  const [hovered, setHovered] = useState(false);
+  const open = pinned || hovered;
 
   useEffect(() => {
     if (activePlugin?.id !== 'gallery') return;
@@ -97,153 +105,178 @@ export function Sidebar({
       window.removeEventListener('message', onMsg);
     };
   }, [activePlugin?.id]);
+
   return (
     <>
-      {/* Fixed menu + spacer: the nav floats over the page, the spacer keeps
-          its column width so content never slides underneath it. */}
+      {/* Spacer holds the rail's width in the page flow; only a pinned bar
+          reserves the expanded column. Hover expansion overlays the page like
+          the fixed OldCode menu instead of shifting content under the cursor. */}
       <div
         aria-hidden="true"
-        className={`hidden shrink-0 transition-[width] duration-200 md:block ${collapsed ? 'w-16' : 'w-60'}`}
+        className={`hidden shrink-0 transition-[width] duration-150 ease-out md:block ${pinned ? 'w-60' : 'w-16'}`}
       />
       <aside
-        className={`fixed inset-y-0 left-0 z-30 hidden h-dvh flex-col border-r border-white/[0.06] bg-obsidian-bg/95 backdrop-blur transition-[width] duration-200 md:flex ${collapsed ? 'w-16' : 'w-60'}`}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        onFocusCapture={() => setHovered(true)}
+        onBlurCapture={(event) => {
+          const next = event.relatedTarget as Node | null;
+          if (!next || !event.currentTarget.contains(next)) setHovered(false);
+        }}
+        className={`fixed inset-y-0 left-0 z-30 hidden h-dvh flex-col overflow-hidden border-r border-white/[0.06] bg-obsidian-bg/95 backdrop-blur transition-[width] duration-150 ease-out md:flex ${
+          open ? 'w-60 shadow-2xl shadow-black/50' : 'w-16'
+        }`}
       >
-        <div className={`shrink-0 ${collapsed ? 'p-2' : 'px-3 pt-3 pb-1'}`}>
-          <div
-            className={`flex items-center ${collapsed ? 'justify-center' : ''}`}
-            title={collapsed ? 'SDCodex' : undefined}
-          >
-            {collapsed ? (
-              <img src="/codex.svg" alt="SDCodex" className="h-9 w-9 shrink-0 object-contain" />
+        <button
+          type="button"
+          onClick={onTogglePin}
+          title={pinned ? 'Unpin sidebar' : 'Pin sidebar open'}
+          aria-label={pinned ? 'Unpin sidebar' : 'Pin sidebar open'}
+          aria-pressed={pinned}
+          className={`absolute right-1 top-1 z-20 flex h-5 w-5 items-center justify-center rounded transition-colors ${
+            pinned
+              ? 'bg-primary/20 text-primary hover:bg-primary/30'
+              : 'text-ink-faint hover:bg-white/10 hover:text-white'
+          }`}
+        >
+          <FanIcon
+            icon="fa-solid fa-thumbtack"
+            name="Pin sidebar"
+            className={`!text-[11px] ${pinned ? '' : 'rotate-45'}`}
+          />
+        </button>
+
+        {/* Fixed-width inner column: icons stay centred in the 64px rail while
+            labels keep their layout and are revealed as the bar widens. */}
+        <div className="flex h-full w-60 shrink-0 flex-col">
+          <div className={`shrink-0 ${open ? 'px-3 pb-1 pt-3' : 'px-2 pb-1 pt-5'}`}>
+            {open ? (
+              <div className="pr-8">
+                <img src="/codex.svg" alt="SDCodex" className="h-24 w-full object-fill" />
+              </div>
             ) : (
-              <img src="/codex.svg" alt="SDCodex" className="h-24 w-full object-fill" />
+              <div className="flex h-10 w-12 items-center justify-center" title="SDCodex">
+                <img src="/sdcodex.svg" alt="SDCodex" className="h-8 w-8 object-contain" />
+              </div>
             )}
           </div>
-        </div>
-        {/* Only the nav scrolls, so the brand and footer stay on screen with long menus. */}
-        <div className={`min-h-0 flex-1 overflow-y-auto ${collapsed ? 'p-2' : 'p-4 pt-2'}`}>
-      <nav className="space-y-1 text-sm">
-        {activePlugin ? (
-          <>
-            {!collapsed && <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
-              {activePlugin.name}
-              {activePlugin.version ? ` · v${activePlugin.version}` : ''}
-            </div>}
-            {activePlugin.nav_items.length > 0 && activePlugin.nav_items.map((item) => (
-              <button
-                key={item.page}
-                type="button"
-                onClick={() => onPluginPage(item.page)}
-                title={collapsed ? item.label : undefined}
-                aria-label={collapsed ? item.label : undefined}
-                className={`flex w-full items-center ${collapsed ? 'justify-center px-1' : 'gap-2 px-3'} rounded py-2 text-left ${
-                  currentPage === item.page
-                    ? 'bg-primary/15 text-white ring-1 ring-inset ring-primary/40'
-                    : 'text-ink-muted hover:bg-white/5'
-                }`}
-              >
-                {collapsed
-                  ? <FanIcon icon={item.icon ?? 'extension'} name={item.label} className="!text-[18px]" />
-                  : <>{item.icon ? <FanIcon icon={item.icon} name={item.label} className="!text-[16px]" /> : null}<span>{item.label}</span></>}
-              </button>
-            ))}
-            {activePlugin.id === 'gallery' && gallerySources.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-white/[0.06]">
-                {!collapsed && (
-                  <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
-                    Sources
+
+          {/* Only the nav scrolls, so the brand and footer stay on screen with long menus. */}
+          <div className="min-h-0 flex-1 overflow-y-auto p-2">
+            <nav className="space-y-1 text-sm">
+              {activePlugin ? (
+                <>
+                  <div className={`px-3 pb-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint transition-opacity duration-150 ${open ? 'opacity-100' : 'opacity-0'}`}>
+                    {activePlugin.name}
+                    {activePlugin.version ? ` · v${activePlugin.version}` : ''}
                   </div>
-                )}
-                {gallerySources.map((source) => (
+                  {activePlugin.nav_items.length > 0 && activePlugin.nav_items.map((item) => (
+                    <button
+                      key={item.page}
+                      type="button"
+                      onClick={() => onPluginPage(item.page)}
+                      title={open ? undefined : item.label}
+                      aria-label={open ? undefined : item.label}
+                      className={`flex w-full items-center rounded py-1 text-left ${
+                        currentPage === item.page
+                          ? 'bg-primary/15 text-white ring-1 ring-inset ring-primary/40'
+                          : 'text-ink-muted hover:bg-white/5'
+                      }`}
+                    >
+                      <span className="flex h-10 w-12 shrink-0 items-center justify-center">
+                        <FanIcon icon={item.icon ?? 'extension'} name={item.label} className="!text-[18px]" />
+                      </span>
+                      <span className={`min-w-0 flex-1 truncate pr-2 transition-opacity duration-150 ${open ? 'opacity-100' : 'opacity-0'}`}>{item.label}</span>
+                    </button>
+                  ))}
+                  {activePlugin.id === 'gallery' && gallerySources.length > 0 && (
+                    <div className="mt-3 border-t border-white/[0.06] pt-3">
+                      <div className={`px-3 pb-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint transition-opacity duration-150 ${open ? 'opacity-100' : 'opacity-0'}`}>
+                        Sources
+                      </div>
+                      {gallerySources.map((source) => (
+                        <button
+                          key={source.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveGallerySource(source.id);
+                            const iframes = document.querySelectorAll('iframe');
+                            iframes.forEach((f) => {
+                              f.contentWindow?.postMessage(
+                                { type: 'sdcodex:set-source', sourceId: source.id },
+                                window.location.origin,
+                              );
+                            });
+                          }}
+                          title={open ? undefined : source.label}
+                          aria-label={open ? undefined : source.label}
+                          className={`flex w-full items-center rounded py-1 text-left text-xs ${
+                            activeGallerySource === source.id
+                              ? 'bg-primary/15 text-white ring-1 ring-inset ring-primary/40'
+                              : 'text-ink-muted hover:bg-white/5'
+                          }`}
+                        >
+                          <span className="flex h-8 w-12 shrink-0 items-center justify-center">
+                            <FanIcon
+                              icon={source.id === 'media' ? 'folder' : 'cloud'}
+                              name={source.label}
+                              className="!text-[16px] text-ink-faint"
+                            />
+                          </span>
+                          <span className={`min-w-0 flex-1 truncate pr-2 transition-opacity duration-150 ${open ? 'opacity-100' : 'opacity-0'}`}>{source.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                NAV.map((item) => (
                   <button
-                    key={source.id}
+                    key={item.id}
                     type="button"
-                    onClick={() => {
-                      setActiveGallerySource(source.id);
-                      const iframes = document.querySelectorAll('iframe');
-                      iframes.forEach((f) => {
-                        f.contentWindow?.postMessage(
-                          { type: 'sdcodex:set-source', sourceId: source.id },
-                          window.location.origin,
-                        );
-                      });
-                    }}
-                    title={collapsed ? source.label : undefined}
-                    aria-label={collapsed ? source.label : undefined}
-                    className={`flex w-full items-center ${collapsed ? 'justify-center px-1' : 'gap-2 px-3'} rounded py-1.5 text-left text-xs ${
-                      activeGallerySource === source.id
+                    onClick={() => go(item.id)}
+                    title={open ? undefined : item.label}
+                    aria-label={open ? undefined : item.label}
+                    className={`flex w-full items-center rounded py-1 text-left ${
+                      view === item.id
                         ? 'bg-primary/15 text-white ring-1 ring-inset ring-primary/40'
                         : 'text-ink-muted hover:bg-white/5'
                     }`}
                   >
-                    <FanIcon
-                      icon={source.id === 'media' ? 'folder' : 'cloud'}
-                      name={source.label}
-                      className="!text-[16px] text-ink-faint shrink-0"
-                    />
-                    {!collapsed && <span className="truncate">{source.label}</span>}
+                    <span className="relative flex h-10 w-12 shrink-0 items-center justify-center">
+                      <FanIcon icon={NAV_ICONS[item.id]} name={item.label} className="!text-[20px]" />
+                      {item.id === 'queue' && queueCount > 0 && (
+                        <span className="absolute right-0.5 top-0 min-w-4 rounded-full bg-primary px-1 text-center font-mono text-[9px] leading-4 text-obsidian">
+                          {queueCount > 99 ? '99+' : queueCount}
+                        </span>
+                      )}
+                    </span>
+                    <span className={`flex min-w-0 flex-1 items-center gap-2 truncate pr-2 transition-opacity duration-150 ${open ? 'opacity-100' : 'opacity-0'}`}>
+                      {item.label}
+                      {item.soon && (
+                        <span className="ml-1 rounded border border-white/15 px-2 py-0.5 font-mono text-[10px] uppercase text-ink-faint">
+                          soon
+                        </span>
+                      )}
+                    </span>
                   </button>
-                ))}
-              </div>
-            )}
-          </>
-        ) : (
-          NAV.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => go(item.id)}
-            title={collapsed ? item.label : undefined}
-            aria-label={collapsed ? item.label : undefined}
-            className={`flex w-full items-center ${collapsed ? 'justify-center px-1' : 'justify-between px-3'} rounded py-2 text-left ${
-              view === item.id
-                ? 'bg-primary/15 text-white ring-1 ring-inset ring-primary/40'
-                : 'text-ink-muted hover:bg-white/5'
-            }`}
-          >
-            {collapsed ? (
-              <span className="relative flex h-10 w-10 items-center justify-center">
-                <FanIcon icon={NAV_ICONS[item.id]} name={item.label} className="!text-[20px]" />
-                {item.id === 'queue' && queueCount > 0 && (
-                  <span className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-primary px-1 text-center font-mono text-[9px] leading-4 text-obsidian">
-                    {queueCount > 99 ? '99+' : queueCount}
-                  </span>
-                )}
-              </span>
-            ) : (
-              <span className="flex items-center gap-2">
-                <FanIcon icon={NAV_ICONS[item.id]} name={item.label} className="!text-[16px]" />
-                {item.label}
-                {item.soon && (
-                  <span className="ml-1 rounded border border-white/15 px-2 py-0.5 font-mono text-[10px] uppercase text-ink-faint">
-                    soon
-                  </span>
-                )}
-              </span>
-            )}
-            {item.id === 'queue' && queueCount > 0 && (
-              <span className={`rounded bg-primary/30 px-1.5 font-mono text-[10px] ${collapsed ? 'hidden' : ''}`}>
-                {queueCount}
-              </span>
-            )}
-            </button>
-          )))
-        }
-      </nav>
-        </div>
-        <div className={`shrink-0 ${collapsed ? 'p-2' : 'p-3'}`}>
-          {!collapsed ? (
-            <div className="space-y-2.5">
-              <div className="font-mono text-[10px] leading-relaxed text-ink-faint">
-                <div className="flex items-center justify-between">
-                  <span>Storage</span>
-                  <span className="text-ink-muted">742 GB of 2 TB</span>
+                ))
+              )}
+            </nav>
+          </div>
+
+          <div className={`shrink-0 ${open ? 'p-3' : 'p-2'}`}>
+            {open ? (
+              <div className="space-y-2.5">
+                <div className="font-mono text-[10px] leading-relaxed text-ink-faint">
+                  <div className="flex items-center justify-between">
+                    <span>Storage</span>
+                    <span className="text-ink-muted">742 GB of 2 TB</span>
+                  </div>
+                  <div className="mt-1 h-1.5 overflow-hidden rounded-sm bg-white/10">
+                    <div className="h-full w-[37%] rounded-sm bg-gradient-to-r from-primary to-secondary" />
+                  </div>
                 </div>
-                <div className="mt-1 h-1.5 overflow-hidden rounded-sm bg-white/10">
-                  <div className="h-full w-[37%] rounded-sm bg-gradient-to-r from-primary to-secondary" />
-                </div>
-              </div>
-              {(hasUpdate || updates.newPluginAvailable || !collapsed) && (
                 <div className="flex flex-wrap items-center justify-between gap-1.5 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
                   {hasUpdate ? (
                     <button
@@ -278,47 +311,47 @@ export function Sidebar({
                     </button>
                   )}
                 </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-2">
-              <div className="h-1 w-8 overflow-hidden rounded-sm bg-white/10" title="Storage: 742 GB of 2 TB">
-                <div className="h-full w-[37%] rounded-sm bg-gradient-to-r from-primary to-secondary" />
               </div>
-              {(hasUpdate || updates.newPluginAvailable) && (
-                <div className="flex flex-col items-center gap-1 font-mono text-[10px]">
-                  {hasUpdate && (
-                    <button
-                      type="button"
-                      onClick={onGoPlugins}
-                      title={
-                        updates.core
-                          ? 'Core update available — open Plugin Hub to update'
-                          : 'Plugin updates available — open Plugin Hub'
-                      }
-                      className={`rounded border px-2 py-0.5 font-mono text-[10px] font-semibold ${
-                        updates.core
-                          ? 'border-status-warning/50 bg-status-warning/15 text-[#fcd34d]'
-                          : 'border-secondary/50 bg-secondary/15 text-[#22d3ee]'
-                      }`}
-                    >
-                      {updates.core ? '⟳' : '⬢'}
-                    </button>
-                  )}
-                  {updates.newPluginAvailable && (
-                    <button
-                      type="button"
-                      onClick={onGoPlugins}
-                      title="A new plugin is available to install"
-                      className="rounded border border-status-warning/50 bg-status-warning/15 px-2 py-0.5 font-mono text-[10px] font-semibold text-[#fcd34d]"
-                    >
-                      +
-                    </button>
-                  )}
+            ) : (
+              <div className="flex w-12 flex-col items-center gap-2">
+                <div className="h-1 w-8 overflow-hidden rounded-sm bg-white/10" title="Storage: 742 GB of 2 TB">
+                  <div className="h-full w-[37%] rounded-sm bg-gradient-to-r from-primary to-secondary" />
                 </div>
-              )}
-            </div>
-          )}
+                {(hasUpdate || updates.newPluginAvailable) && (
+                  <div className="flex flex-col items-center gap-1 font-mono text-[10px]">
+                    {hasUpdate && (
+                      <button
+                        type="button"
+                        onClick={onGoPlugins}
+                        title={
+                          updates.core
+                            ? 'Core update available — open Plugin Hub to update'
+                            : 'Plugin updates available — open Plugin Hub'
+                        }
+                        className={`rounded border px-2 py-0.5 font-mono text-[10px] font-semibold ${
+                          updates.core
+                            ? 'border-status-warning/50 bg-status-warning/15 text-[#fcd34d]'
+                            : 'border-secondary/50 bg-secondary/15 text-[#22d3ee]'
+                        }`}
+                      >
+                        {updates.core ? '⟳' : '⬢'}
+                      </button>
+                    )}
+                    {updates.newPluginAvailable && (
+                      <button
+                        type="button"
+                        onClick={onGoPlugins}
+                        title="A new plugin is available to install"
+                        className="rounded border border-status-warning/50 bg-status-warning/15 px-2 py-0.5 font-mono text-[10px] font-semibold text-[#fcd34d]"
+                      >
+                        +
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </aside>
     </>
@@ -532,8 +565,6 @@ export function UserMenu({
 export function Topbar({
   installMode = 'local',
   go,
-  onToggleSidebar,
-  sidebarCollapsed,
   profileLabel,
   avatarUrl,
   signedIn,
@@ -546,8 +577,6 @@ export function Topbar({
 }: {
   installMode?: 'docker' | 'local';
   go: (v: ViewId) => void;
-  onToggleSidebar: () => void;
-  sidebarCollapsed: boolean;
   profileLabel: string;
   avatarUrl: string;
   signedIn: boolean;
@@ -560,20 +589,6 @@ export function Topbar({
 }) {
   return (
     <div className="mb-4 flex items-center gap-2">
-      <button
-        type="button"
-        onClick={onToggleSidebar}
-        className="glass-l1 hidden shrink-0 rounded-lg px-2.5 py-2 text-ink-muted hover:text-white md:block"
-        title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        aria-pressed={sidebarCollapsed}
-      >
-        <FanIcon
-          icon={sidebarCollapsed ? 'fa-solid fa-angles-right' : 'fa-solid fa-angles-left'}
-          name={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className="!text-[18px]"
-        />
-      </button>
       <div className="glass-l1 flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2">
         {assistant?.configured ? (
           <AssistantBar model={assistant.model} onAction={assistant.onAction} />

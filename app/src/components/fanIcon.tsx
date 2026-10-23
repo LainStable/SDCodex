@@ -9,6 +9,7 @@ const ICON_ALIASES: Record<string, string> = {
   'fa-solid fa-folder-open': 'folder',
   'fa-solid fa-download': 'download',
   'fa-solid fa-gear': 'settings',
+  'fa-solid fa-thumbtack': 'pin',
   'fa-solid fa-cubes': 'cubes',
   'fas fa-tags': 'tag',
   'fas fa-headphones-alt': 'headphones',
@@ -73,6 +74,7 @@ const ICON_PATHS: Record<string, string[]> = {
   wand: ['M3 21 12 12', 'm15 3 1.3 2.7 2.7 1.3-2.7 1.3L15 11l-1.3-2.7L11 7l2.7-1.3L15 3Z', 'm7 14 .7 1.5L9 16.2l-1.3.7L7 18.4l-.7-1.5L5 16.2l1.3-.7L7 14Z'],
   rename: ['M4 20h16', 'm14.4 5.6 4 4', 'M13 7 5 15v4h4l8-8-4-4Z'],
   captions: ['M3 5h18v14H3z', 'M7 12h3', 'M14 12h3'],
+  pin: ['M12 17v5', 'M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z'],
 };
 
 export function FanIcon({
