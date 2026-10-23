@@ -91,7 +91,7 @@ export async function inferBaseModel(file: File): Promise<string> {
   if (!file.name.toLowerCase().endsWith('.safetensors')) return '';
   try {
     const length = Number(new DataView(await file.slice(0, 8).arrayBuffer()).getBigUint64(0, true));
-    if (!length || length > 100 * 1024 * 1024) return '';
+    if (!length || length > 4 * 1024 * 1024) return '';
     const header = JSON.parse(new TextDecoder().decode(await file.slice(8, 8 + length).arrayBuffer())) as {
       __metadata__?: Record<string, unknown>;
     };

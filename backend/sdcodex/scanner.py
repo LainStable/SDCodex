@@ -53,7 +53,7 @@ def infer_base_model(filepath):
             if len(raw) < 8:
                 return ''
             length = int.from_bytes(raw, 'little')
-            if not length or length > 100 * 1024 * 1024:
+            if not length or length > 4 * 1024 * 1024:
                 return ''
             header = json.loads(handle.read(length).decode('utf-8', 'ignore'))
     except (OSError, ValueError):

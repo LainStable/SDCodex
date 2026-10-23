@@ -487,28 +487,10 @@ def library():
     # Large libraries exceed the old 2000-row cap (thousands of LoRAs), which
     # looked like a partial scan. Send the whole table; the UI renders in pages.
     rows = Download.query.order_by(Download.id.desc()).limit(10000).all()
-    # Rows stored before the architecture was captured (or scanned while
-    # Civitai was unreachable) would render an "unknown" chip forever: read the
-    # safetensors header once and persist it. Capped so a big library does not
-    # stall the first response — the rest fills in on later loads.
-    from .scanner import infer_base_model
-
-    patched = 0
-    for d in rows:
-        if d.base_model or patched >= 25:
-            continue
-        path = (d.get_files() or {}).get("model")
-        if not path:
-            continue
-        guess = infer_base_model(path)
-        if guess:
-            d.base_model = guess
-            patched += 1
-    if patched:
-        try:
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
+    # Never touch model files here. Reading safetensors headers to backfill the
+    # base-model chip made this endpoint take minutes on a busy/slow mount
+    # (observed 191 s), which is exactly what made the Library appear empty.
+    # Scans and the Identify models task persist the architecture instead.
     return jsonify(
         {
             "items": [
