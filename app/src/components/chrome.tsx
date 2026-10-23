@@ -127,29 +127,31 @@ export function Sidebar({
           open ? 'w-60 shadow-2xl shadow-black/50' : 'w-16'
         }`}
       >
-        <button
-          type="button"
-          onClick={onTogglePin}
-          title={pinned ? 'Unpin sidebar' : 'Pin sidebar open'}
-          aria-label={pinned ? 'Unpin sidebar' : 'Pin sidebar open'}
-          aria-pressed={pinned}
-          className={`absolute right-1 top-1 z-20 flex h-5 w-5 items-center justify-center rounded transition-colors ${
-            pinned
-              ? 'bg-primary/20 text-primary hover:bg-primary/30'
-              : 'text-ink-faint hover:bg-white/10 hover:text-white'
-          }`}
-        >
-          <FanIcon
-            icon="fa-solid fa-thumbtack"
-            name="Pin sidebar"
-            className={`!text-[11px] ${pinned ? '' : 'rotate-45'}`}
-          />
-        </button>
+        {open && (
+          <button
+            type="button"
+            onClick={onTogglePin}
+            title={pinned ? 'Unpin sidebar' : 'Pin sidebar open'}
+            aria-label={pinned ? 'Unpin sidebar' : 'Pin sidebar open'}
+            aria-pressed={pinned}
+            className={`absolute right-1 top-1 z-20 flex h-5 w-5 items-center justify-center rounded transition-colors ${
+              pinned
+                ? 'bg-primary/20 text-primary hover:bg-primary/30'
+                : 'text-ink-faint hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            <FanIcon
+              icon="fa-solid fa-thumbtack"
+              name="Pin sidebar"
+              className={`!text-[11px] ${pinned ? '' : 'rotate-45'}`}
+            />
+          </button>
+        )}
 
         {/* Fixed-width inner column: icons stay centred in the 64px rail while
             labels keep their layout and are revealed as the bar widens. */}
         <div className="flex h-full w-60 shrink-0 flex-col">
-          <div className={`shrink-0 ${open ? 'px-3 pb-1 pt-3' : 'px-2 pb-1 pt-5'}`}>
+          <div className={`shrink-0 ${open ? 'px-3 pb-1 pt-3' : 'px-2 pb-1 pt-3'}`}>
             {open ? (
               <div className="pr-8">
                 <img src="/codex.svg" alt="SDCodex" className="h-24 w-full object-fill" />
@@ -177,7 +179,7 @@ export function Sidebar({
                       onClick={() => onPluginPage(item.page)}
                       title={open ? undefined : item.label}
                       aria-label={open ? undefined : item.label}
-                      className={`flex w-full items-center rounded py-1 text-left ${
+                      className={`flex items-center rounded py-1 text-left transition-[width] duration-150 ${open ? 'w-full' : 'w-12'} ${
                         currentPage === item.page
                           ? 'bg-primary/15 text-white ring-1 ring-inset ring-primary/40'
                           : 'text-ink-muted hover:bg-white/5'
@@ -210,7 +212,7 @@ export function Sidebar({
                           }}
                           title={open ? undefined : source.label}
                           aria-label={open ? undefined : source.label}
-                          className={`flex w-full items-center rounded py-1 text-left text-xs ${
+                          className={`flex items-center rounded py-1 text-left text-xs transition-[width] duration-150 ${open ? 'w-full' : 'w-12'} ${
                             activeGallerySource === source.id
                               ? 'bg-primary/15 text-white ring-1 ring-inset ring-primary/40'
                               : 'text-ink-muted hover:bg-white/5'
@@ -237,7 +239,7 @@ export function Sidebar({
                     onClick={() => go(item.id)}
                     title={open ? undefined : item.label}
                     aria-label={open ? undefined : item.label}
-                    className={`flex w-full items-center rounded py-1 text-left ${
+                    className={`flex items-center rounded py-1 text-left transition-[width] duration-150 ${open ? 'w-full' : 'w-12'} ${
                       view === item.id
                         ? 'bg-primary/15 text-white ring-1 ring-inset ring-primary/40'
                         : 'text-ink-muted hover:bg-white/5'
