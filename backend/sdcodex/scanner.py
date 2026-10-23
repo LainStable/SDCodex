@@ -97,6 +97,28 @@ def _version_from_metadata(data, filename):
     if not isinstance(data, dict):
         return None
 
+    # StabilityMatrix ConnectedModelInfo (`.cm-info.json`, PascalCase fields).
+    if data.get("ModelId") and data.get("VersionId"):
+        try:
+            model_id = int(data.get("ModelId") or 0)
+            version_id = int(data.get("VersionId") or 0)
+        except (TypeError, ValueError):
+            return None
+        if not model_id or not version_id:
+            return None
+        return {
+            "id": version_id,
+            "modelId": model_id,
+            "name": data.get("VersionName") or "",
+            "baseModel": data.get("BaseModel") or "",
+            "files": [{"name": filename, "hashes": data.get("Hashes") or {}}],
+            "images": [],
+            "model": {
+                "name": data.get("ModelName") or "Unknown Model",
+                "type": data.get("ModelType") or "Other",
+            },
+        }
+
     def matches(version):
         files = version.get("files")
         if not isinstance(files, list) or not files:
@@ -108,15 +130,23 @@ def _version_from_metadata(data, filename):
         )
 
     versions = data.get("modelVersions")
-    if isinstance(versions, list):
-        # The downloader saves the full model object.
-        for version in versions:
-            if isinstance(version, dict) and matches(version):
-                enriched = dict(version)
-                enriched.setdefault(
-                    "model", {"name": data.get("name", "Unknown Model"), "type": data.get("type", "Other")}
-                )
-                return enriched
+    if isinstance(versions, list) and versions:
+        # The downloader saves the full model object; pick the version whose
+        # file matches (or the only version, for renamed files).
+        chosen = next(
+            (v for v in versions if isinstance(v, dict) and matches(v)),
+            None,
+        )
+        if chosen is None and len(versions) == 1 and isinstance(versions[0], dict):
+            chosen = versions[0]
+        if chosen is not None:
+            enriched = dict(chosen)
+            # Version objects in a model payload carry no modelId of their own.
+            enriched.setdefault("modelId", data.get("id"))
+            enriched.setdefault(
+                "model", {"name": data.get("name", "Unknown Model"), "type": data.get("type", "Other")}
+            )
+            return enriched
         return None
 
     if data.get("id") and data.get("modelId"):
@@ -130,9 +160,42 @@ def _version_from_metadata(data, filename):
     return None
 
 
+META_SUFFIXES = ('.metadata.json', '.cm-info.json')
+IMAGE_SUFFIXES = ('.webp', '.png', '.jpg', '.jpeg', '.preview.png')
+
+
+def _read_sidecar(file_dir, base_name):
+    """First readable JSON sidecar next to a model.
+
+    Supports both formats in the wild: Civitai's `<name>.metadata.json` and
+    StabilityMatrix's `<name>.cm-info.json`.
+    """
+    for suffix in META_SUFFIXES:
+        path = os.path.join(file_dir, f"{base_name}{suffix}")
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding='utf-8') as handle:
+                return path, json.load(handle)
+        except (OSError, ValueError):
+            continue
+    return None, None
+
+
+def _find_image(file_dir, base_name):
+    for ext in IMAGE_SUFFIXES:
+        path = os.path.join(file_dir, f"{base_name}{ext}")
+        if os.path.exists(path):
+            return path
+    return os.path.join(file_dir, f"{base_name}.webp")
+
+
 def scan_directory(directory, model_type, api_key=None, progress_callback=None):
     """
     Scan a directory for models, identify them, and download missing metadata/images.
+
+    Two passes: first read sidecars for every model (no hashing), then hash and
+    query Civitai only for the files that had no usable metadata.
     """
     if not os.path.isdir(directory):
         return 0, "Directory does not exist", []
@@ -146,9 +209,50 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
                 model_files.append(os.path.join(root, name))
 
     total_files = len(model_files)
-    processed = 0
     updated_count = 0
     found_ids = []
+
+    # Pass 1 — sidecars only. A model with a Civitai metadata file or a
+    # StabilityMatrix cm-info file is identified without reading the weights.
+    identified = {}
+    sidecar_identified = set()
+    sidecars = {}
+    pending = []
+    for index, filepath in enumerate(model_files, start=1):
+        if not os.path.isfile(filepath):
+            continue
+        filename = os.path.basename(filepath)
+        base_name = os.path.splitext(filename)[0]
+        file_dir = os.path.dirname(filepath)
+        if progress_callback and total_files:
+            progress_callback(
+                int(index / total_files * 45), f"Reading metadata for {filename}..."
+            )
+        sidecar_path, sidecar = _read_sidecar(file_dir, base_name)
+        if sidecar_path:
+            sidecars[filepath] = sidecar_path
+        version = _version_from_metadata(sidecar, filename) if sidecar is not None else None
+        if version:
+            identified[filepath] = version
+            sidecar_identified.add(filepath)
+        else:
+            pending.append(filepath)
+
+    # Pass 2 — hash + Civitai lookup for everything without usable metadata.
+    for index, filepath in enumerate(pending, start=1):
+        if progress_callback:
+            progress_callback(
+                45 + int(index / max(1, len(pending)) * 45),
+                f"Identifying {os.path.basename(filepath)}...",
+            )
+        try:
+            file_hash = _cached_sha256(filepath)
+            version = api.get_model_version_by_hash(file_hash, api_key)
+        except Exception as exc:
+            print(f"Failed to identify {os.path.basename(filepath)}: {exc}")
+            version = None
+        if version:
+            identified[filepath] = version
 
     for filepath in model_files:
         if not os.path.isfile(filepath):
@@ -157,39 +261,10 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
         base_name = os.path.splitext(filename)[0]
         file_dir = os.path.dirname(filepath)
 
-        processed += 1
-        if progress_callback and total_files:
-            progress_callback(
-                int(processed / total_files * 100), f"Scanning {filename}..."
-            )
-
-        # Check for metadata (sidecars live next to the model file)
-        metadata_path = os.path.join(file_dir, f"{base_name}.metadata.json")
-        image_path = os.path.join(file_dir, f"{base_name}.webp")  # Default check
-        if not os.path.exists(image_path):
-            for ext in ['.png', '.jpg', '.jpeg', '.preview.png']:
-                alt_path = os.path.join(file_dir, f"{base_name}{ext}")
-                if os.path.exists(alt_path):
-                    image_path = alt_path
-                    break
-
-        # 1. Try to load from metadata saved by a previous download/scan.
-        model_version = None
-        if os.path.exists(metadata_path):
-            try:
-                with open(metadata_path, encoding='utf-8') as handle:
-                    model_version = _version_from_metadata(json.load(handle), filename)
-            except (OSError, ValueError):
-                model_version = None
-
-        # 2. Only hash/query Civitai when the sidecar did not identify it.
-        if not model_version:
-            try:
-                file_hash = _cached_sha256(filepath)
-                model_version = api.get_model_version_by_hash(file_hash, api_key)
-            except Exception as exc:
-                print(f"Failed to identify {filename}: {exc}")
-                model_version = None
+        metadata_path = sidecars.get(filepath) or os.path.join(file_dir, f"{base_name}.metadata.json")
+        image_path = _find_image(file_dir, base_name)
+        model_version = identified.get(filepath)
+        from_sidecar = filepath in sidecar_identified
 
         if not model_version:
             # Unknown (maybe not hosted on Civitai): still list the model.
@@ -197,17 +272,11 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
             # them; the placeholder covers the rest.
             import zlib
 
-            sidecar_image = None
-            for ext in ['.png', '.jpg', '.jpeg', '.webp', '.preview.png']:
-                candidate = os.path.join(file_dir, f"{base_name}{ext}")
-                if os.path.exists(candidate):
-                    sidecar_image = candidate
-                    break
             downloaded_files = {'model': filepath}
-            if os.path.exists(metadata_path):
+            if metadata_path and os.path.exists(metadata_path):
                 downloaded_files['metadata'] = metadata_path
-            if sidecar_image:
-                downloaded_files['image'] = sidecar_image
+            if os.path.exists(image_path):
+                downloaded_files['image'] = image_path
             stand_in = zlib.crc32(f"{model_type}/{filepath}".encode()) & 0x7FFFFFFF
             existing = Download.query.filter_by(model_id=0, version_id=stand_in).first()
             inferred_base = infer_base_model(filepath)
@@ -239,41 +308,47 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
             continue
         model_details = model_version.get('model') or {}
         model_name = model_details.get('name', 'Unknown Model')
-        model_type_api = model_details.get('type', model_type)  # noqa: F841 (kept for parity)
 
         downloaded_files = {'model': filepath}
 
-        if not os.path.exists(metadata_path):
-            try:
-                full_model = api.get_model(model_id, api_key)
-                with open(metadata_path, 'w', encoding='utf-8') as handle:
-                    json.dump(full_model, handle, indent=4)
-                downloaded_files['metadata'] = metadata_path
-                updated_count += 1
-            except Exception as exc:
-                print(f"Failed to download metadata for {filename}: {exc}")
-        else:
+        if from_sidecar:
+            # The folder already carried the metadata (and possibly an image):
+            # no network calls for this model.
             downloaded_files['metadata'] = metadata_path
-
-        if not os.path.exists(image_path):
-            if model_version.get('images'):
-                image_url = model_version['images'][0]['url']
-                if '.png' in image_url:
-                    ext = '.png'
-                elif '.jpg' in image_url or '.jpeg' in image_url:
-                    ext = '.jpg'
-                else:
-                    ext = '.webp'
-
-                new_image_path = os.path.join(file_dir, f"{sanitize_filename(base_name)}{ext}")
+            if os.path.exists(image_path):
+                downloaded_files['image'] = image_path
+        else:
+            if not os.path.exists(metadata_path):
                 try:
-                    download_file(image_url, new_image_path, api_key)
-                    downloaded_files['image'] = new_image_path
+                    full_model = api.get_model(model_id, api_key)
+                    with open(metadata_path, 'w', encoding='utf-8') as handle:
+                        json.dump(full_model, handle, indent=4)
+                    downloaded_files['metadata'] = metadata_path
                     updated_count += 1
                 except Exception as exc:
-                    print(f"Failed to download image for {filename}: {exc}")
-        else:
-            downloaded_files['image'] = image_path
+                    print(f"Failed to download metadata for {filename}: {exc}")
+            else:
+                downloaded_files['metadata'] = metadata_path
+
+            if not os.path.exists(image_path):
+                if model_version.get('images'):
+                    image_url = model_version['images'][0]['url']
+                    if '.png' in image_url:
+                        ext = '.png'
+                    elif '.jpg' in image_url or '.jpeg' in image_url:
+                        ext = '.jpg'
+                    else:
+                        ext = '.webp'
+
+                    new_image_path = os.path.join(file_dir, f"{sanitize_filename(base_name)}{ext}")
+                    try:
+                        download_file(image_url, new_image_path, api_key)
+                        downloaded_files['image'] = new_image_path
+                        updated_count += 1
+                    except Exception as exc:
+                        print(f"Failed to download image for {filename}: {exc}")
+            else:
+                downloaded_files['image'] = image_path
 
         existing = Download.query.filter_by(model_id=model_id, version_id=version_id).first()
         if not existing:

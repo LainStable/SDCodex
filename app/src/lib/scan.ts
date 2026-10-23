@@ -162,6 +162,125 @@ function baseModelFromSidecar(json: unknown): string {
   return '';
 }
 
+/** Sidecar files living next to a model. Civitai's scan writes
+    `<base>.metadata.json`; StabilityMatrix writes `<base>.cm-info.json`. */
+const META_SUFFIXES = ['.metadata.json', '.cm-info.json'] as const;
+const IMAGE_SUFFIXES = ['.png', '.jpg', '.jpeg', '.webp', '.preview.png'] as const;
+
+async function readModelSidecar(
+  dir: FileSystemDirectoryHandle,
+  base: string,
+): Promise<{ data: Record<string, unknown>; name: string } | null> {
+  for (const suffix of META_SUFFIXES) {
+    try {
+      const handle = await dir.getFileHandle(`${base}${suffix}`);
+      const parsed = JSON.parse(await (await handle.getFile()).text());
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return { data: parsed as Record<string, unknown>, name: `${base}${suffix}` };
+      }
+    } catch {
+      /* missing or malformed — try the other format */
+    }
+  }
+  return null;
+}
+
+async function findSidecarImage(dir: FileSystemDirectoryHandle, base: string): Promise<string | null> {
+  for (const ext of IMAGE_SUFFIXES) {
+    if (await fileExists(dir, `${base}${ext}`)) return `${base}${ext}`;
+  }
+  return null;
+}
+
+export interface SidecarIdentity {
+  modelId: number;
+  versionId: number;
+  name: string;
+  baseModel: string;
+  hash: string;
+}
+
+/** Identify a model from a sidecar without hashing it. Understands both the
+    Civitai model/version JSON and StabilityMatrix's `.cm-info.json`. */
+export function identityFromSidecar(
+  data: Record<string, unknown>,
+  filename: string,
+): SidecarIdentity | null {
+  const num = (value: unknown) => {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  const hashOf = (hashes: unknown) => {
+    if (!hashes || typeof hashes !== 'object') return '';
+    const sha = (hashes as Record<string, unknown>).SHA256;
+    return typeof sha === 'string' ? sha.trim().toLowerCase().slice(0, 12) : '';
+  };
+
+  // StabilityMatrix ConnectedModelInfo (PascalCase fields).
+  if (data.ModelId || data.VersionId) {
+    const modelId = num(data.ModelId);
+    const versionId = num(data.VersionId);
+    if (!modelId || !versionId) return null;
+    return {
+      modelId,
+      versionId,
+      name: String(data.ModelName || '').trim(),
+      baseModel: String(data.BaseModel || '').trim(),
+      hash: hashOf(data.Hashes),
+    };
+  }
+
+  const versions = Array.isArray(data.modelVersions)
+    ? (data.modelVersions as Array<Record<string, unknown>>)
+    : [];
+  if (versions.length) {
+    const leaf = filename.toLowerCase();
+    const matching = versions.find((version) => {
+      const files = version.files;
+      return (
+        Array.isArray(files) &&
+        files.some(
+          (file) =>
+            typeof (file as Record<string, unknown>)?.name === 'string' &&
+            String((file as Record<string, unknown>).name).split('/').pop()?.toLowerCase() === leaf,
+        )
+      );
+    });
+    const version = matching ?? versions[0];
+    const modelId = num(data.id) || num(version?.modelId);
+    const versionId = num(version?.id);
+    if (!modelId || !versionId) return null;
+    const files = Array.isArray(version?.files) ? (version.files as Array<Record<string, unknown>>) : [];
+    const primary = files.find(
+      (file) => String(file?.name || '').split('/').pop()?.toLowerCase() === leaf,
+    ) ?? files[0];
+    return {
+      modelId,
+      versionId,
+      name: String(data.name || version?.name || '').trim(),
+      baseModel: String(version?.baseModel || '').trim(),
+      hash: hashOf(primary?.hashes),
+    };
+  }
+
+  // Civitai version JSON (the shape returned by the by-hash lookup).
+  if (data.id && data.modelId) {
+    const model = (data.model && typeof data.model === 'object' ? data.model : {}) as Record<string, unknown>;
+    const files = Array.isArray(data.files) ? (data.files as Array<Record<string, unknown>>) : [];
+    const primary = files.find(
+      (file) => String(file?.name || '').split('/').pop()?.toLowerCase() === filename.toLowerCase(),
+    ) ?? files[0];
+    return {
+      modelId: num(data.modelId),
+      versionId: num(data.id),
+      name: String(model.name || data.name || '').trim(),
+      baseModel: String(data.baseModel || '').trim(),
+      hash: hashOf(primary?.hashes),
+    };
+  }
+  return null;
+}
+
 /** Last-resort architecture hint from the user's own folder/file naming.
     Downloads land in a `<base_model_slug>/` folder (`sdxl_1_0`, `flux_1_d`),
     and many people tag files (`*_pony`, `*XL`); only explicit tokens match. */
@@ -280,15 +399,76 @@ export async function scanDir(
   }
 
   let updated = 0;
-  let done = 0;
   onProgress?.(0, files.length, `${type}: ${files.length} file${files.length === 1 ? '' : 's'} found`);
+
+  // Pass 1 — sidecars only. A folder that already holds a Civitai metadata
+  // file or a StabilityMatrix cm-info file (plus an image) is recorded without
+  // touching the weights. Hashing is deferred until the tree is fully walked.
+  const pending: typeof files = [];
+  let checked = 0;
   for (const f of files) {
     const name = f.rel.split('/').pop() ?? f.rel;
-    done += 1;
-    const progressMsg = `${type}: Scanning ${f.rel}... (${done}/${files.length})`;
-    onMsg(progressMsg);
-    onProgress?.(done, files.length, progressMsg);
+    const base = name.replace(/\.[^.]+$/, '');
     seen.add(`${f.dirKey}/${f.rel}`);
+    checked += 1;
+    const sidecar = await readModelSidecar(f.dir, base);
+    const identity = sidecar ? identityFromSidecar(sidecar.data, name) : null;
+    if (!identity) {
+      pending.push(f);
+    } else {
+      const imageName = await findSidecarImage(f.dir, base);
+      let size = 0;
+      let file: File | null = null;
+      try {
+        file = await f.handle.getFile();
+        size = file.size;
+      } catch {
+        /* unreadable — list by name only */
+      }
+      // Sidecar architecture first; the weights header is cheap (8-byte
+      // length + JSON) and avoids hashing the file just for the chip.
+      let baseModel = identity.baseModel;
+      if (!baseModel && file) {
+        try {
+          baseModel = await inferBaseModel(file);
+        } catch {
+          /* unreadable header */
+        }
+      }
+      upsertScanned({
+        modelId: identity.modelId,
+        versionId: identity.versionId,
+        name: identity.name || base,
+        type,
+        baseModel: baseModel || baseModelFromPath(`${f.dirPath}/${f.rel}`),
+        dirKey: f.dirKey,
+        dirPath: f.dirPath,
+        filename: f.rel,
+        hash: identity.hash,
+        size,
+        imageName,
+        identified: true,
+        scannedAt: Date.now(),
+      });
+      updated += 1;
+      onMsg(`${type}: ${name} read from ${sidecar?.name ?? 'sidecar'}`);
+    }
+    onProgress?.(checked, files.length, `${type}: reading sidecars (${checked}/${files.length})`);
+  }
+
+  // Pass 2 — hash + Civitai lookup for files with no usable metadata sidecar.
+  let done = 0;
+  onProgress?.(
+    0,
+    pending.length,
+    `${type}: identifying ${pending.length} file${pending.length === 1 ? '' : 's'}...`,
+  );
+  for (const f of pending) {
+    const name = f.rel.split('/').pop() ?? f.rel;
+    done += 1;
+    const progressMsg = `${type}: Identifying ${f.rel}... (${done}/${pending.length})`;
+    onMsg(progressMsg);
+    onProgress?.(done, pending.length, progressMsg);
     try {
       const file = await f.handle.getFile();
       const hash = await sha256Hex(file);
@@ -362,12 +542,7 @@ export async function scanDir(
         /* unreadable header — leave the chip unknown */
       }
       let sidecar: string | null = null;
-      for (const ext of ['.png', '.jpg', '.jpeg', '.webp']) {
-        if (await fileExists(f.dir, `${base}${ext}`)) {
-          sidecar = `${base}${ext}`;
-          break;
-        }
-      }
+      sidecar = await findSidecarImage(f.dir, base);
       upsertScanned({
         modelId: 0,
         versionId: pathId(`${f.dirKey}/${f.rel}`),
