@@ -1533,10 +1533,10 @@ export function Plugins() {
                 }
               }}
             >
-              <div className="glass-l2 edge-shimmer w-full max-w-2xl overflow-hidden rounded-lg border border-ink/10">
-                <div className="flex items-center gap-3 px-5 py-4">
-                  <img src="/sdcodex.svg" alt="" className="h-10 w-10 shrink-0 object-contain" />
-                  <h2 className="min-w-0 truncate font-display text-lg font-semibold tracking-tight">
+              <div className="glass-l2 edge-shimmer w-full max-w-lg overflow-hidden rounded-lg border border-ink/10">
+                <div className="flex items-center gap-2.5 px-4 py-3">
+                  <img src="/sdcodex.svg" alt="" className="h-8 w-8 shrink-0 object-contain" />
+                  <h2 className="min-w-0 truncate font-display text-base font-semibold tracking-tight">
                     {finished
                       ? 'Update complete'
                       : failed
@@ -1547,8 +1547,8 @@ export function Plugins() {
                   </h2>
                 </div>
 
-                <div className="px-5 py-4">
-                  <div className="mb-4 flex flex-wrap items-center gap-2">
+                <div className="px-4 py-3">
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
                     <span className="rounded border border-primary/40 bg-primary/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em] text-ink">
                       {isLocal ? 'local' : 'docker'}
                     </span>
@@ -1568,7 +1568,7 @@ export function Plugins() {
                     </span>
                   </div>
 
-                  <ol className="flex flex-col gap-2.5">
+                  <ol className="flex flex-col gap-2">
                     {steps.map((label, i) => {
                       const done = finished || i < active;
                       const current = !finished && i === active;
@@ -1580,9 +1580,9 @@ export function Plugins() {
                             ? 'bg-primary animate-pulse'
                             : 'bg-ink-faint/40';
                       return (
-                        <li key={label} className="flex items-center gap-3">
-                          <span className={`h-3 w-3 shrink-0 rounded-full ${dot}`} aria-hidden="true" />
-                          <span className={`text-sm ${done || current ? 'text-ink' : 'text-ink-muted'}`}>
+                        <li key={label} className="flex items-center gap-2.5">
+                          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${dot}`} aria-hidden="true" />
+                          <span className={`text-[13px] ${done || current ? 'text-ink' : 'text-ink-muted'}`}>
                             {label}
                           </span>
                         </li>
@@ -1593,7 +1593,7 @@ export function Plugins() {
                     type="button"
                     onClick={() => setLogOpen((open) => !open)}
                     aria-expanded={logOpen}
-                    className="mt-5 flex w-full items-center justify-between gap-2 rounded px-1 py-1 text-left text-sm font-semibold text-ink transition-colors hover:text-ink-muted"
+                    className="mt-4 flex w-full items-center justify-between gap-2 rounded px-1 py-1 text-left text-[13px] font-semibold text-ink transition-colors hover:text-ink-muted"
                   >
                     <span>Updater log</span>
                     <span
@@ -1604,7 +1604,7 @@ export function Plugins() {
                     </span>
                   </button>
                   {logOpen && (
-                    <div className="mt-2 max-h-72 overflow-y-auto rounded border border-ink/10 bg-obsidian-lowest p-4 font-mono text-[12px] leading-relaxed text-ink-muted">
+                    <div className="mt-2 max-h-52 overflow-y-auto rounded border border-ink/10 bg-obsidian-lowest p-3 font-mono text-[11px] leading-relaxed text-ink-muted">
                       {rebuildLog.length === 0 ? (
                         <p className="text-ink-faint">
                           {applying
