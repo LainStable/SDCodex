@@ -429,6 +429,12 @@ def _rebuild_container() -> None:
                 _rlog(f"removed stale {stale_name}")
             except Exception:
                 pass
+        # Compose ownership travels with the swap: the sibling is created by the
+        # SDK, so without the old container's labels the replacement would look
+        # foreign and a later `docker compose up` would fail with a name
+        # conflict ("already in use by container …").
+        labels = (me.attrs.get("Config", {}) or {}).get("Labels") or None if me else None
+        healthcheck = (me.attrs.get("Config", {}) or {}).get("Healthcheck") if me else None
         _rlog("creating sibling container (no ports — old self holds the port)")
         try:
             sibling = client.containers.run(
@@ -437,6 +443,8 @@ def _rebuild_container() -> None:
                 detach=True,
                 environment=cfg.get("environment", {}),
                 volumes=binds,
+                labels=labels,
+                healthcheck=healthcheck,
                 restart_policy={"Name": "no"},
             )
         except Exception as e:
@@ -487,6 +495,8 @@ def _rebuild_container() -> None:
             "networks": nets,
             "restart": cfg.get("restart", "unless-stopped") or "unless-stopped",
             "image": IMAGE_TAG,
+            "labels": labels,
+            "healthcheck": healthcheck,
         }
         helper_volumes = dict(binds)
         helper_volumes["/var/run/docker.sock"] = {"bind": "/var/run/docker.sock", "mode": "rw"}

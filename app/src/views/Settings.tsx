@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FilterPills, GhostButton, PageHeader, PrimaryButton } from '../components/chrome';
 import { AssistantPanel, McpPanel } from '../components/assistantPanels';
 import { TypeBadge } from '../components/ui';
-import { bindDirectoryKey, scanDir, serverScan, serverScanStatus } from '../lib/scan';
+import { bindDirectoryKey, scanDir, serverScan, serverScanStatus, type ScanRoot } from '../lib/scan';
 import { getHandle } from '../lib/idb';
 import { loadScanned, pruneScanned } from '../lib/library';
 import {
@@ -272,15 +272,16 @@ function Dirs() {
 
   const say = (line: string) => pushScanLog(line);
 
-  const resolveAll = async (type: string): Promise<FileSystemDirectoryHandle[]> => {
-    // Every saved path for the category gets its own bound folder.
+  const resolveAll = async (type: string): Promise<ScanRoot[]> => {
+    // Every saved path for the category gets its own bound folder; the key
+    // travels with the handle so records point at the folder they came from.
     const keys = [`dir_${type}`, ...Object.keys(getDirectories()).filter((k) => k.startsWith(`dir_${type}__`)).sort()];
-    const out: FileSystemDirectoryHandle[] = [];
+    const out: ScanRoot[] = [];
     for (const key of keys) {
       if (!(getDirectories()[key] ?? '').trim()) continue;
       const existing = await getHandle(key);
       if (existing) {
-        out.push(existing);
+        out.push({ key, dir: existing });
         continue;
       }
       say(`${type}: pick the folder for this path`);
@@ -288,7 +289,7 @@ function Dirs() {
         const dir = await bindDirectoryKey(key);
         if (dir) {
           setBound((b) => ({ ...b, [type]: true }));
-          out.push(dir);
+          out.push({ key, dir });
         }
       } catch {
         setMsgs((m) => ({ ...m, [type]: 'pick failed' }));
@@ -375,7 +376,10 @@ function Dirs() {
       beginScan('all folders');
       try {
         for (const t of MODEL_TYPES) {
-          if (!(dirs[`dir_${t}`] ?? '').trim()) continue;
+          const configured = Object.keys(dirs).some(
+            (k) => (k === `dir_${t}` || k.startsWith(`dir_${t}__`)) && (dirs[k] ?? '').trim(),
+          );
+          if (!configured) continue;
           await scanDir(
             t,
             resolveAll,

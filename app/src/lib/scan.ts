@@ -116,11 +116,124 @@ export interface ScanHandle {
   resolve: (type: string) => Promise<FileSystemDirectoryHandle | null>;
 }
 
+export interface ScanRoot {
+  /** Settings key (`dir_LORA`, `dir_LORA__2`) — also the record's dirKey. */
+  key: string;
+  dir: FileSystemDirectoryHandle;
+}
+
+/** Every folder bound for a category, keyed like Settings stores them
+    (`dir_<Type>`, `dir_<Type>__1`, …). Handles survive restarts; a folder that
+    was never picked simply has no entry. */
+export async function boundFolders(type: string): Promise<ScanRoot[]> {
+  const keys = [
+    `dir_${type}`,
+    ...Object.keys(getDirectories())
+      .filter((k) => k.startsWith(`dir_${type}__`))
+      .sort(),
+  ];
+  const out: ScanRoot[] = [];
+  for (const key of keys) {
+    try {
+      const dir = await getHandle(key);
+      if (dir) out.push({ key, dir });
+    } catch {
+      /* unbound slot — skip */
+    }
+  }
+  return out;
+}
+
+/** The architecture carried by a stored Citivai metadata sidecar. The scan
+    writes the full model JSON, so `modelVersions[].baseModel` is available even
+    when the weights header cannot be read (ckpt, permissions, big files). */
+function baseModelFromSidecar(json: unknown): string {
+  if (!json || typeof json !== 'object') return '';
+  const obj = json as Record<string, unknown>;
+  const own = typeof obj.baseModel === 'string' ? obj.baseModel.trim() : '';
+  if (own) return own;
+  const versions = obj.modelVersions;
+  if (Array.isArray(versions)) {
+    for (const v of versions) {
+      const bm = (v as Record<string, unknown> | null)?.baseModel;
+      if (typeof bm === 'string' && bm.trim()) return bm.trim();
+    }
+  }
+  return '';
+}
+
+/** Last-resort architecture hint from the user's own folder/file naming.
+    Downloads land in a `<base_model_slug>/` folder (`sdxl_1_0`, `flux_1_d`),
+    and many people tag files (`*_pony`, `*XL`); only explicit tokens match. */
+export function baseModelFromPath(path: string): string {
+  const text = path.toLowerCase();
+  const word = (token: string) => new RegExp(`(^|[^a-z0-9])${token}([^a-z0-9]|$)`).test(text);
+  if (word('flux')) return 'Flux.1 D';
+  if (word('pony') || word('ponyxl')) return 'Pony';
+  if (word('noobai')) return 'NoobAI';
+  if (word('illustrious')) return 'Illustrious';
+  if (word('sdxl') || word('sd_xl') || word('xl_1_0') || word('xl_base')) return 'SDXL 1.0';
+  if (word('sd3') || word('sd_3')) return 'SD 3';
+  if (word('sd15') || word('sd_15') || word('sd1_5') || /sd[\s._-]?1[._-]5/.test(text)) return 'SD 1.5';
+  if (word('sd21') || word('sd_21') || word('sd2_1')) return 'SD 2.1';
+  return '';
+}
+
+/** Resolve the architecture for a scanned record that has none stored. Tries
+    the record's own folder first, then every other bound folder of the same
+    category (records saved before per-folder keys existed carry the wrong
+    `dir_key`), reading `<name>.metadata.json` before the weights header. */
+export async function resolveRecordBaseModel(record: {
+  dirKey: string;
+  filename: string;
+  type: string;
+  dirPath?: string;
+}): Promise<{ baseModel: string; dirKey: string; dirPath: string } | null> {
+  const roots = await boundFolders(record.type);
+  const ordered = [
+    ...roots.filter((r) => r.key === record.dirKey),
+    ...roots.filter((r) => r.key !== record.dirKey),
+  ];
+  const parts = record.filename.split('/').filter(Boolean);
+  const leaf = parts[parts.length - 1] ?? '';
+  for (const root of parts.length > 0 ? ordered : []) {
+    try {
+      let cur = root.dir;
+      for (const part of parts.slice(0, -1)) cur = await cur.getDirectoryHandle(part);
+      const file = await (await cur.getFileHandle(leaf)).getFile();
+      const sidecar = `${leaf.replace(/\.[^.]+$/, '')}.metadata.json`;
+      try {
+        const meta = JSON.parse(await (await (await cur.getFileHandle(sidecar)).getFile()).text());
+        const fromMeta = baseModelFromSidecar(meta);
+        if (fromMeta) {
+          return { baseModel: fromMeta, dirKey: root.key, dirPath: getDirectories()[root.key] ?? '' };
+        }
+      } catch {
+        /* no sidecar — fall through to the weights */
+      }
+      const inferred = await inferBaseModel(file);
+      if (inferred) {
+        return { baseModel: inferred, dirKey: root.key, dirPath: getDirectories()[root.key] ?? '' };
+      }
+    } catch {
+      /* file not in this folder — try the next slot */
+    }
+  }
+  // Nothing readable: fall back to the folder/file naming so the chip stops
+  // saying "unknown" for models the user already labelled themselves.
+  const fromPath = baseModelFromPath(`${record.dirPath ?? ''}/${record.filename}`);
+  if (fromPath) {
+    const own = roots.find((r) => r.key === record.dirKey);
+    return { baseModel: fromPath, dirKey: record.dirKey, dirPath: own ? getDirectories()[record.dirKey] ?? '' : '' };
+  }
+  return null;
+}
+
 /** Scan one Settings type across every saved folder. Returns files identified;
     appends seen keys for cleanup. */
 export async function scanDir(
   type: string,
-  resolveAll: (type: string) => Promise<FileSystemDirectoryHandle[]>,
+  resolveAll: (type: string) => Promise<ScanRoot[]>,
   seen: Set<string>,
   onMsg: (msg: string) => void,
   onProgress?: (done: number, total: number, message: string) => void,
@@ -130,27 +243,40 @@ export async function scanDir(
 
   // Recursive: users sort models into subfolders. Sidecars stay next to
   // their model file; seen keys use paths relative to the linked folder.
-  const files: { rel: string; handle: FileSystemFileHandle; dir: FileSystemDirectoryHandle }[] = [];
+  const files: {
+    rel: string;
+    handle: FileSystemFileHandle;
+    dir: FileSystemDirectoryHandle;
+    dirKey: string;
+    dirPath: string;
+  }[] = [];
   const walkDir = async (
     d: FileSystemDirectoryHandle,
     prefix: string,
-    out: { rel: string; handle: FileSystemFileHandle; dir: FileSystemDirectoryHandle }[],
+    root: ScanRoot,
+    out: typeof files,
   ) => {
     const it = (d as unknown as { values: ValuesFn }).values();
     for await (const [name, handle] of it) {
       if (handle.kind === 'directory') {
-        await walkDir(handle as unknown as FileSystemDirectoryHandle, `${prefix}${name}/`, out);
+        await walkDir(handle as unknown as FileSystemDirectoryHandle, `${prefix}${name}/`, root, out);
       } else if (handle.kind === 'file' && MODEL_EXTS.some((e) => name.toLowerCase().endsWith(e))) {
-        out.push({ rel: `${prefix}${name}`, handle: handle as FileSystemFileHandle, dir: d });
+        out.push({
+          rel: `${prefix}${name}`,
+          handle: handle as FileSystemFileHandle,
+          dir: d,
+          dirKey: root.key,
+          dirPath: getDirectories()[root.key] ?? '',
+        });
       }
     }
   };
   for (const root of roots) {
-    if (!(await ensurePermission(root, 'readwrite'))) {
+    if (!(await ensurePermission(root.dir, 'readwrite'))) {
       onMsg(`${type}: permission denied`);
       continue;
     }
-    await walkDir(root, '', files);
+    await walkDir(root.dir, '', root, files);
   }
 
   let updated = 0;
@@ -162,7 +288,7 @@ export async function scanDir(
     const progressMsg = `${type}: Scanning ${f.rel}... (${done}/${files.length})`;
     onMsg(progressMsg);
     onProgress?.(done, files.length, progressMsg);
-    seen.add(`dir_${type}/${f.rel}`);
+    seen.add(`${f.dirKey}/${f.rel}`);
     try {
       const file = await f.handle.getFile();
       const hash = await sha256Hex(file);
@@ -208,8 +334,8 @@ export async function scanDir(
         type,
         // Civitai's answer, or the architecture embedded in the weights.
         baseModel: version.baseModel || (await inferBaseModel(file)),
-        dirKey: `dir_${type}`,
-        dirPath: getDirectories()[`dir_${type}`] ?? '',
+        dirKey: f.dirKey,
+        dirPath: f.dirPath,
         filename: f.rel,
         hash: hash.slice(0, 12),
         size: file.size,
@@ -244,12 +370,12 @@ export async function scanDir(
       }
       upsertScanned({
         modelId: 0,
-        versionId: pathId(`${type}/${f.rel}`),
+        versionId: pathId(`${f.dirKey}/${f.rel}`),
         name: base,
         type,
-        baseModel: inferred,
-        dirKey: `dir_${type}`,
-        dirPath: getDirectories()[`dir_${type}`] ?? '',
+        baseModel: inferred || baseModelFromPath(`${f.dirPath}/${f.rel}`),
+        dirKey: f.dirKey,
+        dirPath: f.dirPath,
         filename: f.rel,
         hash: '',
         size,

@@ -119,43 +119,34 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
     // Resolve browser-scanned preview images through their bound folders, and
     // backfill the architecture for records scanned before it was inferred.
     void (async () => {
-      if (typeof (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker !== 'function') {
-        return;
-      }
+      const canReadFolders =
+        typeof (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker === 'function';
       const { getHandle } = await import('../lib/idb');
-      const { inferBaseModel } = await import('../lib/scan');
-      const { setScannedBaseModel } = await import('../lib/library');
+      const { resolveRecordBaseModel } = await import('../lib/scan');
+      const { setScannedBaseModelByFile } = await import('../lib/library');
       const found: Record<string, string> = {};
       let patched = false;
       for (const s of loadScanned()) {
-        let dir: FileSystemDirectoryHandle | null = null;
-        try {
-          dir = await getHandle(s.dirKey);
-        } catch {
-          dir = null;
-        }
-        if (!dir) continue;
-        if (s.imageName) {
+        if (canReadFolders && s.imageName) {
           const key = `${s.dirKey}/${s.filename}`;
           try {
-            const fh = await dir.getFileHandle(s.imageName);
+            const dir = await getHandle(s.dirKey);
+            if (!dir) throw new Error('unbound');
+            const parts = s.filename.split('/').filter(Boolean);
+            let cur = dir;
+            for (const part of parts.slice(0, -1)) cur = await cur.getDirectoryHandle(part);
+            const fh = await cur.getFileHandle(s.imageName);
             const file = await fh.getFile();
             if (file.type.startsWith('image/')) found[key] = URL.createObjectURL(file);
           } catch {
             /* unlinked or missing — card keeps its placeholder */
           }
         }
-        const parts = s.filename.split('/').filter(Boolean);
-        if (s.baseModel || parts.length === 0) continue;
-        try {
-          let cur = dir;
-          for (const part of parts.slice(0, -1)) cur = await cur.getDirectoryHandle(part);
-          const file = await (await cur.getFileHandle(parts[parts.length - 1])).getFile();
-          const inferred = await inferBaseModel(file);
-          if (inferred && setScannedBaseModel(s.modelId, s.versionId, inferred)) patched = true;
-        } catch {
-          /* header unreadable — chip stays unknown */
-        }
+        if (s.baseModel) continue;
+        // Sidecar metadata first, then the weights header; the folder search
+        // also repairs records saved before per-path keys existed.
+        const hit = await resolveRecordBaseModel(s);
+        if (hit && setScannedBaseModelByFile(s.dirKey, s.filename, hit.baseModel, hit)) patched = true;
       }
       if (!live) return;
       if (Object.keys(found).length > 0) setLocalPreviews(found);
@@ -331,7 +322,11 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                           {r.name}
                         </h2>
                         <div className="mt-1.5">
-                          <BaseModelBadge baseModel={r.baseModel} />
+                          <BaseModelBadge
+                            baseModel={r.baseModel}
+                            type={r.type}
+                            color={colors[r.type]}
+                          />
                         </div>
                       </div>
                     </button>
@@ -402,7 +397,11 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                           {s.name}
                         </h2>
                         <div className="mt-1.5 flex items-center justify-between gap-2">
-                          <BaseModelBadge baseModel={s.baseModel} />
+                          <BaseModelBadge
+                            baseModel={s.baseModel}
+                            type={s.type}
+                            color={colors[s.type]}
+                          />
                           <span className="shrink-0 font-mono text-[10px] text-ink-muted">
                             {formatBytes(s.size)}
                           </span>

@@ -62,6 +62,28 @@ export function setScannedBaseModel(modelId: number, versionId: number, baseMode
   return true;
 }
 
+/** Same, keyed by file path — handles records that predate base-model capture
+    and repairs the folder binding when the file was found in another slot
+    (`dir_<Type>__2` instead of the `dir_<Type>` they were saved under). */
+export function setScannedBaseModelByFile(
+  dirKey: string,
+  filename: string,
+  baseModel: string,
+  found?: { dirKey?: string; dirPath?: string },
+): boolean {
+  const list = loadScanned();
+  const index = list.findIndex((e) => e.dirKey === dirKey && e.filename === filename);
+  if (index < 0 || list[index].baseModel) return false;
+  list[index] = {
+    ...list[index],
+    baseModel,
+    dirKey: found?.dirKey || dirKey,
+    dirPath: found?.dirPath || list[index].dirPath,
+  };
+  persist(list);
+  return true;
+}
+
 export function setScannedImageName(dirKey: string, filename: string, imageName: string): boolean {
   const list = loadScanned();
   const index = list.findIndex((e) => e.dirKey === dirKey && e.filename === filename);

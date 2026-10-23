@@ -8,6 +8,25 @@ const TYPE_BADGE: Record<string, string> = {
   Controlnet: 'bg-badge-sdxl/15 border-badge-sdxl/30 text-[#22d3ee]',
 };
 
+/** Built-in hue per model type — mirrors the TYPE_BADGE classes above so the
+    base-model chip can be tinted exactly like the type badge/filters. */
+const TYPE_HUE: Record<string, string> = {
+  Checkpoint: '#818cf8',
+  LORA: '#a78bfa',
+  LoCon: '#a78bfa',
+  Flux: '#f472b6',
+  SDXL: '#22d3ee',
+  VAE: '#22d3ee',
+  Controlnet: '#22d3ee',
+};
+
+/** Accent for a model type: the user's category color wins, else the
+    built-in hue, else undefined (grey). */
+export function typeHue(type?: string, color?: string): string | undefined {
+  if (color) return color;
+  return type ? TYPE_HUE[type] : undefined;
+}
+
 export function hexToRgba(hex: string, alpha: number): string {
   const h = hex.replace('#', '');
   const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
@@ -41,24 +60,45 @@ export function TypeBadge({ type, color }: { type: string; color?: string }) {
 /** Base-model chip: the architecture a weight targets (SDXL 1.0, Illustrious,
     Flux.1 D…). Local cards use this in place of the old socket pill, and the
     Explorer / Home cards show the same chip so every model card reads alike.
-    Styled like the filter blocks — same radius, size and hues. */
+    Tinted with the card's model-type accent, like the type badge/filters;
+    unknown stays grey so a missing answer is obvious. */
 export function BaseModelBadge({
   baseModel,
   fallback,
+  type,
+  color,
   className = '',
 }: {
   baseModel?: string | null;
   fallback?: string;
+  /** Model type of the card — supplies the accent when `color` is absent. */
+  type?: string;
+  /** Explicit accent (e.g. the user's category color). */
+  color?: string;
   className?: string;
 }) {
   const value = (baseModel ?? '').trim();
   const display = value || (fallback ?? '').trim() || 'unknown';
+  const known = display !== 'unknown';
+  const hue = known ? typeHue(type, color) : undefined;
+  const style = hue
+    ? {
+        color: hue,
+        borderColor: hexToRgba(hue, 0.45),
+        backgroundColor: hexToRgba(hue, 0.13),
+      }
+    : undefined;
   return (
     <span
-      className={`inline-flex max-w-full items-center rounded border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
-        display !== 'unknown' ? 'text-ink-muted' : 'text-ink-faint'
+      className={`inline-flex max-w-full items-center rounded border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
+        hue
+          ? ''
+          : known
+            ? 'border-white/10 bg-white/5 text-ink-muted'
+            : 'border-white/10 bg-white/5 text-ink-faint'
       } ${className}`}
-      title={display !== 'unknown' ? display : 'Unknown'}
+      style={style}
+      title={known ? display : 'Unknown'}
     >
       <span className="truncate">{display}</span>
     </span>

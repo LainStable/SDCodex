@@ -70,6 +70,8 @@ def main() -> int:
     networks = spec.get("networks", [])
     restart = spec.get("restart", "unless-stopped")
     image = spec.get("image", "sdcodex:latest")
+    labels = spec.get("labels") or None
+    healthcheck = spec.get("healthcheck") or None
 
     def get(name):
         try:
@@ -120,6 +122,8 @@ def main() -> int:
             environment=environment,
             ports=ports,
             volumes=binds,
+            labels=labels,
+            healthcheck=healthcheck,
             restart_policy={"Name": restart},
         )
     except Exception as e:

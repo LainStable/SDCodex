@@ -485,6 +485,28 @@ def library():
     if err:
         return err
     rows = Download.query.order_by(Download.id.desc()).limit(2000).all()
+    # Rows stored before the architecture was captured (or scanned while
+    # Civitai was unreachable) would render an "unknown" chip forever: read the
+    # safetensors header once and persist it. Capped so a big library does not
+    # stall the first response — the rest fills in on later loads.
+    from .scanner import infer_base_model
+
+    patched = 0
+    for d in rows:
+        if d.base_model or patched >= 25:
+            continue
+        path = (d.get_files() or {}).get("model")
+        if not path:
+            continue
+        guess = infer_base_model(path)
+        if guess:
+            d.base_model = guess
+            patched += 1
+    if patched:
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
     return jsonify(
         {
             "items": [

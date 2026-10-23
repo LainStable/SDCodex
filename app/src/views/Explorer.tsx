@@ -416,7 +416,11 @@ export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchT
                       {m.name}
                     </h2>
                     <div className="mt-1">
-                      <BaseModelBadge baseModel={v?.baseModel} />
+                      <BaseModelBadge
+                        baseModel={v?.baseModel}
+                        type={m.type}
+                        color={accentColor(colors, m.type)}
+                      />
                     </div>
                   </div>
                 </button>
