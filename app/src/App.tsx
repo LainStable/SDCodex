@@ -21,7 +21,7 @@ import { deleteScanned } from './lib/library';
 import { allThemes, customThemeCss, findTheme, loadTheme, saveThemePayload, themeClass, THEME_CHANGED_EVENT, THEME_LIBRARY_EVENT } from './lib/themes';
 import { apiPost, backendLogout, backendAvailable } from './lib/backend';
 import { getApiKey, pullSettings, setApiUser } from './lib/settings';
-import { LOGIN_BG_EVENT, loadLoginBackground, type LoginBackground } from './lib/loginBackground';
+import { LOGIN_BG_EVENT, loadLoginBackground, loginBackgroundOpacity, type LoginBackground } from './lib/loginBackground';
 import { fetchMe } from './lib/civitai';
 
 type AppRoute = {
@@ -629,21 +629,24 @@ export default function App() {
       {authReady && !authed && (
         <div
           className={`fixed inset-0 z-[60] flex items-center justify-center p-4 ${
-            loginBackground ? '' : 'bg-obsidian-bg/80 backdrop-blur-md'
+            loginBackground ? 'bg-obsidian-bg' : 'bg-obsidian-bg/80 backdrop-blur-md'
           }`}
-          style={
-            loginBackground
-              ? {
-                  backgroundImage: `url("${loginBackground.dataUrl}")`,
-                  backgroundSize: 'cover',
-                  backgroundPosition: 'center',
-                  backgroundRepeat: 'no-repeat',
-                }
-              : undefined
-          }
         >
           {loginBackground && (
-            <div className="absolute inset-0 bg-obsidian-bg/70 backdrop-blur-[2px]" aria-hidden="true" />
+            <div
+              aria-hidden="true"
+              className="absolute inset-0"
+              style={{
+                backgroundImage: `url("${loginBackground.dataUrl}")`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                backgroundRepeat: 'no-repeat',
+                opacity: loginBackgroundOpacity(loginBackground),
+              }}
+            />
+          )}
+          {loginBackground && (
+            <div className="absolute inset-0 bg-obsidian-bg/60 backdrop-blur-[2px]" aria-hidden="true" />
           )}
           <div className="relative w-full max-w-sm">
             <div className="glass-l2 edge-shimmer max-h-[calc(100dvh-4rem)] overflow-y-auto rounded-lg p-5">

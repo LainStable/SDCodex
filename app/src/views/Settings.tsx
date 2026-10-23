@@ -70,9 +70,11 @@ import {
 } from '../lib/themes';
 import {
   LOGIN_BG_EVENT,
+  DEFAULT_LOGIN_BG_OPACITY,
   clearLoginBackground,
   loadLoginBackground,
   loginBackgroundBytes,
+  loginBackgroundOpacity,
   prepareLoginBackground,
   saveLoginBackground,
   type LoginBackground,
@@ -1257,12 +1259,20 @@ function hexToRgbTriplet(hex: string): string {
 
 function LoginBackgroundField() {
   const [background, setBackground] = useState<LoginBackground | null>(() => loadLoginBackground());
+  const [opacity, setOpacity] = useState<number>(() => {
+    const current = loadLoginBackground();
+    return current ? Math.round(loginBackgroundOpacity(current) * 100) : 100;
+  });
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const sync = () => setBackground(loadLoginBackground());
+    const sync = () => {
+      const current = loadLoginBackground();
+      setBackground(current);
+      setOpacity(current ? Math.round(loginBackgroundOpacity(current) * 100) : 100);
+    };
     window.addEventListener(LOGIN_BG_EVENT, sync);
     window.addEventListener('storage', sync);
     return () => {
@@ -1271,14 +1281,36 @@ function LoginBackgroundField() {
     };
   }, []);
 
+  const persistOpacity = (value: number) => {
+    if (!background) return;
+    const next: LoginBackground = {
+      ...background,
+      opacity: Math.min(1, Math.max(0, value / 100)),
+    };
+    try {
+      saveLoginBackground(next);
+      setBackground(next);
+      setMessage(null);
+    } catch (error) {
+      setMessage({
+        ok: false,
+        text: error instanceof Error ? error.message : 'Could not save the opacity.',
+      });
+    }
+  };
+
   const pick = async (file: File | undefined) => {
     if (!file) return;
     setBusy(true);
     setMessage(null);
     try {
       const prepared = await prepareLoginBackground(file);
-      saveLoginBackground(prepared);
-      setBackground(prepared);
+      // Replacing the image keeps the chosen opacity.
+      const keep = background ? loginBackgroundOpacity(background) : DEFAULT_LOGIN_BG_OPACITY;
+      const next = { ...prepared, opacity: keep };
+      saveLoginBackground(next);
+      setBackground(next);
+      setOpacity(Math.round(keep * 100));
       setMessage({ ok: true, text: `Login background set from ${file.name}.` });
     } catch (error) {
       setMessage({
@@ -1350,6 +1382,29 @@ function LoginBackgroundField() {
         <p className="mt-3 font-mono text-[10px] text-ink-faint">
           No background set — the login gate uses the theme background.
         </p>
+      )}
+
+      {background && (
+        <div className="mt-3 flex items-center gap-3">
+          <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+            Opacity
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={opacity}
+            onChange={(event) => setOpacity(Number(event.target.value))}
+            onPointerUp={() => persistOpacity(opacity)}
+            onKeyUp={() => persistOpacity(opacity)}
+            onBlur={() => persistOpacity(opacity)}
+            aria-label="Login background image opacity"
+            title="Background image opacity on the login page"
+            className="h-2 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-white/20 accent-[#6366f1]"
+          />
+          <span className="w-9 shrink-0 text-right font-mono text-[10px] text-ink-muted">{opacity}%</span>
+        </div>
       )}
 
       {message && (

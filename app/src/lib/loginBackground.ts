@@ -16,7 +16,18 @@ export type LoginBackground = {
   width: number;
   height: number;
   updated: number;
+  /** 0–1; how strongly the image shows through the login backdrop. */
+  opacity: number;
 };
+
+export const DEFAULT_LOGIN_BG_OPACITY = 1;
+
+/** Clamp a stored/edited opacity to 0–1 (older rows default to fully opaque). */
+export function loginBackgroundOpacity(background: LoginBackground): number {
+  const value = Number(background.opacity);
+  if (!Number.isFinite(value)) return DEFAULT_LOGIN_BG_OPACITY;
+  return Math.min(1, Math.max(0, value));
+}
 
 /** Longest edge kept; larger uploads are scaled down before being stored. */
 const MAX_WIDTH = 1920;
@@ -37,6 +48,7 @@ export function loadLoginBackground(): LoginBackground | null {
       width: Number(parsed.width) || 0,
       height: Number(parsed.height) || 0,
       updated: Number(parsed.updated) || 0,
+      opacity: Number.isFinite(Number(parsed.opacity)) ? Math.min(1, Math.max(0, Number(parsed.opacity))) : DEFAULT_LOGIN_BG_OPACITY,
     };
   } catch {
     return null;
@@ -44,8 +56,12 @@ export function loadLoginBackground(): LoginBackground | null {
 }
 
 export function saveLoginBackground(background: LoginBackground): void {
+  const normalized: LoginBackground = {
+    ...background,
+    opacity: Math.min(1, Math.max(0, Number(background.opacity) || 0)),
+  };
   try {
-    localStorage.setItem(LOGIN_BG_KEY, JSON.stringify(background));
+    localStorage.setItem(LOGIN_BG_KEY, JSON.stringify(normalized));
   } catch {
     throw new Error('That image is too large to store in this browser. Try a smaller file.');
   }
@@ -115,5 +131,6 @@ export async function prepareLoginBackground(file: File): Promise<LoginBackgroun
     width,
     height,
     updated: Date.now(),
+    opacity: DEFAULT_LOGIN_BG_OPACITY,
   };
 }
