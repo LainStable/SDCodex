@@ -124,7 +124,7 @@ class DownloadManager:
 
     def _scan_worker(self):
         from sdcodex.models import Setting
-        from sdcodex.scanner import scan_directory
+        from sdcodex.scanner import identify_unmatched, scan_directory
 
         print("DownloadManager scan worker started")
         while True:
@@ -148,41 +148,44 @@ class DownloadManager:
 
                 with self.app.app_context():
                     try:
-                        only = task.get("model_types") or None
-                        dir_rows = {
-                            s.key: (s.value or "").strip()
-                            for s in Setting.query.all()
-                            if s.key.startswith("dir_") and (s.value or "").strip()
-                        }
-                        directories = []
-                        for m_type in MODEL_TYPES:
-                            if only and m_type not in only:
-                                continue
-                            paths = [dir_rows[f"dir_{m_type}"]] if f"dir_{m_type}" in dir_rows else []
-                            extra = sorted(
-                                v for k, v in dir_rows.items() if k.startswith(f"dir_{m_type}__")
+                        if task.get("type") == "identify":
+                            _, message, _ = identify_unmatched(task["api_key"], progress_callback)
+                        else:
+                            only = task.get("model_types") or None
+                            dir_rows = {
+                                s.key: (s.value or "").strip()
+                                for s in Setting.query.all()
+                                if s.key.startswith("dir_") and (s.value or "").strip()
+                            }
+                            directories = []
+                            for m_type in MODEL_TYPES:
+                                if only and m_type not in only:
+                                    continue
+                                paths = [dir_rows[f"dir_{m_type}"]] if f"dir_{m_type}" in dir_rows else []
+                                extra = sorted(
+                                    v for k, v in dir_rows.items() if k.startswith(f"dir_{m_type}__")
+                                )
+                                for path in paths + extra:
+                                    # Skip paths that are currently unreachable
+                                    # (unmounted drive, typo): their rows must not
+                                    # be treated as missing and deleted.
+                                    if os.path.isdir(path):
+                                        directories.append((path, m_type))
+                            scanned_types = {m_type for _, m_type in directories}
+                            total_updated = 0
+                            all_found_ids = set()
+                            for directory, m_type in directories:
+                                task['message'] = f"Scanning {m_type} directory..."
+                                updated, msg, found_ids = scan_directory(
+                                    directory, m_type, task['api_key'], progress_callback
+                                )
+                                total_updated += updated
+                                all_found_ids.update(found_ids)
+                            removed_count = remove_missing_downloads(all_found_ids, scanned_types)
+                            message = (
+                                f"Scan complete. Updated {total_updated} models. "
+                                f"Removed {removed_count} missing models."
                             )
-                            for path in paths + extra:
-                                # Skip paths that are currently unreachable
-                                # (unmounted drive, typo): their rows must not
-                                # be treated as missing and deleted.
-                                if os.path.isdir(path):
-                                    directories.append((path, m_type))
-                        scanned_types = {m_type for _, m_type in directories}
-                        total_updated = 0
-                        all_found_ids = set()
-                        for directory, m_type in directories:
-                            task['message'] = f"Scanning {m_type} directory..."
-                            updated, msg, found_ids = scan_directory(
-                                directory, m_type, task['api_key'], progress_callback
-                            )
-                            total_updated += updated
-                            all_found_ids.update(found_ids)
-                        removed_count = remove_missing_downloads(all_found_ids, scanned_types)
-                        message = (
-                            f"Scan complete. Updated {total_updated} models. "
-                            f"Removed {removed_count} missing models."
-                        )
                     finally:
                         db.session.remove()
                 print(f"Scan finished: {message}")
@@ -222,7 +225,7 @@ class DownloadManager:
 
     def add_task(self, model_id=None, version_id=None, api_key=None, task_type='download', **kwargs):
         task = self._new_task(model_id, version_id, api_key, task_type, **kwargs)
-        self.queue.put(task) if task_type != 'scan' else self.scan_queue.put(task)
+        self.scan_queue.put(task) if task_type in ('scan', 'identify') else self.queue.put(task)
         try:
             self.ensure_scan_worker()
             if task_type != 'scan':
@@ -268,6 +271,32 @@ class DownloadManager:
         if removed:
             return True, "Removed from queue."
         return False, "Task not found (it may have finished)."
+
+    def cancel_scans(self) -> int:
+        """Cancel queued/running scan and identify tasks. Returns the count."""
+        count = 0
+        with self.lock:
+            for t in self.active_tasks:
+                if t.get('type') in ('scan', 'identify') and t.get('status') == 'running':
+                    t['cancel'] = True
+                    t['message'] = 'Cancelling…'
+                    count += 1
+        kept = []
+        try:
+            while True:
+                t = self.scan_queue.get_nowait()
+                if t.get('type') in ('scan', 'identify'):
+                    t['status'] = 'cancelled'
+                    t['message'] = 'Cancelled by user'
+                    self._record_history(t)
+                    count += 1
+                else:
+                    kept.append(t)
+        except queue.Empty:
+            pass
+        for t in kept:
+            self.scan_queue.put(t)
+        return count
 
     def get_status(self):
         try:

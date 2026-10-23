@@ -78,7 +78,8 @@ export interface InstalledPlugin {
 }
 
 export interface InstalledPluginsResult {
-  list: InstalledPlugin[];
+  /** Null means the request failed — callers must keep their previous list. */
+  list: InstalledPlugin[] | null;
   /** False while the backend's background remote check is still running. */
   checked: boolean;
 }
@@ -86,13 +87,15 @@ export interface InstalledPluginsResult {
 export async function fetchInstalled(): Promise<InstalledPluginsResult> {
   try {
     const { apiGet, backendAvailable } = await import('./backend');
-    if (!(await backendAvailable())) return { list: [], checked: false };
+    if (!(await backendAvailable())) return { list: null, checked: false };
     const r = await apiGet<{ installed?: InstalledPlugin[]; updates_checked?: boolean }>('/plugins');
     return {
       list: Array.isArray(r.installed) ? r.installed : [],
       checked: r.updates_checked !== false,
     };
   } catch {
-    return { list: [], checked: false };
+    // A transient failure (restart, queue saturation, Cloudflare 524) must not
+    // render as "no plugins installed"; keep the caller's previous list.
+    return { list: null, checked: false };
   }
 }

@@ -12,7 +12,7 @@ import { adoptServerUser, fetchPublicProviders, type ServerAuthState } from '../
 import { apiPost, mirrorAuth } from '../lib/backend';
 import { fetchCatalog, versionAtLeast, type HubCatalog } from '../lib/plugins';
 import { allThemes, loadTheme, saveTheme } from '../lib/themes';
-import { getScanState, subscribeScanState, type LocalScanState } from '../lib/scanstate';
+import { getScanState, requestScanCancel, subscribeScanState, type LocalScanState } from '../lib/scanstate';
 
 /** Blocking auth gate (mirrors OldCode bootstrap + login). No session, no app:
     first-ever user sets a password and becomes admin; returning users sign in. */
@@ -1012,11 +1012,18 @@ export function PluginTaskFloat({
     /downloads/status; browser (folder-linked) scans report through
     lib/scanstate. Both keep progress visible while the user browses. */
 export function ScanFloat({ onOpen }: { onOpen: () => void }) {
-  type ServerScan = { percent: number; message: string; queued: number; startedAt: number };
+  type ServerScan = {
+    kind: 'scan' | 'identify';
+    percent: number;
+    message: string;
+    queued: number;
+    startedAt: number;
+  };
   const [local, setLocal] = useState<LocalScanState | null>(getScanState);
   const [server, setServer] = useState<ServerScan | null>(null);
   const [now, setNow] = useState(() => Date.now() / 1000);
   const [dismissed, setDismissed] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const serverStart = useRef(0);
   const lastRun = useRef('');
 
@@ -1044,7 +1051,9 @@ export function ScanFloat({ onOpen }: { onOpen: () => void }) {
           scan_queued?: number;
         }>('/downloads/status');
         if (!live) return;
-        const scan = (st.active_tasks ?? []).find((t) => t.type === 'scan');
+        const scan = (st.active_tasks ?? []).find(
+          (t) => t.type === 'scan' || t.type === 'identify',
+        );
         if (!scan) {
           serverStart.current = 0;
           setServer(null);
@@ -1052,6 +1061,7 @@ export function ScanFloat({ onOpen }: { onOpen: () => void }) {
         }
         if (!serverStart.current) serverStart.current = Date.now() / 1000;
         setServer({
+          kind: scan.type === 'identify' ? 'identify' : 'scan',
           percent: Math.max(0, Math.min(100, Number(scan.progress ?? 0))),
           message: scan.message || 'Scanning…',
           queued: st.scan_queued ?? 0,
@@ -1073,6 +1083,7 @@ export function ScanFloat({ onOpen }: { onOpen: () => void }) {
   const view = local
     ? {
         run: `local-${local.startedAt}`,
+        kind: local.kind,
         label: local.label,
         percent: local.total > 0 ? (local.current / local.total) * 100 : 0,
         count: `${local.current}/${local.total || '?'}`,
@@ -1083,7 +1094,8 @@ export function ScanFloat({ onOpen }: { onOpen: () => void }) {
     : server
       ? {
           run: `server-${server.startedAt}`,
-          label: 'all folders',
+          kind: server.kind,
+          label: server.kind === 'identify' ? 'unmatched models' : 'all folders',
           percent: server.percent,
           count: `${Math.round(server.percent)}%`,
           message: server.message,
@@ -1096,11 +1108,26 @@ export function ScanFloat({ onOpen }: { onOpen: () => void }) {
     if (!view || view.run === lastRun.current) return;
     lastRun.current = view.run;
     setDismissed(false);
+    setCancelling(false);
     // Re-run only when a different scan starts, not on every progress tick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view?.run]);
 
   if (!view || dismissed) return null;
+
+  const cancel = async () => {
+    setCancelling(true);
+    if (local) {
+      requestScanCancel();
+      return;
+    }
+    try {
+      const { serverScanCancel } = await import('../lib/scan');
+      await serverScanCancel();
+    } catch {
+      setCancelling(false);
+    }
+  };
 
   const seconds = Math.max(0, Math.round(now - view.startedAt));
   const elapsed = view.startedAt
@@ -1112,7 +1139,9 @@ export function ScanFloat({ onOpen }: { onOpen: () => void }) {
   return (
     <div className="glass-l2 rounded-lg p-3">
       <div className="flex items-center gap-2">
-        <h2 className="font-display text-sm font-semibold">Model Scan</h2>
+        <h2 className="font-display text-sm font-semibold">
+          {view.kind === 'identify' ? 'Identify Models' : 'Model Scan'}
+        </h2>
         <span className="rounded border border-primary/40 bg-primary/10 px-2 py-0.5 font-mono text-[10px] uppercase text-primary">
           {view.count}
         </span>
@@ -1128,7 +1157,9 @@ export function ScanFloat({ onOpen }: { onOpen: () => void }) {
 
       <div className="mt-2 rounded border border-white/[0.06] p-2">
         <div className="flex items-center justify-between gap-2 font-mono text-[11px]">
-          <span className="min-w-0 flex-1 truncate text-ink">Scanning {view.label}</span>
+          <span className="min-w-0 flex-1 truncate text-ink">
+            {view.kind === 'identify' ? 'Identifying' : 'Scanning'} {view.label}
+          </span>
           <span className="shrink-0 text-ink-muted">{Math.round(view.percent)}%</span>
         </div>
         <div className="mt-1.5 h-1.5 overflow-hidden rounded-sm bg-obsidian-high/60">
@@ -1146,13 +1177,23 @@ export function ScanFloat({ onOpen }: { onOpen: () => void }) {
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={onOpen}
-        className="mt-2 w-full rounded border border-white/15 py-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-muted hover:bg-white/5 hover:text-white"
-      >
-        Open Model dirs →
-      </button>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void cancel()}
+          disabled={cancelling}
+          className="rounded border border-status-alert/40 bg-status-alert/10 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.06em] text-[#f87171] hover:bg-status-alert/20 disabled:opacity-50"
+        >
+          {cancelling ? 'Cancelling…' : 'Cancel'}
+        </button>
+        <button
+          type="button"
+          onClick={onOpen}
+          className="flex-1 rounded border border-white/15 py-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-muted hover:bg-white/5 hover:text-white"
+        >
+          Open Model dirs →
+        </button>
+      </div>
     </div>
   );
 }

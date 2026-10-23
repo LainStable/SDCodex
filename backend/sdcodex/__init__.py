@@ -166,6 +166,36 @@ def create_app(db_path: str | None = None) -> Flask:
 
     app.register_blueprint(api_v1, url_prefix="/api")
 
+    # Log requests that held a waitress thread for too long. A handful of these
+    # is normal (updates, scans); a steady stream explains queue-depth warnings
+    # and Cloudflare 524s.
+    import time as _time
+
+    from flask import g as _g
+
+    @app.before_request
+    def _sd_request_started():
+        _g._sd_started = _time.perf_counter()
+
+    @app.after_request
+    def _sd_log_slow(response):
+        started = getattr(_g, "_sd_started", None)
+        if started is not None:
+            elapsed = _time.perf_counter() - started
+            try:
+                threshold = float(os.environ.get("SDCODEX_SLOW_REQUEST", "3"))
+            except ValueError:
+                threshold = 3.0
+            if elapsed >= threshold:
+                app.logger.warning(
+                    "slow request %.1fs %s %s -> %s",
+                    elapsed,
+                    request.method,
+                    request.path,
+                    response.status_code,
+                )
+        return response
+
     # Serve the built frontend in Docker from /srv/frontend (outside the
     # repo mount, which would mask anything baked under /app). Dev keeps
     # using Vite; bare-metal can drop a build into backend/sdcodex/static/.

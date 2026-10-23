@@ -160,7 +160,9 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
     };
   }, []);
 
-  // Ask the backend which installed models have a newer Civitai version.
+  // Ask the backend which installed models have a newer Civitai version. The
+  // backend answers immediately from cache and refreshes the rest in the
+  // background, so poll while it reports `pending`.
   useEffect(() => {
     const items = [
       ...scanned.map((s) => ({ modelId: s.modelId, versionId: s.versionId })),
@@ -168,21 +170,28 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
     ].filter((s) => s.modelId > 0 && s.versionId > 0);
     if (items.length === 0) return;
     let live = true;
-    void (async () => {
+    let timer: number | null = null;
+    const load = async (attempt: number) => {
       try {
         const { apiPost, backendAvailable } = await import('../lib/backend');
         if (!(await backendAvailable())) return;
-        const r = await apiPost<{ updates?: Record<string, { id: number; name?: string }> }>(
-          '/library/updates',
-          { items },
-        );
-        if (live) setUpdates(r.updates ?? {});
+        const r = await apiPost<{
+          updates?: Record<string, { id: number; name?: string }>;
+          pending?: boolean;
+        }>('/library/updates', { items });
+        if (!live) return;
+        setUpdates(r.updates ?? {});
+        if (r.pending && attempt < 5) {
+          timer = window.setTimeout(() => void load(attempt + 1), 4000);
+        }
       } catch {
         /* offline — no update badges */
       }
-    })();
+    };
+    void load(0);
     return () => {
       live = false;
+      if (timer !== null) window.clearTimeout(timer);
     };
   }, [scanned, serverRows]);
 

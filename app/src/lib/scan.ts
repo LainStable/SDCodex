@@ -2,16 +2,27 @@
    dir: enumerate model files → SHA-256 → Civitai by-hash → write
    <base>.metadata.json + preview image → record. */
 
-import { fetchModel, fetchVersionByHash } from './civitai';
+import { fetchVersionByHash } from './civitai';
 import { ensurePermission, getHandle, putHandle } from './idb';
-import { upsertScanned } from './library';
+import { loadScanned, upsertScanned } from './library';
+import { isScanCancelled } from './scanstate';
 import { getDirectories } from './settings';
 import { apiGet, apiPost, backendAvailable } from './backend';
 
-/** Server-side scan (no folder picker — the backend reads its own paths). */
-export async function serverScan(types?: string[]): Promise<void> {
+/** Server-side scan (no folder picker — the backend reads its own paths).
+    `mode: 'identify'` hashes and matches rows saved as unidentified. */
+export async function serverScan(types?: string[], mode?: 'scan' | 'identify'): Promise<void> {
   if (!(await backendAvailable())) throw new Error('backend unreachable');
-  await apiPost('/scan', types ? { types } : {});
+  await apiPost('/scan', {
+    ...(types ? { types } : {}),
+    ...(mode && mode !== 'scan' ? { mode } : {}),
+  });
+}
+
+/** Cancel the running/queued server scan or identify task. */
+export async function serverScanCancel(): Promise<void> {
+  if (!(await backendAvailable())) throw new Error('backend unreachable');
+  await apiPost('/scan/cancel', {});
 }
 
 export interface ServerScanStatus {
@@ -47,17 +58,6 @@ export function pathId(rel: string): number {
     for (let k = 0; k < 8; k++) crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
   }
   return (crc ^ 0xffffffff) >>> 0;
-}
-
-async function writeBytesFile(
-  dir: FileSystemDirectoryHandle,
-  name: string,
-  data: ArrayBuffer,
-): Promise<void> {
-  const fh = await dir.getFileHandle(name, { create: true });
-  const w = await fh.createWritable();
-  await w.write(data);
-  await w.close();
 }
 
 /** Map safetensors `__metadata__` keys (modelspec / A1111) to a Civitai base
@@ -407,6 +407,7 @@ export async function scanDir(
   const pending: typeof files = [];
   let checked = 0;
   for (const f of files) {
+    if (isScanCancelled()) throw new Error('Scan cancelled');
     const name = f.rel.split('/').pop() ?? f.rel;
     const base = name.replace(/\.[^.]+$/, '');
     seen.add(`${f.dirKey}/${f.rel}`);
@@ -456,114 +457,122 @@ export async function scanDir(
     onProgress?.(checked, files.length, `${type}: reading sidecars (${checked}/${files.length})`);
   }
 
-  // Pass 2 — hash + Civitai lookup for files with no usable metadata sidecar.
+  // Pass 2 — list the remaining files as unidentified. Hashing is a separate,
+  // explicit action ("Identify models"), so a scan stays fast and never calls
+  // Civitai on its own.
   let done = 0;
-  onProgress?.(
-    0,
-    pending.length,
-    `${type}: identifying ${pending.length} file${pending.length === 1 ? '' : 's'}...`,
-  );
   for (const f of pending) {
+    if (isScanCancelled()) throw new Error('Scan cancelled');
     const name = f.rel.split('/').pop() ?? f.rel;
+    const base = name.replace(/\.[^.]+$/, '');
     done += 1;
-    const progressMsg = `${type}: Identifying ${f.rel}... (${done}/${pending.length})`;
+    const progressMsg = `${type}: listing ${f.rel} (${done}/${pending.length})`;
     onMsg(progressMsg);
     onProgress?.(done, pending.length, progressMsg);
+    let size = 0;
+    let file: File | null = null;
     try {
-      const file = await f.handle.getFile();
+      file = await f.handle.getFile();
+      size = file.size;
+    } catch {
+      /* unreadable — list by name only */
+    }
+    let inferred = '';
+    if (file) {
+      try {
+        inferred = await inferBaseModel(file);
+      } catch {
+        /* unreadable header */
+      }
+    }
+    const imageName = await findSidecarImage(f.dir, base);
+    upsertScanned({
+      modelId: 0,
+      versionId: pathId(`${f.dirKey}/${f.rel}`),
+      name: base,
+      type,
+      baseModel: inferred || baseModelFromPath(`${f.dirPath}/${f.rel}`),
+      dirKey: f.dirKey,
+      dirPath: f.dirPath,
+      filename: f.rel,
+      hash: '',
+      size,
+      imageName,
+      identified: false,
+      scannedAt: Date.now(),
+    });
+    updated += 1;
+  }
+  onMsg(`${type}: scanned ${files.length} files, updated ${updated} models.`);
+  onProgress?.(files.length, files.length, `${type}: scanned ${files.length} files, updated ${updated} models.`);
+  return updated;
+}
+
+/** Hash + Civitai-match local scan records saved as unidentified. */
+export async function identifyUnknownModels(
+  onMsg: (msg: string) => void,
+  onProgress?: (done: number, total: number, message: string) => void,
+): Promise<number> {
+  const records = loadScanned().filter((record) => !record.identified);
+  const total = records.length;
+  if (total === 0) {
+    onMsg('No unidentified models to check.');
+    onProgress?.(0, 0, 'No unidentified models to check.');
+    return 0;
+  }
+  let identified = 0;
+  let done = 0;
+  const rootsByType = new Map<string, ScanRoot[]>();
+  for (const record of records) {
+    if (isScanCancelled()) throw new Error('Identification cancelled');
+    done += 1;
+    const message = `Identifying ${record.filename} (${done}/${total})`;
+    onMsg(message);
+    onProgress?.(done, total, message);
+    try {
+      let roots = rootsByType.get(record.type);
+      if (!roots) {
+        roots = await boundFolders(record.type);
+        rootsByType.set(record.type, roots);
+      }
+      const root = roots.find((r) => r.key === record.dirKey) ?? roots[0];
+      if (!root || !(await ensurePermission(root.dir, 'read'))) continue;
+      let dir = root.dir;
+      const parts = record.filename.split('/').filter(Boolean);
+      for (const part of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(part);
+      const leaf = parts[parts.length - 1] ?? record.filename;
+      const file = await (await dir.getFileHandle(leaf)).getFile();
       const hash = await sha256Hex(file);
       const version = await fetchVersionByHash(hash);
-      const versionId = version.id;
-      const modelId = version.modelId ?? 0;
-      const base = name.replace(/\.[^.]+$/, '');
-
-      const metaName = `${base}.metadata.json`;
-      if (!(await fileExists(f.dir, metaName))) {
-        try {
-          const full = modelId ? await fetchModel(modelId) : null;
-          const fh = await f.dir.getFileHandle(metaName, { create: true });
-          const w = await fh.createWritable();
-          await w.write(JSON.stringify(full ?? version, null, 4));
-          await w.close();
-        } catch {
-          /* metadata best-effort */
-        }
-      }
-
-      let imageName: string | null = null;
-      const imgUrl = version.images?.[0]?.url;
-      if (imgUrl) {
-        const ext = imgUrl.includes('.png') ? '.png' : imgUrl.includes('.jpg') || imgUrl.includes('.jpeg') ? '.jpg' : '.webp';
-        imageName = `${base}${ext}`;
-        if (!(await fileExists(f.dir, imageName))) {
-          try {
-            const res = await fetch(imgUrl);
-            if (res.ok) await writeBytesFile(f.dir, imageName, await res.arrayBuffer());
-            else imageName = null;
-          } catch {
-            imageName = null;
-          }
-        }
-      }
-
+      const base = leaf.replace(/\.[^.]+$/, '');
+      const imageName = await findSidecarImage(dir, base);
       upsertScanned({
-        modelId,
-        versionId,
-        name: version.model?.name ?? name,
-        // Folder category, not the API taxonomy — sections follow Settings.
-        type,
-        // Civitai's answer, or the architecture embedded in the weights.
-        baseModel: version.baseModel || (await inferBaseModel(file)),
-        dirKey: f.dirKey,
-        dirPath: f.dirPath,
-        filename: f.rel,
+        modelId: version.modelId ?? 0,
+        versionId: version.id,
+        name: version.model?.name ?? record.name,
+        type: record.type,
+        baseModel:
+          version.baseModel ||
+          (await inferBaseModel(file)) ||
+          baseModelFromPath(`${record.dirPath}/${record.filename}`),
+        dirKey: record.dirKey,
+        dirPath: record.dirPath,
+        filename: record.filename,
         hash: hash.slice(0, 12),
         size: file.size,
         imageName,
         identified: true,
         scannedAt: Date.now(),
       });
-      updated += 1;
+      identified += 1;
     } catch {
-      // Unidentified: still display the model. Prefer a sidecar image the
-      // folder already has (<base>.png/.jpg/.webp); else the placeholder.
-      // A stable stand-in id lets Update-metadata adopt a match later.
-      let size = 0;
-      try {
-        size = (await f.handle.getFile()).size;
-      } catch {
-        /* unreadable — list by name only */
-      }
-      const base = (f.rel.split('/').pop() ?? f.rel).replace(/\.[^.]+$/, '');
-      let inferred = '';
-      try {
-        inferred = await inferBaseModel(await f.handle.getFile());
-      } catch {
-        /* unreadable header — leave the chip unknown */
-      }
-      let sidecar: string | null = null;
-      sidecar = await findSidecarImage(f.dir, base);
-      upsertScanned({
-        modelId: 0,
-        versionId: pathId(`${f.dirKey}/${f.rel}`),
-        name: base,
-        type,
-        baseModel: inferred || baseModelFromPath(`${f.dirPath}/${f.rel}`),
-        dirKey: f.dirKey,
-        dirPath: f.dirPath,
-        filename: f.rel,
-        hash: '',
-        size,
-        imageName: sidecar,
-        identified: false,
-        scannedAt: Date.now(),
-      });
-      onMsg(`${type}: no Civitai match for ${f.rel} — kept as unknown`);
+      onMsg(`No Civitai match for ${record.filename}`);
     }
   }
-  onMsg(`${type}: scanned ${files.length} files, updated ${updated} models.`);
-  onProgress?.(files.length, files.length, `${type}: scanned ${files.length} files, updated ${updated} models.`);
-  return updated;
+  const summary = `Identified ${identified} of ${total} unmatched models.`;
+  onMsg(summary);
+  onProgress?.(total, total, summary);
+  return identified;
 }
 
 export async function resolveBound(type: string): Promise<FileSystemDirectoryHandle | null> {

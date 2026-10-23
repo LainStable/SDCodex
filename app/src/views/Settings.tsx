@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FilterPills, GhostButton, PageHeader, PrimaryButton } from '../components/chrome';
 import { AssistantPanel, McpPanel } from '../components/assistantPanels';
 import { TypeBadge } from '../components/ui';
-import { bindDirectoryKey, scanDir, serverScan, serverScanStatus, type ScanRoot } from '../lib/scan';
+import { bindDirectoryKey, identifyUnknownModels, scanDir, serverScan, serverScanStatus, type ScanRoot } from '../lib/scan';
 import { getHandle } from '../lib/idb';
 import { loadScanned, pruneScanned } from '../lib/library';
 import {
@@ -426,6 +426,43 @@ function Dirs() {
     }
   };
 
+  /** Hash + Civitai-match every model a scan saved as unidentified. */
+  const identifyAll = async () => {
+    setScanning(true);
+    try {
+      await serverScan(undefined, 'identify');
+      say('Identify started on server…');
+      await pollServer();
+      return;
+    } catch (e) {
+      if (!supported) {
+        say(
+          `Server identify failed (${e instanceof Error ? e.message : 'unreachable'}) — folder linking needs Chromium.`,
+        );
+        setScanning(false);
+        return;
+      }
+      /* standalone — fall through to the browser flow */
+    }
+    try {
+      beginScan('unmatched models', 'identify');
+      try {
+        const count = await identifyUnknownModels(
+          (msg) => say(msg),
+          (done, total, message) =>
+            updateScan({ label: 'unmatched models', current: done, total, message }),
+        );
+        finishScan(`Identified ${count} unmatched model${count === 1 ? '' : 's'}.`);
+      } catch (err) {
+        finishScan(
+          `Identification stopped — ${err instanceof Error ? err.message : 'cancelled'}`,
+        );
+      }
+    } finally {
+      setScanning(false);
+    }
+  };
+
   const addCustom = () => {
     if (!label.trim() || !path.trim()) return;
     setCustomDir(label.trim(), path.trim());
@@ -444,6 +481,13 @@ function Dirs() {
         <PrimaryButton disabled={scanning} onClick={() => void scanAll()}>
           {scanning ? 'Scanning…' : 'Scan all folders'}
         </PrimaryButton>
+        <GhostButton
+          disabled={scanning}
+          onClick={() => void identifyAll()}
+          title="Hash every unidentified model and look it up on Civitai"
+        >
+          Identify models
+        </GhostButton>
         <label
           className="flex cursor-pointer items-center gap-2 rounded border border-white/10 px-2 py-1.5 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-muted hover:border-white/25"
           title="Download into <type>/<BaseModel>/ subfolders, e.g. checkpoints/Anima/"

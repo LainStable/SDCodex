@@ -486,8 +486,15 @@ export default function App() {
   // Plugin installs/uninstalls refresh spaces everywhere.
   useEffect(() => {
     const onChange = () => void refreshInstalled();
+    // Returning to the tab is a cheap moment to re-check (covers a backend that
+    // was saturated, or plugins installed from another window).
+    const onFocus = () => void refreshInstalled();
     window.addEventListener('sdcodex:plugins-changed', onChange);
-    return () => window.removeEventListener('sdcodex:plugins-changed', onChange);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('sdcodex:plugins-changed', onChange);
+      window.removeEventListener('focus', onFocus);
+    };
   }, []);
 
   const go = (v: ViewId) => {
@@ -556,9 +563,11 @@ export default function App() {
   const refreshInstalled = async () => {
     const { fetchInstalled } = await import('./lib/plugins');
     const { list, checked } = await fetchInstalled();
-    setInstalled(list);
-    // Drop the space if its plugin went away.
-    setSpace((s) => (s.kind === 'plugin' && !list.some((p) => p.id === s.id) ? { kind: 'core' } : s));
+    if (list) {
+      setInstalled(list);
+      // Drop the space if its plugin went away.
+      setSpace((s) => (s.kind === 'plugin' && !list.some((p) => p.id === s.id) ? { kind: 'core' } : s));
+    }
     if (checked) {
       installedRetryRef.current = 0;
       if (installedTimerRef.current) {
@@ -568,12 +577,15 @@ export default function App() {
       void checkUpdates();
       return;
     }
-    if (installedRetryRef.current < 10 && installedTimerRef.current === null) {
+    // Backend restarting, queue saturated, or Cloudflare 524: keep polling with
+    // a backoff instead of leaving the radial menu looking core-only.
+    if (installedRetryRef.current < 40 && installedTimerRef.current === null) {
+      const attempt = installedRetryRef.current;
       installedRetryRef.current += 1;
       installedTimerRef.current = setTimeout(() => {
         installedTimerRef.current = null;
         void refreshInstalled();
-      }, 2000);
+      }, attempt < 5 ? 2000 : attempt < 15 ? 4000 : 8000);
     }
   };
 

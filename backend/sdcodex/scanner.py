@@ -226,7 +226,7 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
         file_dir = os.path.dirname(filepath)
         if progress_callback and total_files:
             progress_callback(
-                int(index / total_files * 45), f"Reading metadata for {filename}..."
+                int(index / total_files * 95), f"Reading metadata for {filename}..."
             )
         sidecar_path, sidecar = _read_sidecar(file_dir, base_name)
         if sidecar_path:
@@ -238,21 +238,9 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
         else:
             pending.append(filepath)
 
-    # Pass 2 — hash + Civitai lookup for everything without usable metadata.
-    for index, filepath in enumerate(pending, start=1):
-        if progress_callback:
-            progress_callback(
-                45 + int(index / max(1, len(pending)) * 45),
-                f"Identifying {os.path.basename(filepath)}...",
-            )
-        try:
-            file_hash = _cached_sha256(filepath)
-            version = api.get_model_version_by_hash(file_hash, api_key)
-        except Exception as exc:
-            print(f"Failed to identify {os.path.basename(filepath)}: {exc}")
-            version = None
-        if version:
-            identified[filepath] = version
+    # Everything without a usable sidecar is listed as unidentified. Hashing
+    # is an explicit "Identify models" action (identify_unmatched), so a scan
+    # stays fast and never talks to Civitai.
 
     for filepath in model_files:
         if not os.path.isfile(filepath):
@@ -370,3 +358,91 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
         found_ids.append((model_id, version_id))
 
     return updated_count, f"Scanned {total_files} files, updated {updated_count} models.", found_ids
+
+
+def identify_unmatched(api_key=None, progress_callback=None):
+    """Hash and Civitai-match every library row that is still unidentified.
+
+    Scans never hash now; this is the explicit follow-up the user triggers from
+    Settings -> Model dirs ("Identify models"). Returns (count, message, []).
+    """
+    rows = Download.query.filter_by(model_id=0).order_by(Download.id).all()
+    total = len(rows)
+    identified = 0
+    for index, row in enumerate(rows, start=1):
+        files = row.get_files() or {}
+        path = files.get("model") or ""
+        display = os.path.basename(path) or row.name or "model"
+        if progress_callback:
+            progress_callback(
+                int(index / max(1, total) * 100), f"Identifying {display} ({index}/{total})"
+            )
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            file_hash = _cached_sha256(path)
+            version = api.get_model_version_by_hash(file_hash, api_key)
+        except Exception as exc:
+            print(f"Failed to identify {display}: {exc}")
+            continue
+        if not version:
+            continue
+        version_id = version.get("id")
+        model_id = version.get("modelId")
+        if not version_id or not model_id:
+            continue
+
+        # A second copy of an already-identified file: merge and drop this row.
+        existing = Download.query.filter_by(model_id=model_id, version_id=version_id).first()
+        if existing is not None and existing.id != row.id:
+            merged = dict(existing.get_files() or {})
+            for key, value in files.items():
+                if value and not merged.get(key):
+                    merged[key] = value
+            existing.set_files(merged)
+            db.session.delete(row)
+            db.session.commit()
+            identified += 1
+            continue
+
+        base_name = os.path.splitext(os.path.basename(path))[0]
+        file_dir = os.path.dirname(path)
+        new_files = dict(files)
+        new_files["model"] = path
+
+        metadata_path = os.path.join(file_dir, f"{base_name}.metadata.json")
+        if not os.path.exists(metadata_path):
+            try:
+                full_model = api.get_model(model_id, api_key)
+                with open(metadata_path, "w", encoding="utf-8") as handle:
+                    json.dump(full_model, handle, indent=4)
+            except Exception as exc:
+                print(f"Failed to download metadata for {display}: {exc}")
+        if os.path.exists(metadata_path):
+            new_files["metadata"] = metadata_path
+
+        image_path = _find_image(file_dir, base_name)
+        if not os.path.exists(image_path) and version.get("images"):
+            image_url = version["images"][0]["url"]
+            ext = (
+                ".png" if ".png" in image_url
+                else ".jpg" if (".jpg" in image_url or ".jpeg" in image_url)
+                else ".webp"
+            )
+            image_path = os.path.join(file_dir, f"{sanitize_filename(base_name)}{ext}")
+            try:
+                download_file(image_url, image_path, api_key)
+            except Exception as exc:
+                print(f"Failed to download image for {display}: {exc}")
+        if os.path.exists(image_path):
+            new_files["image"] = image_path
+
+        row.model_id = int(model_id)
+        row.version_id = int(version_id)
+        row.name = ((version.get("model") or {}).get("name")) or row.name
+        row.base_model = version.get("baseModel") or infer_base_model(path) or row.base_model
+        row.set_files(new_files)
+        db.session.commit()
+        identified += 1
+
+    return identified, f"Identified {identified} of {total} unmatched models.", []

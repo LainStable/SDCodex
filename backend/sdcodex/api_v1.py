@@ -531,6 +531,45 @@ def library():
 _LIBRARY_UPDATE_TTL = 600
 _LIBRARY_UPDATE_CACHE: dict = {}
 _LIBRARY_UPDATE_LOCK = threading.Lock()
+# Model ids with a background refresh in flight (never block a request on these).
+_LIBRARY_UPDATE_INFLIGHT: set = set()
+_LIBRARY_UPDATE_INFLIGHT_LOCK = threading.Lock()
+
+
+def _library_update_cached(model_id: int):
+    """Cached latest version for a model id, or None when not fetched yet."""
+    now = time.time()
+    with _LIBRARY_UPDATE_LOCK:
+        hit = _LIBRARY_UPDATE_CACHE.get(model_id)
+        if hit and now - hit[0] < _LIBRARY_UPDATE_TTL:
+            return hit[1]
+    return None
+
+
+def _schedule_library_updates(model_ids: list, api_key) -> bool:
+    """Refresh missing model ids on a daemon thread.
+
+    Probing up to 60 models synchronously used to hold a waitress thread for
+    minutes (and trip Cloudflare's 100 s 524), so requests return known rows
+    immediately and the client polls until `pending` clears.
+    """
+    with _LIBRARY_UPDATE_INFLIGHT_LOCK:
+        fresh = [mid for mid in model_ids if mid not in _LIBRARY_UPDATE_INFLIGHT]
+        _LIBRARY_UPDATE_INFLIGHT.update(fresh)
+    if not fresh:
+        with _LIBRARY_UPDATE_INFLIGHT_LOCK:
+            return any(mid in _LIBRARY_UPDATE_INFLIGHT for mid in model_ids)
+
+    def _run():
+        try:
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                list(pool.map(lambda mid: _latest_civitai_version(mid, api_key), fresh))
+        finally:
+            with _LIBRARY_UPDATE_INFLIGHT_LOCK:
+                _LIBRARY_UPDATE_INFLIGHT.difference_update(fresh)
+
+    threading.Thread(target=_run, name="library-update-refresh", daemon=True).start()
+    return True
 
 
 def _latest_civitai_version(model_id: int, api_key: str | None):
@@ -586,11 +625,18 @@ def library_updates():
         wanted.setdefault(model_id, []).append(version_id)
     model_ids = list(wanted)[:60]
     if not model_ids:
-        return jsonify({"updates": {}})
+        return jsonify({"updates": {}, "pending": False})
 
     api_key = user.api_key or None
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        latest_by_model = dict(zip(model_ids, pool.map(lambda mid: _latest_civitai_version(mid, api_key), model_ids)))
+    latest_by_model = {}
+    missing = []
+    for model_id in model_ids:
+        cached = _library_update_cached(model_id)
+        if cached is not None:
+            latest_by_model[model_id] = cached
+        else:
+            missing.append(model_id)
+    pending = _schedule_library_updates(missing, api_key) if missing else False
 
     updates = {}
     for model_id in model_ids:
@@ -601,7 +647,13 @@ def library_updates():
         for version_id in wanted[model_id]:
             if int(latest_id) != version_id:
                 updates[f"{model_id}-{version_id}"] = latest
-    return jsonify({"updates": updates, "truncated": len(wanted) > len(model_ids)})
+    return jsonify(
+        {
+            "updates": updates,
+            "pending": pending,
+            "truncated": len(wanted) > len(model_ids),
+        }
+    )
 
 
 @api_v1.put("/library/<int:row_id>/identify")
@@ -869,6 +921,13 @@ def scan():
     from .download_manager import download_manager
 
     data = request.get_json(force=True, silent=True) or {}
+    mode = str(data.get("mode") or "scan").strip().lower()
+    if mode == "identify":
+        # Hash + Civitai lookup for rows a scan saved as unidentified.
+        task = download_manager.add_task(
+            api_key=user.api_key or None, task_type="identify"
+        )
+        return jsonify({"ok": True, "status": task.get("status")})
     types = data.get("types")
     if types is not None and (not isinstance(types, list) or not all(isinstance(t, str) for t in types)):
         return jsonify({"error": "types must be a string list"}), 400
@@ -876,6 +935,16 @@ def scan():
         api_key=user.api_key or None, task_type="scan", model_types=types
     )
     return jsonify({"ok": True, "status": task.get("status")})
+
+
+@api_v1.post("/scan/cancel")
+def scan_cancel():
+    user, err = _require_user()
+    if err:
+        return err
+    from .download_manager import download_manager
+
+    return jsonify({"ok": True, "cancelled": download_manager.cancel_scans()})
 
 
 # ------------------------------------------------------------------ oidc ---
@@ -2000,7 +2069,7 @@ def civitai_proxy(subpath: str):
     if request.args:
         url = f"{url}?{urlencode(dict(request.args), doseq=True)}"
     try:
-        resp = _civitai_get(url, headers, timeout=(5, 30))
+        resp = _civitai_get(url, headers, timeout=(4, 15))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as e:

@@ -114,51 +114,70 @@ _PLUGIN_TASK_CACHE: dict = {"cookie": None, "ts": 0.0, "data": []}
 _PLUGIN_TASK_PROBE_LOCK = threading.Lock()
 
 
+def _collect_plugin_tasks(cookie: str) -> list[dict]:
+    from . import updater as updater_mod
+
+    tasks = []
+    with _plugin_session(cookie) as probe_cookie:
+        for plugin in updater_mod.list_installed():
+            meta = plugin.get("task_status") or {}
+            route = (meta.get("path") or "").strip()
+            if not route.startswith("/"):
+                continue
+            _, payload = _probe(route, probe_cookie)
+            if not isinstance(payload, dict) or not payload.get("active"):
+                continue
+            current = payload.get("current")
+            total = payload.get("total")
+            tasks.append(
+                {
+                    "pluginId": plugin["id"],
+                    "pluginName": meta.get("label") or plugin.get("name") or plugin["id"],
+                    "page": meta.get("page") or plugin.get("entry_page") or "",
+                    "state": str(payload.get("state") or "running"),
+                    "current": current if isinstance(current, int) else 0,
+                    "total": total if isinstance(total, int) else 0,
+                    "detail": str(payload.get("detail") or ""),
+                    "message": str(payload.get("message") or ""),
+                    "startedAt": payload.get("started_at") or 0,
+                }
+            )
+    return tasks
+
+
 def plugin_tasks(cookie: str = "") -> list[dict]:
     """Running background tasks reported by installed plugins.
 
     The floating panel polls every couple of seconds. Reuse a very short
-    cache and never stack probe cycles: if one plugin's status route hangs,
-    later polls get the previous snapshot instead of blocking another
-    waitress thread (a hung route used to exhaust the whole connection pool).
+    cache, and run probes on a daemon thread so a slow/hung plugin status
+    route can never hold the waitress thread that served the poll.
     """
-    from . import updater as updater_mod
-
     now = time.time()
     if _PLUGIN_TASK_CACHE["cookie"] == cookie and now - _PLUGIN_TASK_CACHE["ts"] < 1.5:
         return list(_PLUGIN_TASK_CACHE["data"])
+    cached = (
+        list(_PLUGIN_TASK_CACHE["data"]) if _PLUGIN_TASK_CACHE["cookie"] == cookie else []
+    )
     if not _PLUGIN_TASK_PROBE_LOCK.acquire(blocking=False):
-        return list(_PLUGIN_TASK_CACHE["data"]) if _PLUGIN_TASK_CACHE["cookie"] == cookie else []
+        return cached
     try:
-        tasks = []
-        with _plugin_session(cookie) as probe_cookie:
-            for plugin in updater_mod.list_installed():
-                meta = plugin.get("task_status") or {}
-                route = (meta.get("path") or "").strip()
-                if not route.startswith("/"):
-                    continue
-                _, payload = _probe(route, probe_cookie)
-                if not isinstance(payload, dict) or not payload.get("active"):
-                    continue
-                current = payload.get("current")
-                total = payload.get("total")
-                tasks.append(
-                    {
-                        "pluginId": plugin["id"],
-                        "pluginName": meta.get("label") or plugin.get("name") or plugin["id"],
-                        "page": meta.get("page") or plugin.get("entry_page") or "",
-                        "state": str(payload.get("state") or "running"),
-                        "current": current if isinstance(current, int) else 0,
-                        "total": total if isinstance(total, int) else 0,
-                        "detail": str(payload.get("detail") or ""),
-                        "message": str(payload.get("message") or ""),
-                        "startedAt": payload.get("started_at") or 0,
-                    }
-                )
-        _PLUGIN_TASK_CACHE.update(cookie=cookie, ts=time.time(), data=tasks)
-        return tasks
-    finally:
+        app = current_app._get_current_object()
+    except Exception:
         _PLUGIN_TASK_PROBE_LOCK.release()
+        return cached
+
+    def _run():
+        try:
+            with app.app_context():
+                tasks = _collect_plugin_tasks(cookie)
+            _PLUGIN_TASK_CACHE.update(cookie=cookie, ts=time.time(), data=tasks)
+        except Exception:
+            app.logger.warning("plugin task probe failed", exc_info=True)
+        finally:
+            _PLUGIN_TASK_PROBE_LOCK.release()
+
+    threading.Thread(target=_run, name="plugin-task-probe", daemon=True).start()
+    return cached
 
 
 @contextmanager

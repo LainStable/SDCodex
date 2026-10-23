@@ -3,7 +3,10 @@ import requests
 BASE_URL = "https://civitai.com/api/v1"
 # Civitai occasionally stalls; every call must have a hard ceiling or a
 # background download/scan worker blocks forever.
-TIMEOUT = (5, 30)
+# Cloudflare fronts the app: any request held past ~100 s becomes a 524 and
+# clients retry, which piles more work onto waitress. Keep upstream calls well
+# below that ceiling.
+TIMEOUT = (5, 15)
 USER_AGENT = "SDCodex/1.0 (+https://github.com/LainStable/SDCodex)"
 
 _session = requests.Session()

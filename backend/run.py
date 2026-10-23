@@ -79,9 +79,9 @@ if __name__ == "__main__":
                 # core's own polling can easily exceed a small pool: with 8
                 # threads waitress logged "Task queue depth is 58" and pages
                 # stalled. Default higher; SDCODEX_THREADS still overrides.
-                threads = max(8, min(128, int(os.environ.get("SDCODEX_THREADS", "24"))))
+                threads = max(8, min(128, int(os.environ.get("SDCODEX_THREADS", "48"))))
             except (TypeError, ValueError):
-                threads = 24
+                threads = 48
             try:
                 # Browsers keep several keep-alive sockets per tab and plugin
                 # iframes multiply that; the old 40-minute channel timeout let
