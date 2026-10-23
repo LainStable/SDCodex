@@ -1548,13 +1548,13 @@ export function Plugins() {
                       <div ref={rebuildLogEndRef} />
                     </div>
                   )}
-                  <p className="mt-3 text-[14px] text-[#8b93a5]">{statusText}</p>
+                  <p className="mt-3 text-[14px] text-ink-faint">{statusText}</p>
                 </div>
                 <div className="flex justify-end px-5 py-3">
                   <button
                     type="button"
                     onClick={() => setShowRebuildLog(false)}
-                    className="rounded-lg bg-[#3b4a63] px-6 py-2 text-sm font-semibold text-white hover:bg-[#4a5a75]"
+                    className="rounded-lg bg-obsidian-high px-6 py-2 text-sm font-semibold text-ink hover:bg-obsidian-highest hover:border-white/20 border border-white/10"
                   >
                     Close
                   </button>
