@@ -158,9 +158,11 @@ def download_model(model_id, version_id, api_key=None, progress_callback=None, i
 
         org_row = db.session.get(Setting, "organize_by_base")
         if org_row and (org_row.value or "") == "1":
-            slug = re.sub(r'[^a-z0-9]+', '_', (version.get('baseModel') or '').lower()).strip('_')
-            if slug:
-                base_dir = os.path.join(base_dir, slug)
+            base_model_name = (version.get('baseModel') or '').strip()
+            if base_model_name:
+                # Preserve original capitalization and spaces; sanitize only unsafe path chars.
+                safe_dir_name = base_model_name.replace('/', '_').replace('\\', '_')
+                base_dir = os.path.join(base_dir, safe_dir_name)
 
         # exist_ok avoids the TOCTOU crash when parallel workers target the
         # same new folder.
