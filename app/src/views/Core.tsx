@@ -1523,29 +1523,28 @@ export function Plugins() {
                   ? 'Preparing…'
                   : 'Preparing…';
           return (
-            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-obsidian-bg/80 p-4 backdrop-blur-md">
+            <div
+              className="fixed inset-0 z-[70] flex items-center justify-center p-4"
+              onClick={(event) => {
+                // No visible close affordance while a rebuild runs; once it has
+                // failed (or before it starts) clicking outside still dismisses.
+                if (event.target === event.currentTarget && (!running || failed)) {
+                  setShowRebuildLog(false);
+                }
+              }}
+            >
               <div className="glass-l2 edge-shimmer w-full max-w-2xl overflow-hidden rounded-lg border border-ink/10">
-                <div className="flex items-start justify-between gap-3 px-5 py-4">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <img src="/sdcodex.svg" alt="" className="h-10 w-10 shrink-0 object-contain" />
-                    <h2 className="min-w-0 truncate font-display text-lg font-semibold tracking-tight">
-                      {finished
-                        ? 'Update complete'
-                        : failed
-                          ? 'Update failed'
-                          : running
-                            ? 'Updating SDCodex'
-                            : 'Ready to update'}
-                    </h2>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowRebuildLog(false)}
-                    aria-label="Close self-update dialog"
-                    className="shrink-0 rounded border border-ink/10 bg-obsidian-low px-2.5 py-1.5 text-sm text-ink-muted transition-colors hover:border-ink/20 hover:text-ink"
-                  >
-                    ✕
-                  </button>
+                <div className="flex items-center gap-3 px-5 py-4">
+                  <img src="/sdcodex.svg" alt="" className="h-10 w-10 shrink-0 object-contain" />
+                  <h2 className="min-w-0 truncate font-display text-lg font-semibold tracking-tight">
+                    {finished
+                      ? 'Update complete'
+                      : failed
+                        ? 'Update failed'
+                        : running
+                          ? 'Updating SDCodex'
+                          : 'Ready to update'}
+                  </h2>
                 </div>
 
                 <div className="px-5 py-4">
@@ -1625,16 +1624,6 @@ export function Plugins() {
                     </div>
                   )}
                   <p className="mt-3 font-mono text-[11px] text-ink-faint">{statusText}</p>
-                </div>
-
-                <div className="flex items-center justify-end gap-3 px-5 py-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowRebuildLog(false)}
-                    className="rounded border border-ink/10 bg-obsidian-high px-4 py-1.5 text-sm font-semibold text-ink transition-colors hover:border-ink/20 hover:bg-obsidian-highest"
-                  >
-                    Close
-                  </button>
                 </div>
               </div>
             </div>
