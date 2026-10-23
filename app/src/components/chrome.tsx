@@ -618,7 +618,7 @@ export function Topbar({
         )}
       </div>
       <span
-        title="Selected install mode"
+        title="Running mode — Docker container vs local process"
         className={`hidden rounded border px-2 py-0.5 font-mono text-[10px] tracking-[0.06em] sm:inline ${
           installMode === 'local'
             ? 'border-status-active/30 bg-status-active/10 text-status-active'

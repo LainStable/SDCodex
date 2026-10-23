@@ -209,9 +209,11 @@ export function BootstrapCard({
             className="pointer-events-none absolute inset-x-10 -bottom-px h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent"
           />
         </div>
-        <h1 className="mt-4 font-display text-xl font-semibold tracking-tight">
-          {isCreate ? 'Create administrator' : 'Welcome back'}
-        </h1>
+        {isCreate && (
+          <h1 className="mt-4 font-display text-xl font-semibold tracking-tight">
+            Create administrator
+          </h1>
+        )}
       </div>
 
       <div className="mt-5 flex flex-col gap-3">

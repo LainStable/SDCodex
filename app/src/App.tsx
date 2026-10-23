@@ -382,9 +382,15 @@ export default function App() {
     const refreshInstallMode = async () => {
       try {
         const { apiGet } = await import('./lib/backend');
-        const status = await apiGet<{ mode?: 'docker' | 'local' }>('/system/install-mode');
-        if (live && (status.mode === 'docker' || status.mode === 'local')) {
-          setInstallMode(status.mode);
+        // The badge reports how the app is actually running (docker vs a
+        // local process), not the configured preference — those can differ
+        // and the runtime value is what the operator needs at a glance.
+        const status = await apiGet<{ mode?: 'docker' | 'local'; runtime_mode?: 'docker' | 'local' }>(
+          '/system/install-mode',
+        );
+        const next = status.runtime_mode ?? status.mode;
+        if (live && (next === 'docker' || next === 'local')) {
+          setInstallMode(next);
         }
       } catch {
         // Keep the local fallback when the backend mode endpoint is unavailable.
