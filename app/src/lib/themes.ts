@@ -148,11 +148,123 @@ export const THEMES: ThemeDef[] = [
 
 export const THEME_STORAGE_KEY = 'sdcodex.theme.md.v1';
 export const THEME_CHANGED_EVENT = 'sdcodex:theme-changed';
+/** Fired when the custom-theme library itself changes (save/delete). */
+export const THEME_LIBRARY_EVENT = 'sdcodex:theme-library-changed';
 /** Every account starts on Obsidian Codex unless it picked something else. */
 export const DEFAULT_THEME_SLUG = 'obsidian-codex';
 
+/** Colour tokens every theme defines; the Themes tab edits exactly these. */
+export const THEME_VAR_KEYS = [
+  '--c-bg',
+  '--c-bg-lowest',
+  '--c-bg-low',
+  '--c-obsidian',
+  '--c-bg-high',
+  '--c-bg-highest',
+  '--c-ink',
+  '--c-ink-muted',
+  '--c-ink-faint',
+  '--c-primary',
+  '--c-secondary',
+  '--c-tertiary',
+] as const;
+
+export const THEME_VAR_LABELS: Record<string, string> = {
+  '--c-bg': 'Background',
+  '--c-bg-lowest': 'Background · lowest',
+  '--c-bg-low': 'Background · low',
+  '--c-obsidian': 'Surface',
+  '--c-bg-high': 'Surface · high',
+  '--c-bg-highest': 'Surface · highest',
+  '--c-ink': 'Text',
+  '--c-ink-muted': 'Text · muted',
+  '--c-ink-faint': 'Text · faint',
+  '--c-primary': 'Primary',
+  '--c-secondary': 'Secondary',
+  '--c-tertiary': 'Tertiary',
+};
+
+const CUSTOM_THEMES_KEY = 'sdcodex.theme.custom.v1';
+
+export function customThemeSlug(name: string): string {
+  const base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  return `custom-${base || 'theme'}`;
+}
+
+export function isCustomTheme(slug: string): boolean {
+  return slug.startsWith('custom-');
+}
+
+/** User-saved themes, newest last. Stored next to the selected slug. */
+export function loadCustomThemes(): ThemeDef[] {
+  try {
+    const raw = localStorage.getItem(CUSTOM_THEMES_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (t): t is ThemeDef =>
+        !!t &&
+        typeof t.slug === 'string' &&
+        /^custom-[a-z0-9-]+$/.test(t.slug) &&
+        typeof t.name === 'string' &&
+        (t.mode === 'dark' || t.mode === 'light') &&
+        !!t.vars &&
+        typeof t.vars === 'object',
+    );
+  } catch {
+    return [];
+  }
+}
+
+function persistCustomThemes(list: ThemeDef[]): void {
+  try {
+    localStorage.setItem(CUSTOM_THEMES_KEY, JSON.stringify(list));
+  } catch {
+    /* quota — keep the in-memory copy only */
+  }
+  window.dispatchEvent(new Event(THEME_LIBRARY_EVENT));
+}
+
+/** Create or replace a custom theme (same slug = overwrite). */
+export function saveCustomTheme(theme: ThemeDef): ThemeDef[] {
+  const list = loadCustomThemes().filter((t) => t.slug !== theme.slug);
+  const next = [...list, theme];
+  persistCustomThemes(next);
+  return next;
+}
+
+export function deleteCustomTheme(slug: string): ThemeDef[] {
+  const next = loadCustomThemes().filter((t) => t.slug !== slug);
+  persistCustomThemes(next);
+  return next;
+}
+
+/** Built-in themes plus the user's saved ones. */
+export function allThemes(): ThemeDef[] {
+  return [...THEMES, ...loadCustomThemes()];
+}
+
+export function findTheme(slug: string): ThemeDef | undefined {
+  return allThemes().find((t) => t.slug === slug);
+}
+
+/** CSS rules for saved themes, so they use the same `.theme-<slug>` mechanism
+    as the built-ins (App injects this into a <style> element). */
+export function customThemeCss(): string {
+  return loadCustomThemes()
+    .map((t) => {
+      const vars = THEME_VAR_KEYS.map((key) => `  ${key}: ${t.vars[key] ?? '0 0 0'};`).join('\n');
+      return `.theme-${t.slug} {\n  color-scheme: ${t.mode};\n${vars}\n}\n.theme-${t.slug} body { font-family: ${t.fontBody}; }\n.theme-${t.slug} .font-display { font-family: ${t.fontDisplay}; }`;
+    })
+    .join('\n');
+}
+
 export function isThemeSlug(slug: string): boolean {
-  return THEMES.some((t) => t.slug === slug);
+  return allThemes().some((t) => t.slug === slug);
 }
 
 /** Active named-theme slug. Falls back to the default theme, never ''. */
@@ -169,7 +281,7 @@ export const THEME_PAYLOAD_KEY = 'sdcodex.theme.payload.v1';
 
 /** Serialised palette for consumers outside the React tree (plugin iframes). */
 export function themePayload(slug: string) {
-  const t = THEMES.find((x) => x.slug === slug) ?? THEMES[0];
+  const t = findTheme(slug) ?? THEMES[0];
   return {
     slug: t.slug,
     mode: t.mode,

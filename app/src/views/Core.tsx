@@ -11,7 +11,7 @@ import { bootstrapUser, startSession, verifyPassword, type Profile } from '../li
 import { adoptServerUser, fetchPublicProviders, type ServerAuthState } from '../lib/auth';
 import { apiPost, mirrorAuth } from '../lib/backend';
 import { fetchCatalog, type HubCatalog } from '../lib/plugins';
-import { loadTheme, saveTheme, THEMES } from '../lib/themes';
+import { allThemes, loadTheme, saveTheme } from '../lib/themes';
 import { getScanState, subscribeScanState, type LocalScanState } from '../lib/scanstate';
 
 /** Blocking auth gate (mirrors OldCode bootstrap + login). No session, no app:
@@ -281,7 +281,7 @@ export function BootstrapCard({
               }}
               className={fieldClass}
             >
-              {THEMES.map((t) => (
+              {allThemes().map((t) => (
                 <option key={t.slug} value={t.slug}>
                   {t.name} · {t.mode === 'dark' ? 'Dark' : 'Light'}
                 </option>

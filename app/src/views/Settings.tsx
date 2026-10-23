@@ -54,7 +54,20 @@ import { BootstrapCard, Plugins } from './Core';
 import AvatarCrop from '../components/AvatarCrop';
 import { clearScanLog, getScanLog, pushScanLog, subscribeScanLog } from '../lib/scanlog';
 import { beginScan, finishScan, updateScan } from '../lib/scanstate';
-import { loadTheme, saveTheme, THEMES } from '../lib/themes';
+import {
+  allThemes,
+  customThemeSlug,
+  deleteCustomTheme,
+  findTheme,
+  isCustomTheme,
+  loadTheme,
+  saveCustomTheme,
+  saveTheme,
+  DEFAULT_THEME_SLUG,
+  THEME_VAR_KEYS,
+  THEME_VAR_LABELS,
+  type ThemeDef,
+} from '../lib/themes';
 
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {  return (
@@ -983,7 +996,6 @@ function Auth({
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pwBusy, setPwBusy] = useState(false);
   const [savedTick, setSavedTick] = useState(false);
-  const [themeSlug, setThemeSlug] = useState<string>(() => loadTheme());
 
   if (!profile) {
     return (
@@ -1173,46 +1185,6 @@ function Auth({
       </div>
 
       <div className="mt-4 border-t border-white/[0.06] pt-3">
-        <h3 className="font-display text-sm font-semibold">Theme</h3>
-        <p className="mt-1 text-xs text-ink-muted">
-          Named themes from themes.md. The picker is also shown when the first account is created,
-          and the choice is stored on your account so it survives restarts and rebuilds.
-        </p>
-        <div className="mt-2 flex max-w-xl flex-wrap items-center gap-2">
-          <select
-            value={themeSlug}
-            onChange={(e) => {
-              const next = e.target.value;
-              saveTheme(next);
-              setThemeSlug(loadTheme());
-              // Persist on the account row (no-op when the backend is offline).
-              void (async () => {
-                try {
-                  const { apiPut, backendAvailable } = await import('../lib/backend');
-                  if (await backendAvailable()) await apiPut('/profile', { theme: next });
-                } catch {
-                  /* local choice still applies */
-                }
-              })();
-            }}
-            className="min-w-0 flex-1 rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none focus:border-primary"
-          >
-            {THEMES.map((t) => (
-              <option key={t.slug} value={t.slug}>
-                {t.name} · {t.mode === 'dark' ? 'Dark' : 'Light'}
-              </option>
-            ))}
-          </select>
-          <span className="rounded border border-primary/50 bg-primary/20 px-2 py-0.5 font-mono text-[10px] uppercase text-white">
-            {THEMES.find((t) => t.slug === themeSlug)?.mode}
-          </span>
-        </div>
-        <p className="mt-1 font-mono text-[10px] text-ink-faint">
-          {THEMES.find((t) => t.slug === themeSlug)?.blurb}
-        </p>
-      </div>
-
-      <div className="mt-4 border-t border-white/[0.06] pt-3">
         <h3 className="font-display text-sm font-semibold">Change password</h3>
         <div className="mt-2 grid max-w-xl grid-cols-1 gap-2 sm:grid-cols-3">
           <input
@@ -1251,6 +1223,194 @@ function Auth({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- themes --- */
+
+/** `R G B` token → `#rrggbb` for <input type="color">. */
+function rgbTripletToHex(value?: string): string {
+  const parts = (value ?? '').trim().split(/\s+/).map((n) => Number(n));
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return '#000000';
+  return `#${parts
+    .map((n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
+function hexToRgbTriplet(hex: string): string {
+  const raw = hex.replace('#', '');
+  const full = raw.length === 3 ? raw.split('').map((c) => c + c).join('') : raw;
+  const n = parseInt(full.slice(0, 6), 16);
+  if (Number.isNaN(n)) return '0 0 0';
+  return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`;
+}
+
+function Themes() {
+  const [library, setLibrary] = useState<ThemeDef[]>(() => allThemes());
+  const [slug, setSlug] = useState<string>(() => loadTheme());
+  const active = findTheme(slug) ?? library[0];
+  const [draft, setDraft] = useState<Record<string, string>>(() => ({ ...active.vars }));
+  const [name, setName] = useState('');
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Selecting a theme loads its palette into the editor. Custom themes keep
+  // their own name; built-ins seed a "<name> copy" suggestion.
+  useEffect(() => {
+    const theme = findTheme(slug);
+    if (!theme) return;
+    setDraft({ ...theme.vars });
+    setName(isCustomTheme(slug) ? theme.name : `${theme.name} copy`);
+    setMessage(null);
+  }, [slug]);
+
+  const pushProfileTheme = (next: string) => {
+    void (async () => {
+      try {
+        const { apiPut, backendAvailable } = await import('../lib/backend');
+        if (await backendAvailable()) await apiPut('/profile', { theme: next });
+      } catch {
+        /* local choice still applies */
+      }
+    })();
+  };
+
+  const apply = (next: string) => {
+    saveTheme(next);
+    setSlug(next);
+    setLibrary(allThemes());
+    pushProfileTheme(next);
+  };
+
+  const saveAsNew = () => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setMessage({ ok: false, text: 'Give the theme a name first.' });
+      return;
+    }
+    const nextSlug = customThemeSlug(trimmed);
+    if (nextSlug !== slug && library.some((t) => t.slug === nextSlug)) {
+      setMessage({ ok: false, text: 'A saved theme already uses that name.' });
+      return;
+    }
+    const theme: ThemeDef = {
+      name: trimmed,
+      slug: nextSlug,
+      mode: active.mode,
+      blurb: 'Saved from the Themes tab.',
+      vars: { ...draft },
+      fontDisplay: active.fontDisplay,
+      fontBody: active.fontBody,
+    };
+    saveCustomTheme(theme);
+    saveTheme(nextSlug);
+    setLibrary(allThemes());
+    setSlug(nextSlug);
+    setMessage({ ok: true, text: `Saved “${trimmed}”.` });
+    pushProfileTheme(nextSlug);
+  };
+
+  const remove = () => {
+    deleteCustomTheme(slug);
+    saveTheme(DEFAULT_THEME_SLUG);
+    setLibrary(allThemes());
+    setSlug(DEFAULT_THEME_SLUG);
+    setMessage({ ok: true, text: 'Theme deleted.' });
+    pushProfileTheme(DEFAULT_THEME_SLUG);
+  };
+
+  return (
+    <div className="glass-l1 rounded-lg p-4">
+      <h2 className="font-display text-base font-semibold">Themes</h2>
+      <p className="mt-1 text-xs text-ink-muted">
+        Pick a named theme, then edit any of its colours and save the result under a name of your
+        own. Saved themes appear in the picker here, on the first-run gate, and are stored on this
+        account.
+      </p>
+
+      <div className="mt-3 flex max-w-xl flex-wrap items-center gap-2">
+        <select
+          value={slug}
+          onChange={(e) => apply(e.target.value)}
+          aria-label="Theme"
+          className="min-w-0 flex-1 rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none focus:border-primary"
+        >
+          {library.map((t) => (
+            <option key={t.slug} value={t.slug}>
+              {t.name} · {t.mode === 'dark' ? 'Dark' : 'Light'}
+              {isCustomTheme(t.slug) ? ' · saved' : ''}
+            </option>
+          ))}
+        </select>
+        <span className="rounded border border-primary/50 bg-primary/20 px-2 py-0.5 font-mono text-[10px] uppercase text-white">
+          {active.mode}
+        </span>
+      </div>
+      <p className="mt-1 font-mono text-[10px] text-ink-faint">{active.blurb}</p>
+
+      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {THEME_VAR_KEYS.map((key) => (
+          <label
+            key={key}
+            className="flex items-center gap-2 rounded border border-white/[0.06] bg-white/[0.02] px-2.5 py-1.5"
+            title={`${THEME_VAR_LABELS[key] ?? key} · ${key}`}
+          >
+            <input
+              type="color"
+              value={rgbTripletToHex(draft[key])}
+              onChange={(e) => {
+                const value = hexToRgbTriplet(e.target.value);
+                setDraft((current) => ({ ...current, [key]: value }));
+              }}
+              aria-label={THEME_VAR_LABELS[key] ?? key}
+              className="h-7 w-9 shrink-0 cursor-pointer rounded border border-white/10 bg-transparent p-0"
+            />
+            <span className="min-w-0 flex-1 truncate text-xs text-ink">
+              {THEME_VAR_LABELS[key] ?? key}
+            </span>
+            <span className="shrink-0 font-mono text-[10px] text-ink-faint">{draft[key] ?? '—'}</span>
+          </label>
+        ))}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <input
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            setMessage(null);
+          }}
+          placeholder="Theme name"
+          aria-label="Theme name"
+          className="min-w-0 flex-1 rounded border border-white/10 bg-obsidian-lowest px-3 py-2 text-sm outline-none placeholder:text-ink-faint focus:border-primary sm:max-w-xs"
+        />
+        <PrimaryButton onClick={saveAsNew}>Save theme</PrimaryButton>
+        <GhostButton
+          onClick={() => {
+            setDraft({ ...active.vars });
+            setMessage({ ok: true, text: 'Colours reset to the selected theme.' });
+          }}
+        >
+          Revert colours
+        </GhostButton>
+        {isCustomTheme(slug) && (
+          <GhostButton className="border-status-alert/40 text-[#f87171]" onClick={remove}>
+            Delete
+          </GhostButton>
+        )}
+      </div>
+
+      <p className="mt-2 font-mono text-[10px] text-ink-faint">
+        Colours are stored as RGB triplets (e.g. <span className="text-ink-muted">99 102 241</span>
+        ), matching the CSS tokens themes use.
+      </p>
+      {message && (
+        <p
+          className={`mt-2 font-mono text-[11px] ${message.ok ? 'text-status-active' : 'text-[#f87171]'}`}
+        >
+          {message.text}
+        </p>
+      )}
     </div>
   );
 }
@@ -1424,6 +1584,7 @@ export default function Settings({
     ),
     { id: 'api', label: 'API keys' },
     { id: 'auth', label: 'Profile' },
+    { id: 'themes', label: 'Themes' },
     { id: 'plugins', label: 'Plugins & updates' },
     { id: 'system', label: 'System' },
   ];
@@ -1461,6 +1622,7 @@ export default function Settings({
         {tab === 'dirs' && <Dirs />}
         {tab === 'api' && <ApiKey installed={installed} />}
         {tab === 'auth' && <Auth profile={profile} onProfile={onProfile} onSignOut={onSignOut} />}
+        {tab === 'themes' && <Themes />}
         {tab === 'plugins' && <Plugins />}
         {tab === 'system' && (
           <>

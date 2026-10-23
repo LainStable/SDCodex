@@ -18,7 +18,7 @@ import { adoptServerUser, clearProfile, completeOidcCallback, endSession, fetchS
 import type { InstalledPlugin } from './lib/plugins';
 import type { AssistantAction, AssistantSearchParams } from './lib/assistant';
 import { deleteScanned } from './lib/library';
-import { loadTheme, saveThemePayload, themeClass, THEME_CHANGED_EVENT, THEMES } from './lib/themes';
+import { allThemes, customThemeCss, findTheme, loadTheme, saveThemePayload, themeClass, THEME_CHANGED_EVENT, THEME_LIBRARY_EVENT } from './lib/themes';
 import { apiPost, backendLogout, backendAvailable } from './lib/backend';
 import { getApiKey, pullSettings, setApiUser } from './lib/settings';
 import { fetchMe } from './lib/civitai';
@@ -250,22 +250,38 @@ export default function App() {
   const [mdTheme, setMdTheme] = useState<string>(() => loadTheme());
   const queuedIds = useMemo(() => new Set(queue.map((i) => i.id)), [queue]);
 
+  const [themeRev, setThemeRev] = useState(0);
+
   useEffect(() => {
     const root = document.documentElement;
+    // Saved themes use the same `.theme-<slug>` hooks as the built-ins; their
+    // rules are generated, so inject them before switching classes.
+    let style = document.getElementById('sdcodex-custom-themes') as HTMLStyleElement | null;
+    if (!style) {
+      style = document.createElement('style');
+      style.id = 'sdcodex-custom-themes';
+      document.head.appendChild(style);
+    }
+    style.textContent = customThemeCss();
     // Drop any previous named theme first.
-    for (const t of THEMES) root.classList.remove(themeClass(t.slug));
+    for (const t of allThemes()) root.classList.remove(themeClass(t.slug));
     root.classList.remove('light');
     root.classList.add(themeClass(mdTheme));
-    root.style.colorScheme = THEMES.find((t) => t.slug === mdTheme)?.mode ?? 'dark';
+    root.style.colorScheme = findTheme(mdTheme)?.mode ?? 'dark';
     // Plugin iframes are separate documents: hand them the resolved palette.
     saveThemePayload(mdTheme);
-  }, [mdTheme]);
+  }, [mdTheme, themeRev]);
 
   // Profile theme picker saves + broadcasts; pick it up live.
   useEffect(() => {
     const onTheme = () => setMdTheme(loadTheme());
+    const onLibrary = () => setThemeRev((rev) => rev + 1);
     window.addEventListener(THEME_CHANGED_EVENT, onTheme);
-    return () => window.removeEventListener(THEME_CHANGED_EVENT, onTheme);
+    window.addEventListener(THEME_LIBRARY_EVENT, onLibrary);
+    return () => {
+      window.removeEventListener(THEME_CHANGED_EVENT, onTheme);
+      window.removeEventListener(THEME_LIBRARY_EVENT, onLibrary);
+    };
   }, []);
 
   useEffect(() => {
