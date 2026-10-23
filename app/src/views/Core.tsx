@@ -1680,12 +1680,12 @@ export function Plugins() {
                 <h2 className="font-display text-base font-semibold">{p.name}</h2>
                 <span className="flex items-center gap-1.5">
                   {inst && (
-                    <span className="rounded border border-white/15 bg-white/5 px-2 py-0.5 font-mono text-[10px] uppercase text-ink-muted">
+                    <span className="rounded border border-status-active/40 bg-status-active/10 px-2 py-0.5 font-mono text-[10px] uppercase text-status-active">
                       installed{inst.version ? ` v${inst.version}` : ''}
                     </span>
                   )}
                   {needsUpdate ? (
-                    <span className="rounded border border-white/15 bg-white/5 px-2 py-0.5 font-mono text-[10px] uppercase text-ink-muted">
+                    <span className="rounded border border-status-warning/50 bg-status-warning/15 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-[#fcd34d]">
                       update → v{p.version}
                     </span>
                   ) : (
