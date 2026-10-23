@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "webawesome": {
+      "source": "./node_modules/@awesome.me/webawesome/dist/skills/webawesome",
+      "sourceType": "local",
+      "computedHash": "091d6052e02b5f81ed27a092b15f9ba0b19070d1ff93a1bade70a57a803a163a"
+    },
+    "webawesome-design": {
+      "source": "./node_modules/@awesome.me/webawesome/dist/skills/webawesome-design",
+      "sourceType": "local",
+      "computedHash": "2626a8bd7f21918d1ab0104c3abf0b060a8b2da2676fe14e499e3c36214af612"
+    }
+  }
+}

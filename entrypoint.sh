@@ -14,7 +14,7 @@ if [ -n "${PUID:-}" ] && [ -n "${PGID:-}" ]; then
   if ! id -u "${PUID}" >/dev/null 2>&1; then
     useradd -u "${PUID}" -g "${PGID}" -o -m -s /bin/bash sdcodex 2>/dev/null || true
   fi
-  usermod -u "${PUID}" -g "${PGID}" sdcodex 2>/dev/null || true
+  usermod -u "${PUID}" -g "${PGID}" sdcodex >/dev/null 2>&1 || true
   # Fix ownership for persistent directories
   chown -R sdcodex:sdcodex /app /data /models /downloads /plugins /rembg_output 2>/dev/null || true
 fi
@@ -28,9 +28,11 @@ if [ "$#" -gt 0 ]; then
   exec "$@"
 fi
 
-# Run as the correct user when PUID/PGID is configured
+# Run as the correct user when PUID/PGID is configured. Use a non-login shell
+# (`su` without `-`): a login shell chdirs to /home/sdcodex, which broke the
+# relative `backend/run.py` path. cd /app explicitly and keep HOME sane.
 if [ -n "${PUID:-}" ] && [ -n "${PGID:-}" ] && id -u sdcodex >/dev/null 2>&1; then
-  exec su - sdcodex -c 'python backend/run.py'
+  exec su sdcodex -s /bin/bash -c 'cd /app && exec python backend/run.py'
 else
   exec python backend/run.py
 fi
