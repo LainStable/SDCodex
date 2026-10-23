@@ -792,10 +792,9 @@ export function FilterPills<T extends string>({
     <div className="flex flex-wrap gap-1.5">
       {options.map((f) => {
         const isActive = active === f.id;
-        // Mirror TypeBadge: category-coloured text/border/tint at the same
-        // size, with a slightly stronger tint for the selected pill instead of
-        // switching it to white text.
-        const color = f.color ?? (isActive ? activeColor : undefined);
+        // Selected tabs carry the category colour (same size/weight as the
+        // TypeBadge); unselected tabs stay neutral grey.
+        const color = isActive ? (f.color ?? activeColor) : undefined;
         return (
           <button
             key={f.id}
@@ -806,8 +805,8 @@ export function FilterPills<T extends string>({
               color
                 ? {
                     color,
-                    borderColor: hexToRgba(color, isActive ? 0.7 : 0.45),
-                    backgroundColor: hexToRgba(color, isActive ? 0.22 : 0.13),
+                    borderColor: hexToRgba(color, 0.7),
+                    backgroundColor: hexToRgba(color, 0.22),
                   }
                 : undefined
             }

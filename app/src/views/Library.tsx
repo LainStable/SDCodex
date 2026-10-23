@@ -359,7 +359,11 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
       {sections.length > 0 && (
         <div className="glass-l1 mt-4 rounded-lg p-3">
           <FilterPills
-            options={sections.map((t) => ({ id: t, label: t, color: colors[t] }))}
+            options={sections.map((t) => ({
+              id: t,
+              label: `${t} · ${localByType(t).length + serverByType(t).length}`,
+              color: colors[t],
+            }))}
             active={active ?? ''}
             onPick={setActiveTab}
             activeColor={active ? colors[active] : undefined}
