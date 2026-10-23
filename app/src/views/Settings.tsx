@@ -1411,16 +1411,16 @@ export default function Settings({
     settings: Array<{ label: string; page: string }>;
   }>;
 }) {
-  // Core tabs first, then one tab per plugin settings entry, with Plugins +
-  // System always last.
+  // Core tabs first, then one tab per plugin settings entry. Plugins & updates
+  // sits directly left of System so the update controls stay at the end.
   const tabs: { id: string; label: string }[] = [
     { id: 'dirs', label: 'Model dirs' },
     ...(installed ?? []).flatMap((p) =>
       (p.settings ?? []).map((s, i) => ({ id: `plugin:${p.id}:${i}`, label: s.label })),
     ),
-    { id: 'plugins', label: 'Plugins & updates' },
     { id: 'api', label: 'API keys' },
     { id: 'auth', label: 'Profile' },
+    { id: 'plugins', label: 'Plugins & updates' },
     { id: 'system', label: 'System' },
   ];
   const [tab, setTab] = useState<string>(

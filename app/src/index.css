@@ -307,7 +307,8 @@ body {
     translateX(var(--fan-radius, 168px)) rotate(calc(var(--fan-angle) * -1));
 }
 
-/* Hover: lift the item, then restyle the icon + label in light blue. */
+/* Hover: lift the item, then restyle the icon + label in the same indigo as
+   the model filter pills (primary #6366f1). */
 .fan-layer.open .fan-item:hover,
 .fan-layer.open .fan-item:focus-within {
   z-index: 100;
@@ -319,29 +320,29 @@ body {
     translateX(var(--fan-radius, 168px)) rotate(calc(var(--fan-angle) * -1)) scale(1.18);
 }
 
-/* Icon button: design-system light-blue outline (2px, glowing) + tinted fill. */
+/* Icon button: primary-purple outline (2px, glowing) + tinted fill. */
 .fan-layer.open .fan-item:hover button,
 .fan-layer.open .fan-item:focus-within button {
-  border-color: rgba(76, 215, 246, 0.95) !important;
-  background-color: rgba(6, 182, 212, 0.22) !important;
-  outline: 2px solid #4cd7f6 !important;
+  border-color: rgba(129, 140, 248, 0.95) !important;
+  background-color: rgba(99, 102, 241, 0.22) !important;
+  outline: 2px solid #818cf8 !important;
   outline-offset: 2px;
   box-shadow:
-    0 0 18px rgba(76, 215, 246, 0.75),
-    0 0 0 3px rgba(6, 182, 212, 0.25),
+    0 0 18px rgba(99, 102, 241, 0.75),
+    0 0 0 3px rgba(99, 102, 241, 0.25),
     0 8px 20px rgba(0, 0, 0, 0.5) !important;
   color: #f0fdff !important;
 }
 
-/* Label: light-blue box + white text. */
+/* Label: purple box + white text. */
 .fan-layer.open .fan-item:hover span,
 .fan-layer.open .fan-item:focus-within span {
-  border-color: rgba(76, 215, 246, 0.7) !important;
+  border-color: rgba(129, 140, 248, 0.7) !important;
   background-color: rgba(15, 23, 42, 0.92) !important;
   color: #f0fdff !important;
   font-weight: 600;
   box-shadow:
-    0 0 12px rgba(6, 182, 212, 0.4),
+    0 0 12px rgba(99, 102, 241, 0.4),
     0 4px 12px rgba(0, 0, 0, 0.6) !important;
 }
 

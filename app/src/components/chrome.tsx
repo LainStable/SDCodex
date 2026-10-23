@@ -380,6 +380,18 @@ export function UserMenu({
   const [msg, setMsg] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
+  // Track the viewport so the arc grows/shrinks with the item count but never
+  // runs off-screen when the window is resized.
+  const [viewport, setViewport] = useState(() => ({
+    w: typeof window === 'undefined' ? 1280 : window.innerWidth,
+    h: typeof window === 'undefined' ? 800 : window.innerHeight,
+  }));
+  useEffect(() => {
+    const onResize = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -433,7 +445,12 @@ export function UserMenu({
       : { id: 'signin', label: 'Sign in', icon: 'arrow-right', run: () => go('settings') },
   ];
   const n = actions.length;
-  const radius = n > 4 ? Math.min(220, 168 + (n - 4) * 12) : 168;
+  // One radial slot per item: the arc grows with the item count so adding or
+  // removing a plugin respaces the fan, then clamps to the visible viewport.
+  const idealRadius = 108 + n * 18;
+  const maxRadius = Math.max(120, Math.min(viewport.w * 0.38, viewport.h - 180));
+  const radius = Math.round(Math.max(120, Math.min(idealRadius, maxRadius)));
+  const stagger = Math.min(48, radius * 0.18);
 
   return (
     <div ref={ref} className="relative">
@@ -465,9 +482,9 @@ export function UserMenu({
       >
         {actions.map((a, i) => {
           const angle = n <= 1 ? 135 : 180 - (90 * i) / (n - 1);
-          // Stagger: every second item sits one icon-width closer so the
-          // fan doesn't cramp (44px icon + 4px breathing room).
-          const itemRadius = i % 2 === 1 ? radius - 48 : radius;
+          // Stagger: every second item sits slightly closer so the fan doesn't
+          // cramp (icon width + breathing room, scaled with the radius).
+          const itemRadius = i % 2 === 1 ? radius - stagger : radius;
           return (
             <div
               key={a.id}
@@ -584,13 +601,6 @@ export function Topbar({
       >
         {installMode}
       </span>
-      <button
-        type="button"
-        className="glass-l1 rounded-lg px-3 py-2 text-sm text-ink-muted hover:text-white"
-        title="Sync (backend pending)"
-      >
-        ⇄
-      </button>
       <UserMenu
         go={go}
         profileLabel={profileLabel}
