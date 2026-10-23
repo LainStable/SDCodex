@@ -1165,12 +1165,17 @@ def plugins_list():
     from . import updater as updater_mod
 
     installed = updater_mod.list_installed()
-    updates = {p["id"]: p for p in updater_mod.check_plugin_updates()}
+    # Never wait on `git ls-remote` here: plugin detection used to sit behind a
+    # serial network walk and the whole radial menu vanished for minutes after
+    # a restart. Serve the manifests now, probe remotes in the background, and
+    # let the UI retry until `updates_checked` is true.
+    update_list, checked = updater_mod.cached_plugin_updates()
+    updates = {p["id"]: p for p in update_list}
     for p in installed:
         p["has_update"] = p["id"] in updates
         if p["id"] in updates:
             p["remote_sha"] = updates[p["id"]].get("remote_sha", "")
-    return jsonify({"installed": installed})
+    return jsonify({"installed": installed, "updates_checked": checked})
 
 
 @api_v1.get("/plugin-tasks")

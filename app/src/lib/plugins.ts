@@ -65,13 +65,22 @@ export interface InstalledPlugin {
   has_update?: boolean;
 }
 
-export async function fetchInstalled(): Promise<InstalledPlugin[]> {
+export interface InstalledPluginsResult {
+  list: InstalledPlugin[];
+  /** False while the backend's background remote check is still running. */
+  checked: boolean;
+}
+
+export async function fetchInstalled(): Promise<InstalledPluginsResult> {
   try {
     const { apiGet, backendAvailable } = await import('./backend');
-    if (!(await backendAvailable())) return [];
-    const r = await apiGet<{ installed?: InstalledPlugin[] }>('/plugins');
-    return Array.isArray(r.installed) ? r.installed : [];
+    if (!(await backendAvailable())) return { list: [], checked: false };
+    const r = await apiGet<{ installed?: InstalledPlugin[]; updates_checked?: boolean }>('/plugins');
+    return {
+      list: Array.isArray(r.installed) ? r.installed : [],
+      checked: r.updates_checked !== false,
+    };
   } catch {
-    return [];
+    return { list: [], checked: false };
   }
 }

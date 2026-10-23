@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Explorer from './views/Explorer';
 import Library from './views/Library';
 import Settings from './views/Settings';
@@ -122,6 +122,10 @@ export default function App() {
   // gains core + per-plugin icons once anything is installed).
   const [space, setSpace] = useState<AppRoute['space']>(() => readRoute().space);
   const [installed, setInstalled] = useState<InstalledPlugin[]>([]);
+  // `/api/plugins` answers before its background remote probe finishes; retry
+  // briefly so plugin spaces/update pills appear without a manual reload.
+  const installedRetryRef = useRef(0);
+  const installedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pluginPage, setPluginPage] = useState<string | null>(() => readRoute().pluginPage);
   // The sidebar is a hover-expanding icon rail; pinning keeps it open.
   const [sidebarPinned, setSidebarPinned] = useState(() => {
@@ -551,11 +555,26 @@ export default function App() {
   /** Installed plugin spaces (fan icons, sidebar, settings tabs). */
   const refreshInstalled = async () => {
     const { fetchInstalled } = await import('./lib/plugins');
-    const list = await fetchInstalled();
+    const { list, checked } = await fetchInstalled();
     setInstalled(list);
-    void checkUpdates();
     // Drop the space if its plugin went away.
     setSpace((s) => (s.kind === 'plugin' && !list.some((p) => p.id === s.id) ? { kind: 'core' } : s));
+    if (checked) {
+      installedRetryRef.current = 0;
+      if (installedTimerRef.current) {
+        clearTimeout(installedTimerRef.current);
+        installedTimerRef.current = null;
+      }
+      void checkUpdates();
+      return;
+    }
+    if (installedRetryRef.current < 10 && installedTimerRef.current === null) {
+      installedRetryRef.current += 1;
+      installedTimerRef.current = setTimeout(() => {
+        installedTimerRef.current = null;
+        void refreshInstalled();
+      }, 2000);
+    }
   };
 
   // Single queue entry point: local staged record + backend worker POST.

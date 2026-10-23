@@ -154,7 +154,7 @@ def _https_github_remote(path: str, remote: str) -> str:
         return ""
 
 
-def remote_rev(repo_path_or_url: str) -> str:
+def remote_rev(repo_path_or_url: str, timeout: int = 20) -> str:
     """Remote HEAD sha via the local remote (no API tokens needed)."""
     try:
         if os.path.isdir(os.path.join(repo_path_or_url, ".git")):
@@ -162,9 +162,9 @@ def remote_rev(repo_path_or_url: str) -> str:
             # HTTPS first (see _https_url): SSH remotes are unreachable in a
             # minimal image, which used to hide every available update.
             target = _https_github_remote(repo_path_or_url, remote) or remote
-            r = _git(["ls-remote", target, "HEAD"], cwd=repo_path_or_url, timeout=20)
+            r = _git(["ls-remote", target, "HEAD"], cwd=repo_path_or_url, timeout=timeout)
         else:
-            r = _git(["ls-remote", _https_url(repo_path_or_url), "HEAD"], cwd=root_dir(), timeout=20)
+            r = _git(["ls-remote", _https_url(repo_path_or_url), "HEAD"], cwd=root_dir(), timeout=timeout)
         if r.returncode != 0:
             return ""
         return r.stdout.split()[0]
@@ -582,20 +582,83 @@ def load_plugins(app) -> list:
 
 
 def check_plugin_updates() -> list:
-    """Compare each git-backed plugin against its remote HEAD (cached 60 s)."""
+    """Compare each git-backed plugin against its remote HEAD (cached 60 s).
+
+    Probes run concurrently with a short per-repo timeout: the old serial
+    20 s-each walk froze ``/api/plugins`` for minutes on a slow restart, which
+    looked like the plugins had disappeared.
+    """
+
+    def _probe(p: dict):
+        try:
+            remote = remote_rev(p["path"], timeout=8)
+        except Exception:
+            return None
+        if remote and p["local_sha"] and remote != p["local_sha"]:
+            return {**p, "remote_sha": remote, "has_update": True}
+        return None
 
     def _check():
-        updates = []
-        for p in list_installed():
-            path = p["path"]
-            if not os.path.isdir(os.path.join(path, ".git")):
-                continue
-            remote = remote_rev(path)
-            if remote and p["local_sha"] and remote != p["local_sha"]:
-                updates.append({**p, "remote_sha": remote, "has_update": True})
-        return updates
+        targets = [
+            p
+            for p in list_installed()
+            if os.path.isdir(os.path.join(p["path"], ".git"))
+        ]
+        if not targets:
+            return []
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=min(8, len(targets))) as pool:
+            return [r for r in pool.map(_probe, targets) if r]
 
     return _cached("plugin_updates", 60, _check)
+
+
+_UPDATE_PROBE_LOCK = threading.Lock()
+_UPDATE_PROBE_RUNNING = False
+
+
+def start_plugin_probe() -> bool:
+    """Refresh the plugin-update cache in the background (never blocks a request).
+
+    Returns True when a probe was started, False when one is already running.
+    """
+    global _UPDATE_PROBE_RUNNING
+    with _UPDATE_PROBE_LOCK:
+        if _UPDATE_PROBE_RUNNING:
+            return False
+        _UPDATE_PROBE_RUNNING = True
+
+    def _run():
+        global _UPDATE_PROBE_RUNNING
+        try:
+            check_plugin_updates()
+        except Exception:
+            logger.warning("Plugin update probe failed", exc_info=True)
+        finally:
+            with _UPDATE_PROBE_LOCK:
+                _UPDATE_PROBE_RUNNING = False
+
+    threading.Thread(target=_run, name="plugin-update-probe", daemon=True).start()
+    return True
+
+
+def cached_plugin_updates() -> tuple[list, bool]:
+    """Plugin updates without network I/O.
+
+    Returns ``(updates, checked)``. The first call after boot (or after the
+    60 s cache expires) returns the last known list and starts a background
+    probe, so callers such as ``/api/plugins`` answer immediately and the UI
+    can retry until ``checked`` flips true.
+    """
+    now = time.time()
+    with _NET_CACHE_LOCK:
+        hit = _NET_CACHE.get("plugin_updates")
+        checked = bool(hit and hit[0] > now)
+        value = list(hit[1]) if hit else []
+    if not checked:
+        start_plugin_probe()
+    return value, checked
 
 
 @_serialized

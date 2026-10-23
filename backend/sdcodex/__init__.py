@@ -197,9 +197,13 @@ def create_app(db_path: str | None = None) -> Flask:
 
     # Installed plugins (entrypoint init is optional; page-only plugins skip).
     try:
-        from .updater import load_plugins
+        from .updater import load_plugins, start_plugin_probe
 
         load_plugins(app)
+        # Warm the remote-update cache right away instead of on the first
+        # /api/plugins request after a restart (that request is what used to
+        # hang, making installed plugins look missing).
+        start_plugin_probe()
     except Exception:
         app.logger.warning("Plugin loader failed", exc_info=True)
 
