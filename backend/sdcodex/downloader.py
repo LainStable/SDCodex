@@ -262,6 +262,18 @@ def download_model(model_id, version_id, api_key=None, progress_callback=None, i
         _atomic_write_json(metadata_path, model)
         downloaded_files['metadata'] = metadata_path
 
+        # StabilityMatrix cm-info sidecar when enabled.
+        stability_row = db.session.get(Setting, "stabilitymatrix")
+        if stability_row and (stability_row.value or "") == "1":
+            cm_info_path = os.path.join(base_dir, f"{safe_base_name}.cm-info.json")
+            cm_data = {
+                "ModelId": model_id,
+                "ModelName": model_name,
+                "ModelDescription": model.get('description', ''),
+            }
+            _atomic_write_json(cm_info_path, cm_data)
+            downloaded_files['cm_info'] = cm_info_path
+
         # 5. Record in DB (update the row on re-download instead of adding a
         # duplicate library entry).
         download = Download.query.filter_by(model_id=model_id, version_id=version_id).first()

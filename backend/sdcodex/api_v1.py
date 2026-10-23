@@ -269,6 +269,7 @@ def get_settings():
             or (rows.get("civitai_api_key", "") if user.is_admin else ""),
             "apiMirror": rows.get("api_mirror", "civitai.com") or "civitai.com",
             "organizeByBase": rows.get("organize_by_base", "0") == "1",
+            "stabilitymatrix": rows.get("stabilitymatrix", "0") == "1",
             "maxParallel": max(1, min(16, max_parallel)),
         }
     )
@@ -340,6 +341,12 @@ def post_settings():
             row = Setting(key="organize_by_base")
             db.session.add(row)
         row.value = "1" if data.get("organizeByBase") else "0"
+    if "stabilitymatrix" in data:
+        row = db.session.get(Setting, "stabilitymatrix")
+        if row is None:
+            row = Setting(key="stabilitymatrix")
+            db.session.add(row)
+        row.value = "1" if data.get("stabilitymatrix") else "0"
     db.session.commit()
     try:
         from .download_manager import download_manager

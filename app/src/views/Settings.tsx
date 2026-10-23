@@ -17,6 +17,8 @@ import {
   getCustomDirs,
   getDirColors,
   getDirectories,
+  getStabilityMatrix,
+  setStabilityMatrix,
   getOrganizeByBase,
   pushSettings,
   removeDirPath,
@@ -214,6 +216,7 @@ function Dirs() {
   const [savedKey, setSavedKey] = useState<string | null>(null);
   const [colors, setColors] = useState<Record<string, string>>(getDirColors);
   const [organize, setOrganize] = useState(getOrganizeByBase);
+  const [stability, setStability] = useState(getStabilityMatrix);
   const [bound, setBound] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<Record<string, string>>({});
   const [scanning, setScanning] = useState(false);
@@ -428,6 +431,22 @@ function Dirs() {
             className="accent-[#6366f1]"
           />
           Organize by base
+        </label>
+        <label
+          className="flex cursor-pointer items-center gap-2 rounded border border-white/10 px-2 py-1.5 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-muted hover:border-white/25"
+          title="When downloading, also writes a StabilityMatrix cm-info.json sidecar."
+        >
+          <input
+            type="checkbox"
+            checked={stability}
+            onChange={(e) => {
+              setStability(e.target.checked);
+              setStabilityMatrix(e.target.checked);
+              void pushSettings();
+            }}
+            className="accent-[#6366f1]"
+          />
+          StabilityMatrix
         </label>
       </div>
       <div className="mt-2 divide-y divide-white/[0.06]">

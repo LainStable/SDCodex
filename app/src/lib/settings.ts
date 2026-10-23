@@ -87,6 +87,16 @@ export function getOrganizeByBase(): boolean {
   return read(ORGANIZE_KEY) === '1';
 }
 
+const STABILITYMATRIX_KEY = 'sdcodex.stabilitymatrix.v1';
+
+export function getStabilityMatrix(): boolean {
+  return read(STABILITYMATRIX_KEY) === '1';
+}
+
+export function setStabilityMatrix(on: boolean): void {
+  write(STABILITYMATRIX_KEY, on ? '1' : '0');
+}
+
 export function setOrganizeByBase(on: boolean): void {
   write(ORGANIZE_KEY, on ? '1' : '0');
 }
@@ -233,6 +243,7 @@ export async function pushSettings(): Promise<void> {
       civitaiApiKey: getApiKey(),
       apiMirror: getApiMirror(),
       organizeByBase: getOrganizeByBase(),
+      stabilitymatrix: getStabilityMatrix(),
     });
   } catch {
     /* standalone mode — local cache stands */
