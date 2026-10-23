@@ -5,7 +5,7 @@ import { folderForModelType } from '../lib/categories';
 import { loadScanned, type ScannedModel } from '../lib/library';
 import type { ModalTarget } from '../components/ModelModal';
 import { BaseModelBadge, TypeBadge } from '../components/ui';
-import { BaseCloud, FilterPills, PageHeader, SearchInput } from '../components/chrome';
+import { BaseCloud, FilterPills, GhostButton, PageHeader, SearchInput } from '../components/chrome';
 
 function formatBytes(n: number): string {
   if (n >= 1_073_741_824) return `${(n / 1_073_741_824).toFixed(2)} GB`;
@@ -52,6 +52,8 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
   const [updates, setUpdates] = useState<Record<string, { id: number; name?: string }>>({});
   const [colors] = useState<Record<string, string>>(getDirColors);
   const [activeTab, setActiveTab] = useState<string | null>(null);
+  // Grid is rendered in pages: a category can hold thousands of LoRAs.
+  const [visible, setVisible] = useState(240);
   // Civitai answers for rows stored before the architecture was recorded,
   // keyed `modelId-versionId` (works without any folder permission).
   const [remoteBases, setRemoteBases] = useState<Record<string, string>>({});
@@ -312,6 +314,10 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
   const total = sections.reduce((n, t) => n + localByType(t).length + serverByType(t).length, 0);
   const active = activeTab && sections.includes(activeTab) ? activeTab : (sections[0] ?? null);
 
+  useEffect(() => {
+    setVisible(240);
+  }, [active, query, bases]);
+
   return (
     <div>
       <PageHeader
@@ -386,7 +392,7 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                 </p>
               ) : (
                 <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-                {remote.map((r) => {
+                {remote.slice(0, visible).map((r) => {
                   const up = updateFor(r.modelId, r.versionId);
                   return (
                   <article
@@ -450,7 +456,7 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                   </article>
                   );
                 })}
-                {local.map((s) => {
+                {local.slice(0, visible).map((s) => {
                   const up = updateFor(s.modelId, s.versionId);
                   return (
                   <article
@@ -532,6 +538,13 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                   </article>
                   );
                 })}
+                </div>
+              )}
+              {(remote.length > visible || local.length > visible) && (
+                <div className="mt-3 flex justify-center">
+                  <GhostButton onClick={() => setVisible((n) => n + 240)}>
+                    Show more ({Math.max(remote.length, local.length) - visible} remaining)
+                  </GhostButton>
                 </div>
               )}
             </section>

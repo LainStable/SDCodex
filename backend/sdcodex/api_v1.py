@@ -484,7 +484,9 @@ def library():
     user, err = _require_user()
     if err:
         return err
-    rows = Download.query.order_by(Download.id.desc()).limit(2000).all()
+    # Large libraries exceed the old 2000-row cap (thousands of LoRAs), which
+    # looked like a partial scan. Send the whole table; the UI renders in pages.
+    rows = Download.query.order_by(Download.id.desc()).limit(10000).all()
     # Rows stored before the architecture was captured (or scanned while
     # Civitai was unreachable) would render an "unknown" chip forever: read the
     # safetensors header once and persist it. Capped so a big library does not
