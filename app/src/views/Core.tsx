@@ -306,10 +306,6 @@ export function BootstrapCard({
         </PrimaryButton>
         {sso.length > 0 && (
           <>
-            <div className="flex items-center gap-2 pt-1" aria-hidden="true">
-              <span className="h-px flex-1 bg-ink/10" />
-              <span className="h-px flex-1 bg-ink/10" />
-            </div>
             {sso.map((p) => (
               <GhostButton
                 key={p.id}
