@@ -782,34 +782,41 @@ export function FilterPills<T extends string>({
   onPick,
   activeColor,
 }: {
-  options: { id: T; label: string }[];
+  options: { id: T; label: string; color?: string }[];
   active: T;
   onPick: (id: T) => void;
-  /** Optional accent for the active pill (e.g. category color). */
+  /** Optional accent for the active pill when an option has no own colour. */
   activeColor?: string;
 }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {options.map((f) => {
         const isActive = active === f.id;
+        // Mirror TypeBadge: category-coloured text/border/tint at the same
+        // size, with a slightly stronger tint for the selected pill instead of
+        // switching it to white text.
+        const color = f.color ?? (isActive ? activeColor : undefined);
         return (
           <button
             key={f.id}
             type="button"
             onClick={() => onPick(f.id)}
+            aria-pressed={isActive}
             style={
-              isActive && activeColor
+              color
                 ? {
-                    borderColor: hexToRgba(activeColor, 0.6),
-                    backgroundColor: hexToRgba(activeColor, 0.25),
-                    color: '#fff',
+                    color,
+                    borderColor: hexToRgba(color, isActive ? 0.7 : 0.45),
+                    backgroundColor: hexToRgba(color, isActive ? 0.22 : 0.13),
                   }
                 : undefined
             }
             className={`rounded border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
-              isActive
-                ? 'border-primary/50 bg-primary/20 text-white'
-                : 'border-white/10 bg-white/5 text-ink-muted hover:border-white/20'
+              color
+                ? ''
+                : isActive
+                  ? 'border-primary/50 bg-primary/20 text-white'
+                  : 'border-white/10 bg-white/5 text-ink-muted hover:border-white/20'
             }`}
           >
             {f.label}
