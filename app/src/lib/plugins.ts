@@ -29,11 +29,11 @@ export interface HubCatalog {
   plugins: HubPlugin[];
 }
 
-export async function fetchCatalog(): Promise<{ catalog: HubCatalog; live: boolean }> {
+export async function fetchCatalog(refresh = false): Promise<{ catalog: HubCatalog; live: boolean }> {
   try {
     const { apiGet, backendAvailable } = await import('./backend');
     if (!(await backendAvailable())) throw new Error('Backend unreachable');
-    const json = await apiGet<HubCatalog>('/plugins/store');
+    const json = await apiGet<HubCatalog>(`/plugins/store${refresh ? '?refresh=1' : ''}`);
     if (!Array.isArray(json.plugins)) throw new Error('bad catalog');
     return { catalog: json, live: true };
   } catch {

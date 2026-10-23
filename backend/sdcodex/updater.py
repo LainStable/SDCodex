@@ -1160,3 +1160,9 @@ def fetch_store_catalog() -> dict:
         return _fetch_hub_catalog(timeout=10) or {"plugins": []}
 
     return _cached("store_catalog", 120, _fetch)
+
+
+def invalidate_store_catalog() -> None:
+    """Drop the cached hub catalog so the next read hits GitHub immediately."""
+    with _NET_CACHE_LOCK:
+        _NET_CACHE.pop("store_catalog", None)

@@ -1213,9 +1213,15 @@ function selfUpdateProgress(lines: string[], isLocal: boolean): {
 
 export function Plugins() {
   const [catalog, setCatalog] = useState<HubCatalog | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogMsg, setCatalogMsg] = useState<string | null>(null);
   const [installed, setInstalled] = useState<
     Record<string, { name?: string; version?: string; has_update?: boolean }>
   >({});
+  // Full rows back the fallback list when the hub catalog cannot be fetched.
+  const [installedRows, setInstalledRows] = useState<
+    Array<{ id: string; name?: string; version?: string; description?: string; repository?: string; has_update?: boolean }>
+  >([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<Record<string, string>>({});
   const [volOpen, setVolOpen] = useState<string | null>(null);
@@ -1378,14 +1384,41 @@ export function Plugins() {
     try {
       const { apiGet, backendAvailable } = await import('../lib/backend');
       if (!(await backendAvailable())) return;
-      const r = await apiGet<{ installed?: Array<{ id: string; name?: string; version?: string; has_update?: boolean }> }>(
-        '/plugins',
-      );
+      const r = await apiGet<{
+        installed?: Array<{
+          id: string;
+          name?: string;
+          version?: string;
+          description?: string;
+          repository?: string;
+          has_update?: boolean;
+        }>;
+      }>('/plugins');
+      const rows = r.installed ?? [];
       const map: Record<string, { name?: string; version?: string; has_update?: boolean }> = {};
-      for (const p of r.installed ?? []) map[p.id] = p;
+      for (const p of rows) map[p.id] = p;
       setInstalled(map);
+      setInstalledRows(rows);
     } catch {
       /* standalone — hub only */
+    }
+  };
+
+  /** Pull the available-plugin list from the Plugin Hub repo's plugins.json. */
+  const refreshCatalog = async (force = false) => {
+    setCatalogLoading(true);
+    try {
+      const { catalog: c, live } = await fetchCatalog(force);
+      setCatalog(c);
+      setCatalogMsg(
+        live
+          ? c.plugins.length
+            ? null
+            : 'The Plugin Hub catalog is empty.'
+          : 'Plugin Hub unreachable — showing installed plugins only.',
+      );
+    } finally {
+      setCatalogLoading(false);
     }
   };
 
@@ -1394,14 +1427,18 @@ export function Plugins() {
     const refreshUpdates = () => void check();
     window.addEventListener('sdcodex:install-mode-changed', refreshUpdates);
     void (async () => {
-      const { catalog: c } = await fetchCatalog();
-      if (on) setCatalog(c);
+      if (on) await refreshCatalog(false);
     })();
     void refreshInstalled();
     void check();
+    // Re-read the hub when the tab regains focus so a catalog published after
+    // this page mounted shows up without a full reload.
+    const onFocus = () => void refreshCatalog(false);
+    window.addEventListener('focus', onFocus);
     return () => {
       on = false;
       window.removeEventListener('sdcodex:install-mode-changed', refreshUpdates);
+      window.removeEventListener('focus', onFocus);
     };
   }, []);
 
@@ -1459,7 +1496,21 @@ export function Plugins() {
     }
   };
 
-  const list = catalog?.plugins ?? [];
+  const catalogList = catalog?.plugins ?? [];
+  // Keep installed-but-unlisted plugins (custom repos, older hub entries) on
+  // the page, and fall back to them entirely when the catalog is unreachable.
+  const list: HubCatalog['plugins'] = [
+    ...catalogList,
+    ...installedRows
+      .filter((p) => !catalogList.some((c) => c.id === p.id))
+      .map((p) => ({
+        id: p.id,
+        name: p.name ?? p.id,
+        version: p.version ?? '',
+        description: p.description ?? '',
+        repository: p.repository ?? '',
+      })),
+  ];
   const core = catalog?.core;
   const coreNeedsUpdate = Boolean(updates?.core?.has_update);
 
@@ -1469,6 +1520,9 @@ export function Plugins() {
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <GhostButton disabled={checking} onClick={() => void check()}>
           {checking ? 'Checking…' : 'Check now'}
+        </GhostButton>
+        <GhostButton disabled={catalogLoading} onClick={() => void refreshCatalog(true)}>
+          {catalogLoading ? 'Loading catalog…' : 'Reload catalog'}
         </GhostButton>
         <GhostButton
           disabled={checking || applying || rebuilding || updateUnavailable}
@@ -1483,6 +1537,11 @@ export function Plugins() {
           </div>
         )}
       </div>
+      {catalogMsg && (
+        <p role="status" className="mt-2 font-mono text-[11px] text-[#fcd34d]">
+          {catalogMsg}
+        </p>
+      )}
       {updates?.rebuild?.mode === 'mismatch' && (
         <p role="alert" className="mt-2 font-mono text-[11px] text-[#fcd34d]">
           Selected install mode ({updates.rebuild.install_mode}) differs from the running app

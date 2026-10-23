@@ -1335,8 +1335,15 @@ def plugins_store():
     user, err = _require_user()
     if err:
         return err
+    """Installed plugins plus the available catalog from the Plugin Hub repo.
+
+    ``?refresh=1`` bypasses the 2-minute hub cache so the Plugin Hub page can
+    pull a catalog published moments ago.
+    """
     from . import updater as updater_mod
 
+    if request.args.get("refresh") in ("1", "true", "yes"):
+        updater_mod.invalidate_store_catalog()
     catalog = updater_mod.fetch_store_catalog()
     installed_ids = {p["id"] for p in updater_mod.list_installed()}
     items = catalog.get("plugins", [])
