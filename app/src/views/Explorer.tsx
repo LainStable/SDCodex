@@ -344,7 +344,7 @@ export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchT
           </label>
         </div>
 
-        <div className="mt-3 border-t border-white/[0.06] pt-3">
+        <div className="mt-3 pt-3">
           <BaseCloud
             options={BASE_MODELS}
             active={query.baseModels}
