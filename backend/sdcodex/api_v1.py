@@ -1052,9 +1052,8 @@ def _mode_mismatch(rebuilder_mod):
 
 @api_v1.get("/system/install-mode")
 def system_install_mode_get():
-    _, err = _require_user()
-    if err:
-        return err
+    # Read-only and needed by the pre-auth login gate (the badge switches
+    # between local/docker there); the admin-only write stays protected below.
     from . import rebuilder as rebuilder_mod
 
     return jsonify(rebuilder_mod.install_mode_status())

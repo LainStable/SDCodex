@@ -202,36 +202,26 @@ export function BootstrapCard({
   return (
     <div onKeyDown={onKey}>
       <div className="flex flex-col items-center text-center">
-        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
-          {isCreate ? 'First run setup' : 'Secure access'}
-        </span>
-        <div className="relative mt-4 flex h-16 w-16 items-center justify-center rounded-lg border border-ink/10 bg-obsidian-lowest">
-          <img src="/sdcodex.svg" alt="SDCodex" className="h-12 w-12 object-contain" />
+        <div className="relative w-full">
+          <img src="/codex.svg" alt="SDCodex" className="mx-auto w-full object-contain" />
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute inset-x-2 -bottom-px h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent"
+            className="pointer-events-none absolute inset-x-10 -bottom-px h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent"
           />
         </div>
         <h1 className="mt-4 font-display text-xl font-semibold tracking-tight">
           {isCreate ? 'Create administrator' : 'Welcome back'}
         </h1>
-        <p className="mt-1 text-xs text-ink-muted">
-          {isCreate
-            ? 'Set up the first account for this workstation.'
-            : 'Sign in to your SDCodex workspace.'}
-        </p>
       </div>
 
       <div className="mt-5 flex flex-col gap-3">
         <label className="flex flex-col gap-1">
-          <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
-            Username
-          </span>
           <input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder="username"
             autoComplete="username"
+            aria-label="Username"
             className={fieldClass}
           />
         </label>
@@ -250,15 +240,13 @@ export function BootstrapCard({
           </label>
         )}
         <label className="flex flex-col gap-1">
-          <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
-            Password
-          </span>
           <input
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder={isCreate ? 'Min 8 characters' : 'Enter password'}
             type="password"
             autoComplete={isCreate ? 'new-password' : 'current-password'}
+            aria-label="Password"
             className={fieldClass}
           />
         </label>
@@ -318,9 +306,6 @@ export function BootstrapCard({
           <>
             <div className="flex items-center gap-2 pt-1" aria-hidden="true">
               <span className="h-px flex-1 bg-ink/10" />
-              <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
-                or continue with
-              </span>
               <span className="h-px flex-1 bg-ink/10" />
             </div>
             {sso.map((p) => (

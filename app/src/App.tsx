@@ -376,8 +376,8 @@ export default function App() {
     return () => { live = false; };
   }, [authed]);
 
+  // The auth gate shows the mode too, so resolve it before sign-in as well.
   useEffect(() => {
-    if (!authed) return;
     let live = true;
     const refreshInstallMode = async () => {
       try {
@@ -397,7 +397,7 @@ export default function App() {
       live = false;
       window.removeEventListener('sdcodex:install-mode-changed', onInstallModeChanged);
     };
-  }, [authed]);
+  }, []);
 
   // Global "/" focuses the first search field, as placeholders promise.
   useEffect(() => {
