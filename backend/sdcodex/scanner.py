@@ -210,6 +210,7 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
 
     total_files = len(model_files)
     updated_count = 0
+    new_count = 0
     found_ids = []
 
     # Pass 1 — sidecars only. A model with a Civitai metadata file or a
@@ -278,10 +279,12 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
                 download.set_files(downloaded_files)
                 download.base_model = inferred_base or None
                 db.session.add(download)
-                updated_count += 1
             else:
                 existing.set_files(downloaded_files)
                 existing.base_model = inferred_base or existing.base_model
+            updated_count += 1
+            if not existing:
+                new_count += 1
             db.session.commit()
             found_ids.append((0, stand_in))
             continue
@@ -312,7 +315,6 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
                     with open(metadata_path, 'w', encoding='utf-8') as handle:
                         json.dump(full_model, handle, indent=4)
                     downloaded_files['metadata'] = metadata_path
-                    updated_count += 1
                 except Exception as exc:
                     print(f"Failed to download metadata for {filename}: {exc}")
             else:
@@ -332,7 +334,6 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
                     try:
                         download_file(image_url, new_image_path, api_key)
                         downloaded_files['image'] = new_image_path
-                        updated_count += 1
                     except Exception as exc:
                         print(f"Failed to download image for {filename}: {exc}")
             else:
@@ -348,16 +349,20 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
             )
             download.set_files(downloaded_files)
             db.session.add(download)
-            updated_count += 1
+            new_count += 1
         else:
             existing.set_files(downloaded_files)
             download = existing
+        updated_count += 1
         download.base_model = model_version.get('baseModel') or infer_base_model(filepath) or download.base_model
 
         db.session.commit()
         found_ids.append((model_id, version_id))
 
-    return updated_count, f"Scanned {total_files} files, updated {updated_count} models.", found_ids
+    return updated_count, (
+        f"Scanned {total_files} files: {new_count} new, "
+        f"{max(0, updated_count - new_count)} already listed."
+    ), found_ids
 
 
 def identify_unmatched(api_key=None, progress_callback=None):

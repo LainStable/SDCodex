@@ -217,8 +217,8 @@ class DownloadManager:
                                 [directory for directory, _ in directories],
                             )
                             message = (
-                                f"Scan complete. Updated {total_updated} models. "
-                                f"Removed {removed_count} missing models."
+                                f"Scan complete. Listed {total_updated} models"
+                                + (f", removed {removed_count} missing." if removed_count else ".")
                             )
                     finally:
                         db.session.remove()
