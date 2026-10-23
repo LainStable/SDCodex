@@ -31,6 +31,33 @@ if [ -n "${PUID:-}" ] && [ -n "${PGID:-}" ]; then
   for p in /data /app/plugins /app/db /plugins /rembg_output; do
     [ -e "$p" ] && ! owned "$p" && chown -R "${OWNER}" "$p" 2>/dev/null || true
   done
+
+  # Docker socket access for in-app self-update. The app drops to sdcodex,
+  # while the mounted socket is root:docker 0660 — without this the rebuild
+  # dies with `PermissionError(13, 'Permission denied')` on /var/run/docker.sock.
+  DOCKER_SOCK="${DOCKER_SOCK:-/var/run/docker.sock}"
+  if [ -S "$DOCKER_SOCK" ]; then
+    sock_gid="${DOCKER_GID:-$(stat -c '%g' "$DOCKER_SOCK" 2>/dev/null || true)}"
+    if [ -n "${sock_gid:-}" ]; then
+      [ -n "$(getent group "$sock_gid" || true)" ] || \
+        { groupadd -g "$sock_gid" docker >/dev/null 2>&1 || true; }
+      sock_group="$(getent group "$sock_gid" | cut -d: -f1 || true)"
+      if [ -n "${sock_group:-}" ]; then
+        usermod -aG "$sock_group" sdcodex >/dev/null 2>&1 || true
+        if id -nG sdcodex 2>/dev/null | tr ' ' '\n' | grep -qx "$sock_group"; then
+          echo "docker socket: sdcodex in group ${sock_group} (gid ${sock_gid})"
+        else
+          echo "docker socket: could not add sdcodex to group ${sock_group} (gid ${sock_gid}) — self-update disabled" >&2
+        fi
+      fi
+    fi
+  fi
+
+  # The swap helper runs as root and appends to the update log, so hand these
+  # files back to the app user or later updates cannot report progress.
+  for f in /app/.rebuild.log /app/.rebuild-required; do
+    [ -e "$f" ] && ! owned "$f" && chown "${OWNER}" "$f" 2>/dev/null || true
+  done
 fi
 
 cd /app
