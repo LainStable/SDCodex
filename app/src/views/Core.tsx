@@ -932,6 +932,7 @@ export function PluginTaskFloat({
                 <span className="min-w-0 flex-1 truncate text-ink">{task.pluginName}</span>
                 <span className="shrink-0 text-ink-muted">
                   {task.current}/{task.total || '?'}
+                  {task.total > 0 ? ` · ${Math.round(percent)}%` : ''}
                 </span>
               </div>
               <div className="mt-1.5 h-1.5 overflow-hidden rounded-sm bg-obsidian-high/60">
