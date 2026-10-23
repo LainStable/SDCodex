@@ -279,6 +279,13 @@ export async function pullServerProfile(): Promise<Profile | null> {
         });
       }
     }
+    // Local profile may have been cleared (sign-out, fresh origin) while the
+    // server still has the picture: never leave the avatar empty when the
+    // server has data.
+    if (!avatar && serverAvatar) {
+      avatar = serverAvatar;
+      setLastServerAvatar(serverAvatar);
+    }
     const p: Profile = {
       username: u.username,
       displayName: u.displayName || existing?.displayName || u.username,

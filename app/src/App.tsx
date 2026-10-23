@@ -14,7 +14,7 @@ import {
   loadQueue,
   removeFromQueue,
 } from './lib/queue';
-import { adoptServerUser, clearProfile, completeOidcCallback, endSession, fetchServerAuth, hasSession, initials, loadProfile, pullServerProfile, type Profile, type ServerAuthState } from './lib/auth';
+import { adoptServerUser, completeOidcCallback, endSession, fetchServerAuth, hasSession, initials, loadProfile, pullServerProfile, type Profile, type ServerAuthState } from './lib/auth';
 import type { InstalledPlugin } from './lib/plugins';
 import type { AssistantAction, AssistantSearchParams } from './lib/assistant';
 import { deleteScanned } from './lib/library';
@@ -695,9 +695,9 @@ export default function App() {
             signedIn={authed}
             onSignOut={() => {
               void backendLogout();
-              clearProfile();
+              // Keep the local account row (avatar, display name, theme) so the
+              // next sign-in restores the picture; only the session ends.
               endSession();
-              setProfile(null);
               setAuthed(false);
             }}
             space={space}
