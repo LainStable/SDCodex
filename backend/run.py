@@ -82,16 +82,28 @@ if __name__ == "__main__":
                 threads = max(8, min(128, int(os.environ.get("SDCODEX_THREADS", "24"))))
             except (TypeError, ValueError):
                 threads = 24
+            try:
+                # Browsers keep several keep-alive sockets per tab and plugin
+                # iframes multiply that; the old 40-minute channel timeout let
+                # idle sockets pile up until waitress hit its default 100-open
+                # connection limit and stopped accepting requests.
+                connection_limit = max(64, min(2000, int(os.environ.get("SDCODEX_CONNECTION_LIMIT", "256"))))
+            except (TypeError, ValueError):
+                connection_limit = 256
+            try:
+                channel_timeout = max(30, int(os.environ.get("SDCODEX_CHANNEL_TIMEOUT", "120")))
+            except (TypeError, ValueError):
+                channel_timeout = 120
             print(f"Serving with waitress on http://{host}:{port}", flush=True)
             serve(
                 app,
                 host=host,
                 port=port,
                 threads=threads,
-                # A core+plugin update runs synchronously and can stay quiet
-                # for a while on slow remotes; keep the channel alive well past
-                # the client's own 30-minute ceiling.
-                channel_timeout=2400,
+                # Idle keep-alive channels only; active requests (updates, SSE
+                # streams) are not closed by this timeout.
+                channel_timeout=channel_timeout,
+                connection_limit=connection_limit,
                 ident="SDCodex",
             )
         except ImportError:

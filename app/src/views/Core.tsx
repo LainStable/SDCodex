@@ -10,7 +10,7 @@ import { isPaused, setPaused, type QueueItem } from '../lib/queue';
 import { bootstrapUser, startSession, verifyPassword, type Profile } from '../lib/auth';
 import { adoptServerUser, fetchPublicProviders, type ServerAuthState } from '../lib/auth';
 import { apiPost, mirrorAuth } from '../lib/backend';
-import { fetchCatalog, type HubCatalog } from '../lib/plugins';
+import { fetchCatalog, versionAtLeast, type HubCatalog } from '../lib/plugins';
 import { allThemes, loadTheme, saveTheme } from '../lib/themes';
 import { getScanState, subscribeScanState, type LocalScanState } from '../lib/scanstate';
 
@@ -1215,6 +1215,7 @@ export function Plugins() {
   const [catalog, setCatalog] = useState<HubCatalog | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogMsg, setCatalogMsg] = useState<string | null>(null);
+  const [coreVersion, setCoreVersion] = useState('');
   const [installed, setInstalled] = useState<
     Record<string, { name?: string; version?: string; has_update?: boolean }>
   >({});
@@ -1431,6 +1432,17 @@ export function Plugins() {
     })();
     void refreshInstalled();
     void check();
+    // Hub entries can point at a branch (`#beta`); cores before 2.8.27 cannot
+    // install those, so the card explains it instead of returning a 502.
+    void (async () => {
+      try {
+        const { apiGet } = await import('../lib/backend');
+        const h = await apiGet<{ version?: string }>('/health');
+        if (on) setCoreVersion(h.version ?? '');
+      } catch {
+        /* version stays unknown — don't block installs */
+      }
+    })();
     // Re-read the hub when the tab regains focus so a catalog published after
     // this page mounted shows up without a full reload.
     const onFocus = () => void refreshCatalog(false);
@@ -1754,17 +1766,22 @@ export function Plugins() {
                   {p.repository}
                 </a>
                 {!inst ? (
-                  <GhostButton
-                    disabled={busy !== null}
-                    onClick={() =>
-                      void runAction(p.id, async (api) => {
-                        const r = await api.apiPost<{ ok: boolean; plugin?: { name?: string }; error?: string }>(
-                          '/plugins/install',
-                          { repo_url: p.repository, plugin_id: p.id },
-                        );
-                        return `installed ${r.plugin?.name ?? p.id} — ${
-                          updates?.install_mode?.mode === 'local'
-                            ? 'restart the local app to load it'
+                  p.repository.includes('#') && coreVersion && !versionAtLeast(coreVersion, '2.8.27') ? (
+                    <span className="font-mono text-[10px] text-[#fcd34d]" title="Branch channels were added in core 2.8.27">
+                      update core to 2.8.27+ to install this beta
+                    </span>
+                  ) : (
+                    <GhostButton
+                      disabled={busy !== null}
+                      onClick={() =>
+                        void runAction(p.id, async (api) => {
+                          const r = await api.apiPost<{ ok: boolean; plugin?: { name?: string }; error?: string }>(
+                            '/plugins/install',
+                            { repo_url: p.repository, plugin_id: p.id },
+                          );
+                          return `installed ${r.plugin?.name ?? p.id} — ${
+                            updates?.install_mode?.mode === 'local'
+                              ? 'restart the local app to load it'
                             : 'configure volumes, then restart/rebuild to mount them'
                         }`;
                       })
@@ -1772,6 +1789,7 @@ export function Plugins() {
                   >
                     {busy === p.id ? 'Installing…' : 'Install'}
                   </GhostButton>
+                  )
                 ) : (
                   <>
                     {updates?.install_mode?.mode === 'docker' && (

@@ -1361,10 +1361,14 @@ def plugins_install():
     from . import rebuilder as rebuilder_mod
 
     data = request.get_json(force=True, silent=True) or {}
-    repo_url = (data.get("repo_url") or "").strip()
-    if not repo_url:
+    raw_repo_url = (data.get("repo_url") or "").strip()
+    if not raw_repo_url:
         return jsonify({"error": "repo_url required"}), 400
-    repo_url, _branch = updater_mod.split_repo_ref(repo_url)
+    repo_url, _branch = updater_mod.split_repo_ref(raw_repo_url)
+    if not updater_mod.normalize_github_url(repo_url)[0]:
+        return jsonify({
+            "error": "Only GitHub repository URLs are supported (owner/repo or owner/repo#branch)."
+        }), 400
     requested_id = (data.get("plugin_id") or "").strip() or None
     mode_error = _mode_mismatch(rebuilder_mod)
     if mode_error:
@@ -1372,7 +1376,7 @@ def plugins_install():
 
     install_mode = rebuilder_mod.configured_install_mode()
     ok, result = updater_mod.install_plugin(
-        repo_url,
+        raw_repo_url,
         data.get("volumes") or {},
         install_mode=install_mode,
         plugin_id=requested_id,
