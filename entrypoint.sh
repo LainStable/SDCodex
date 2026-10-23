@@ -15,8 +15,22 @@ if [ -n "${PUID:-}" ] && [ -n "${PGID:-}" ]; then
     useradd -u "${PUID}" -g "${PGID}" -o -m -s /bin/bash sdcodex 2>/dev/null || true
   fi
   usermod -u "${PUID}" -g "${PGID}" sdcodex >/dev/null 2>&1 || true
-  # Fix ownership for persistent directories
-  chown -R sdcodex:sdcodex /app /data /models /downloads /plugins /rembg_output 2>/dev/null || true
+
+  # Fix ownership for persistent directories. A blind `chown -R` walked the
+  # whole bind-mounted repo (node_modules, .venv, testing data, model dirs) on
+  # every start, delaying the backend by minutes. Only touch a path when its
+  # own owner is wrong, and never recurse into the big trees.
+  OWNER="sdcodex:sdcodex"
+  owned() { [ "$(stat -c '%u:%g' "$1" 2>/dev/null)" = "${PUID}:${PGID}" ]; }
+
+  # Top-level only — repo, model and download trees can be huge.
+  for p in /app /models /downloads; do
+    [ -e "$p" ] && ! owned "$p" && chown "${OWNER}" "$p" 2>/dev/null || true
+  done
+  # Small app-owned dirs: recurse, but skip when already correct.
+  for p in /data /app/plugins /app/db /plugins /rembg_output; do
+    [ -e "$p" ] && ! owned "$p" && chown -R "${OWNER}" "$p" 2>/dev/null || true
+  done
 fi
 
 cd /app
