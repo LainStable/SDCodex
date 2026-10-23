@@ -14,21 +14,39 @@ MODEL_TYPES = [
 ]
 
 
-def remove_missing_downloads(found_ids: set, scanned_types: set) -> int:
+def remove_missing_downloads(found_ids: set, scanned_types: set, scanned_dirs=()) -> int:
     """Delete library rows that vanished from *scanned* categories only.
 
-    A type-filtered scan must never delete rows belonging to categories it
-    did not walk (that was silently wiping the rest of the library).
+    A type-filtered scan must never delete rows belonging to categories it did
+    not walk (that was silently wiping the rest of the library). Rows whose
+    file lives outside the directories actually walked (unmounted path,
+    unreadable subtree) are kept too.
     """
     from sdcodex.models import Download
 
     if not scanned_types:
         return 0
+    roots = []
+    for directory in scanned_dirs or ():
+        try:
+            roots.append(os.path.realpath(directory))
+        except OSError:
+            continue
     removed = 0
     for download in Download.query.all():
-        if download.type in scanned_types and (download.model_id, download.version_id) not in found_ids:
-            db.session.delete(download)
-            removed += 1
+        if download.type not in scanned_types:
+            continue
+        if (download.model_id, download.version_id) in found_ids:
+            continue
+        if roots:
+            model_path = (download.get_files() or {}).get("model") or ""
+            if not model_path:
+                continue
+            real = os.path.realpath(model_path)
+            if not any(os.path.commonpath((real, root)) == root for root in roots):
+                continue
+        db.session.delete(download)
+        removed += 1
     if removed:
         db.session.commit()
     return removed
@@ -158,6 +176,7 @@ class DownloadManager:
                                 if s.key.startswith("dir_") and (s.value or "").strip()
                             }
                             directories = []
+                            configured_counts = {}
                             for m_type in MODEL_TYPES:
                                 if only and m_type not in only:
                                     continue
@@ -165,13 +184,24 @@ class DownloadManager:
                                 extra = sorted(
                                     v for k, v in dir_rows.items() if k.startswith(f"dir_{m_type}__")
                                 )
+                                configured_counts[m_type] = sum(1 for p in paths + extra if p)
                                 for path in paths + extra:
                                     # Skip paths that are currently unreachable
                                     # (unmounted drive, typo): their rows must not
                                     # be treated as missing and deleted.
                                     if os.path.isdir(path):
                                         directories.append((path, m_type))
-                            scanned_types = {m_type for _, m_type in directories}
+                            scanned_counts = {}
+                            for _, m_type in directories:
+                                scanned_counts[m_type] = scanned_counts.get(m_type, 0) + 1
+                            # Only prune categories whose every configured path
+                            # was actually scanned; an unmounted/renamed folder
+                            # must never delete the rows it still owns.
+                            prunable_types = {
+                                m_type
+                                for m_type, total in configured_counts.items()
+                                if total and scanned_counts.get(m_type, 0) >= total
+                            }
                             total_updated = 0
                             all_found_ids = set()
                             for directory, m_type in directories:
@@ -181,7 +211,11 @@ class DownloadManager:
                                 )
                                 total_updated += updated
                                 all_found_ids.update(found_ids)
-                            removed_count = remove_missing_downloads(all_found_ids, scanned_types)
+                            removed_count = remove_missing_downloads(
+                                all_found_ids,
+                                prunable_types,
+                                [directory for directory, _ in directories],
+                            )
                             message = (
                                 f"Scan complete. Updated {total_updated} models. "
                                 f"Removed {removed_count} missing models."

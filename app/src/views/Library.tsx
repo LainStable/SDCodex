@@ -23,14 +23,16 @@ interface ServerRow {
   files?: { image?: string; model?: string; metadata?: string };
 }
 
-async function fetchServerRows(): Promise<ServerRow[]> {
+async function fetchServerRows(): Promise<ServerRow[] | null> {
   const { apiGet, backendAvailable } = await import('../lib/backend');
-  if (!(await backendAvailable())) return [];
+  if (!(await backendAvailable())) return null;
   try {
     const r = await apiGet<{ items: ServerRow[] }>('/library');
     return r.items ?? [];
   } catch {
-    return [];
+    // Null means "could not load" — keep retrying instead of showing an
+    // empty library that looks like the scan found nothing.
+    return null;
   }
 }
 
@@ -45,6 +47,7 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
   const [bases, setBases] = useState<string[]>([]);
   const [scanned, setScanned] = useState<ScannedModel[]>(loadScanned);
   const [serverRows, setServerRows] = useState<ServerRow[]>([]);
+  const [serverState, setServerState] = useState<'loading' | 'ready' | 'error'>('loading');
   // Newer Civitai versions for identified local models, keyed modelId-versionId.
   const [updates, setUpdates] = useState<Record<string, { id: number; name?: string }>>({});
   const [colors] = useState<Record<string, string>>(getDirColors);
@@ -100,7 +103,9 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
     };
   }, []);
 
-  // Sections follow Settings: only configured categories appear.
+  // Sections follow Settings: only configured categories appear. If this
+  // browser has no dir keys (fresh origin, cleared storage) fall back to the
+  // categories the library actually contains so rows are never invisible.
   const sections: string[] = useMemo(() => {
     const dirs = getDirectories();
     const configured = new Set<string>();
@@ -110,15 +115,52 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
       const type = rest.includes('__') ? rest.slice(0, rest.indexOf('__')) : rest;
       if ((MODEL_TYPES as readonly string[]).includes(type)) configured.add(type);
     }
-    return MODEL_TYPES.filter((t) => configured.has(t));
-  }, []);
+    if (configured.size > 0) return MODEL_TYPES.filter((t) => configured.has(t));
+    const present = new Set<string>();
+    for (const row of serverRows) {
+      const type = folderForModelType(row.type);
+      if (type) present.add(type);
+    }
+    for (const record of scanned) {
+      const type = folderForModelType(record.type);
+      if (type) present.add(type);
+    }
+    return MODEL_TYPES.filter((t) => present.has(t));
+  }, [serverRows, scanned]);
 
   useEffect(() => {
     let live = true;
-    void (async () => {
+    let timer: number | null = null;
+    let attempt = 0;
+    let loading = false;
+    const loadRows = async () => {
+      if (loading) return;
+      loading = true;
       const rows = await fetchServerRows();
-      if (live) setServerRows(rows);
-    })();
+      loading = false;
+      if (!live) return;
+      if (rows) {
+        setServerRows(rows);
+        setServerState('ready');
+        attempt = 0;
+        if (timer !== null) {
+          window.clearTimeout(timer);
+          timer = null;
+        }
+        return;
+      }
+      setServerState('error');
+      attempt += 1;
+      if (timer === null) {
+        timer = window.setTimeout(() => {
+          timer = null;
+          void loadRows();
+        }, Math.min(10_000, 1500 * attempt));
+      }
+    };
+    void loadRows();
+    const onFocus = () => void loadRows();
+    window.addEventListener('focus', onFocus);
     // Resolve browser-scanned preview images through their bound folders, and
     // backfill the architecture for records scanned before it was inferred.
     void (async () => {
@@ -157,6 +199,8 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
     })();
     return () => {
       live = false;
+      if (timer !== null) window.clearTimeout(timer);
+      window.removeEventListener('focus', onFocus);
     };
   }, []);
 
@@ -273,7 +317,13 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
       <PageHeader
         title="Local Model Library"
         subtitle="Scanned weights grouped by your configured categories."
-        meta={`${total} assets · ${sections.length} categor${sections.length === 1 ? 'y' : 'ies'}`}
+        meta={
+          serverState === 'error'
+            ? 'backend slow — retrying…'
+            : serverState === 'loading' && serverRows.length === 0
+              ? 'loading library…'
+              : `${total} assets · ${sections.length} categor${sections.length === 1 ? 'y' : 'ies'}`
+        }
       />
 
       <div className="glass-l1 edge-shimmer mt-4 rounded-lg p-3">
@@ -328,7 +378,11 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
               </div>
               {local.length + remote.length === 0 ? (
                 <p className="mt-2 font-mono text-[11px] text-ink-faint">
-                  Empty — run Scan in Settings → Model dirs.
+                  {serverState === 'error'
+                    ? 'Waiting for the backend — retrying…'
+                    : serverState === 'loading' && serverRows.length === 0
+                      ? 'Loading library…'
+                      : 'Empty — run Scan in Settings → Model dirs.'}
                 </p>
               ) : (
                 <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">

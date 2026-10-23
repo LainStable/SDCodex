@@ -4,8 +4,10 @@
 
 let cached: boolean | null = null;
 let cachedAt = 0;
-/** How long a negative probe is trusted before re-checking the backend. */
-const NEGATIVE_TTL_MS = 10_000;
+/** How long a negative probe is trusted before re-checking the backend.
+    Keep this short: during a restart or queue backlog a 10 s cache made every
+    view look empty (plugins missing, library empty) long after recovery. */
+const NEGATIVE_TTL_MS = 2_000;
 /** Hard ceiling so a stalled request can never hang the UI forever. */
 const REQUEST_TIMEOUT_MS = 300_000;
 
