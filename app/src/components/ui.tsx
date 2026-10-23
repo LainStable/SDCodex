@@ -30,7 +30,7 @@ export function TypeBadge({ type, color }: { type: string; color?: string }) {
     : undefined;
   return (
     <span
-      className={`rounded border px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${cls}`}
+      className={`rounded border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${cls}`}
       style={style}
     >
       {type}
@@ -55,7 +55,7 @@ export function BaseModelBadge({
   const display = value || (fallback ?? '').trim() || 'unknown';
   return (
     <span
-      className={`inline-flex max-w-full items-center rounded border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
+      className={`inline-flex max-w-full items-center rounded border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
         display !== 'unknown' ? 'text-ink-muted' : 'text-ink-faint'
       } ${className}`}
       title={display !== 'unknown' ? display : 'Unknown'}

@@ -259,7 +259,7 @@ export default function Explorer({ onQueue, queuedIds, ownedIds, onOpen, searchT
           <>
             <span className="mr-2 inline-flex items-center gap-2">
               <span
-                className={`inline-flex h-6 items-center gap-1.5 rounded border px-2 font-mono text-[11px] ${
+                className={`inline-flex items-center gap-1.5 rounded border px-2 py-0.5 font-mono text-[10px] ${
                   apiLive === false
                     ? 'border-status-alert/30 bg-status-alert/10 text-[#f87171]'
                     : 'border-status-active/30 bg-status-active/10 text-status-active'

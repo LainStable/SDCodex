@@ -859,7 +859,7 @@ function OidcManager() {
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="font-semibold">{p.name || '(unnamed)'}</span>
             <span
-              className={`rounded border px-1.5 py-0.5 font-mono text-[9px] uppercase ${
+              className={`rounded border px-2 py-0.5 font-mono text-[10px] uppercase ${
                 p.enabled
                   ? 'border-status-active/40 text-status-active'
                   : 'border-white/15 text-ink-faint'

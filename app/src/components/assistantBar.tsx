@@ -181,7 +181,7 @@ export function AssistantBar({
                     {turn.tools.map((tool, i) => (
                       <span
                         key={i}
-                        className="rounded-[3px] border border-white/10 bg-white/[0.03] px-1.5 py-0.5 font-mono text-[10px] text-ink-faint"
+                        className="rounded-[3px] border border-white/10 bg-white/[0.03] px-2 py-0.5 font-mono text-[10px] text-ink-faint"
                       >
                         {tool.replace(/^plugin__/, '').replace(/__/g, ' · ')}
                       </span>

@@ -215,7 +215,7 @@ export function Sidebar({
                 <FanIcon icon={NAV_ICONS[item.id]} name={item.label} className="!text-[16px]" />
                 {item.label}
                 {item.soon && (
-                  <span className="ml-1 rounded border border-white/15 px-1.5 font-mono text-[9px] uppercase text-ink-faint">
+                  <span className="ml-1 rounded border border-white/15 px-2 py-0.5 font-mono text-[10px] uppercase text-ink-faint">
                     soon
                   </span>
                 )}
@@ -254,7 +254,7 @@ export function Sidebar({
                           ? 'Core update available — open Plugin Hub to update'
                           : 'Plugin updates available — open Plugin Hub'
                       }
-                      className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
+                      className={`rounded border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
                         updates.core
                           ? 'border-status-warning/50 bg-status-warning/15 text-[#fcd34d] hover:bg-status-warning/25'
                           : 'border-secondary/50 bg-secondary/15 text-[#22d3ee] hover:bg-secondary/25'
@@ -263,7 +263,7 @@ export function Sidebar({
                       {updates.core ? '⟳' : '⬢'} v{version}
                     </button>
                   ) : (
-                    <span className="rounded border border-white/20 bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em] text-white">
+                    <span className="rounded border border-white/20 bg-primary/15 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em] text-white">
                       v{version}
                     </span>
                   )}
@@ -272,7 +272,7 @@ export function Sidebar({
                       type="button"
                       onClick={onGoPlugins}
                       title="A new plugin is available to install — open Plugin Hub"
-                      className="rounded border border-status-warning/50 bg-status-warning/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-[#fcd34d] hover:bg-status-warning/25"
+                      className="rounded border border-status-warning/50 bg-status-warning/15 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-[#fcd34d] hover:bg-status-warning/25"
                     >
                       NEW
                     </button>
@@ -296,7 +296,7 @@ export function Sidebar({
                           ? 'Core update available — open Plugin Hub to update'
                           : 'Plugin updates available — open Plugin Hub'
                       }
-                      className={`rounded border px-1 py-0.5 font-mono text-[9px] font-semibold ${
+                      className={`rounded border px-2 py-0.5 font-mono text-[10px] font-semibold ${
                         updates.core
                           ? 'border-status-warning/50 bg-status-warning/15 text-[#fcd34d]'
                           : 'border-secondary/50 bg-secondary/15 text-[#22d3ee]'
@@ -310,7 +310,7 @@ export function Sidebar({
                       type="button"
                       onClick={onGoPlugins}
                       title="A new plugin is available to install"
-                      className="rounded border border-status-warning/50 bg-status-warning/15 px-1 py-0.5 font-mono text-[9px] font-semibold text-[#fcd34d]"
+                      className="rounded border border-status-warning/50 bg-status-warning/15 px-2 py-0.5 font-mono text-[10px] font-semibold text-[#fcd34d]"
                     >
                       +
                     </button>
@@ -512,7 +512,7 @@ export function UserMenu({
               >
                 <FanIcon icon={a.icon} name={a.label} className="!text-[18px]" />
               </button>
-              <span className="whitespace-nowrap rounded border border-white/10 bg-obsidian-low px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-muted">
+              <span className="whitespace-nowrap rounded border border-white/10 bg-obsidian-low px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-muted">
                 {a.label}
               </span>
             </div>
@@ -593,7 +593,7 @@ export function Topbar({
       </div>
       <span
         title="Selected install mode"
-        className={`hidden rounded border px-2 py-1 font-mono text-[10px] tracking-[0.06em] sm:inline ${
+        className={`hidden rounded border px-2 py-0.5 font-mono text-[10px] tracking-[0.06em] sm:inline ${
           installMode === 'local'
             ? 'border-status-active/30 bg-status-active/10 text-status-active'
             : 'border-primary/30 bg-primary/10 text-[#a5b4fc]'
@@ -647,7 +647,7 @@ export function CivitaiAccountStatus() {
     <span
       title={userLabel}
       aria-label={userLabel}
-      className={`inline-flex h-6 shrink-0 items-center gap-1.5 rounded border px-2 font-mono text-[11px] ${userColor}`}
+      className={`inline-flex items-center gap-1.5 rounded border px-2 py-0.5 font-mono text-[10px] ${userColor}`}
     >
       {apiUser ? `@${apiUser}` : hasKey ? 'Unverified' : 'Signed out'}
     </span>
@@ -783,7 +783,7 @@ export function FilterPills<T extends string>({
                   }
                 : undefined
             }
-            className={`rounded border px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
+            className={`rounded border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] ${
               isActive
                 ? 'border-primary/50 bg-primary/20 text-white'
                 : 'border-white/10 bg-white/5 text-ink-muted hover:border-white/20'

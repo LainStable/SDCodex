@@ -351,7 +351,7 @@ function UpdateMetadata({
                 title="Open model page in new tab"
                 aria-label="Open model page in new tab"
                 onClick={() => window.open(`https://civitai.com/models/${c.id}`, '_blank')}
-                className="ml-auto shrink-0 rounded border border-white/10 px-1.5 py-0.5 font-mono text-[10px] text-ink-muted hover:border-white/25 hover:text-white"
+                className="ml-auto shrink-0 rounded border border-white/10 px-2 py-0.5 font-mono text-[10px] text-ink-muted hover:border-white/25 hover:text-white"
               >
                 ↗
               </button>
@@ -606,7 +606,7 @@ export default function ModelModal({
                     setVersionId(v.id);
                     setImgIdx(0);
                   }}
-                  className={`rounded border px-2.5 py-1 font-mono text-[11px] ${
+                  className={`rounded border px-2 py-0.5 font-mono text-[10px] ${
                     v.id === version.id
                       ? 'border-primary/60 bg-primary/25 text-white'
                       : 'border-white/10 bg-white/5 text-ink-muted hover:border-white/25'
@@ -650,7 +650,7 @@ export default function ModelModal({
                       type="button"
                       onClick={() => void setCurrentImageAsCover()}
                       disabled={savingCover}
-                      className="absolute left-2 top-2 rounded border border-primary/30 bg-primary/20 px-2 py-1 font-mono text-[10px] text-white hover:border-primary/70 hover:bg-primary/30 disabled:cursor-default disabled:opacity-80"
+                      className="absolute left-2 top-2 rounded border border-primary/30 bg-primary/20 px-2 py-0.5 font-mono text-[10px] text-white hover:border-primary/70 hover:bg-primary/30 disabled:cursor-default disabled:opacity-80"
                     >
                       {savingCover ? 'Saving…' : 'Replace library image'}
                     </button>
@@ -661,7 +661,7 @@ export default function ModelModal({
                       type="button"
                       title="Open model page in new tab"
                       onClick={() => window.open(`https://civitai.com/models/${modelId}`, '_blank')}
-                      className="absolute right-2 bottom-2 rounded border border-white/20 px-2 py-1 font-mono text-[10px] text-white hover:border-primary/60 backdrop-blur"
+                      className="absolute right-2 bottom-2 rounded border border-white/20 px-2 py-0.5 font-mono text-[10px] text-white hover:border-primary/60 backdrop-blur"
                     >
                       ↗
                     </button>
@@ -860,7 +860,7 @@ export default function ModelModal({
                 alt=""
                 className="max-h-full max-w-full rounded object-contain"
               />
-              <div className="pointer-events-none absolute bottom-3 right-3 flex items-center gap-1.5 rounded border border-white/20 bg-black/50 px-2.5 py-1 font-mono text-[10px] text-white">
+              <div className="pointer-events-none absolute bottom-3 right-3 flex items-center gap-1.5 rounded border border-white/20 bg-black/50 px-2 py-0.5 font-mono text-[10px] text-white">
                 <button
                   type="button"
                   disabled={imgIdx === 0}

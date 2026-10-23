@@ -789,11 +789,11 @@ export function DownloadFloat({ go }: { go: (v: 'queue') => void }) {
     <div className="glass-l2 rounded-lg p-3">
       <div className="flex items-center gap-2">
         <h2 className="font-display text-sm font-semibold">Downloads & Queue</h2>
-        <span className="rounded border border-status-active/40 bg-status-active/10 px-1.5 py-0.5 font-mono text-[9px] uppercase text-status-active">
+        <span className="rounded border border-status-active/40 bg-status-active/10 px-2 py-0.5 font-mono text-[10px] uppercase text-status-active">
           {state.active.length} active
         </span>
         {state.queued > 0 && (
-          <span className="rounded border border-white/15 bg-white/5 px-1.5 py-0.5 font-mono text-[9px] uppercase text-ink-muted">
+          <span className="rounded border border-white/15 bg-white/5 px-2 py-0.5 font-mono text-[10px] uppercase text-ink-muted">
             {state.queued} queued
           </span>
         )}
@@ -910,7 +910,7 @@ export function PluginTaskFloat({
     <div className="glass-l2 rounded-lg p-3">
       <div className="flex items-center gap-2">
         <h2 className="font-display text-sm font-semibold">Plugin Tasks</h2>
-        <span className="rounded border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] uppercase text-primary">
+        <span className="rounded border border-primary/40 bg-primary/10 px-2 py-0.5 font-mono text-[10px] uppercase text-primary">
           {tasks.length} running
         </span>
         <button
@@ -1070,7 +1070,7 @@ export function ScanFloat({ onOpen }: { onOpen: () => void }) {
     <div className="glass-l2 rounded-lg p-3">
       <div className="flex items-center gap-2">
         <h2 className="font-display text-sm font-semibold">Model Scan</h2>
-        <span className="rounded border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] uppercase text-primary">
+        <span className="rounded border border-primary/40 bg-primary/10 px-2 py-0.5 font-mono text-[10px] uppercase text-primary">
           {view.count}
         </span>
         <button

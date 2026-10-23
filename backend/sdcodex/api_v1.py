@@ -1585,11 +1585,11 @@ _PLUGIN_UI_CSS = """<style id="sdcodex-plugin-ui">
 
 /* Filter / segmented pill — core FilterPills: inactive white/5, active primary/20. */
 .sd-btn-pill {
-  padding: 4px 10px; border-color: rgba(255, 255, 255, 0.1);
+  padding: 2px 8px; border-color: rgba(255, 255, 255, 0.1);
   background-color: rgba(255, 255, 255, 0.05);
   color: rgb(var(--c-ink-muted, 199 196 215));
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 10px; font-weight: 600; letter-spacing: 0.06em;
+  font-size: 10px; line-height: 1.5; font-weight: 600; letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 .sd-btn-pill:hover:not(:disabled):not([aria-disabled="true"]) {
