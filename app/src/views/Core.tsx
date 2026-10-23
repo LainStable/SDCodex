@@ -1289,7 +1289,6 @@ export function Plugins() {
     setUpdateMsg(null);
     setRebuildLog([]);
     setShowRebuildLog(true);
-    setLogOpen(false);
     let polling = true;
     const pollLogs = async () => {
       while (polling) {
@@ -1330,7 +1329,9 @@ export function Plugins() {
   const rebuild = async () => {
     setRebuilding(true);
     setShowRebuildLog(true);
-    setLogOpen(false);
+    // Keep the log exactly as the user left it: the git-pull phase hands over
+    // to the build/swap phase, and collapsing an already-expanded log there
+    // looked like the panel closing on its own mid-update.
     setUpdateMsg(null);
     // Docker keeps the old app answering health until replacement; local
     // mode restarts the backend process in place.
@@ -1541,23 +1542,18 @@ export function Plugins() {
           return (
             <div className="fixed inset-0 z-[70] flex items-center justify-center bg-obsidian-bg/80 p-4 backdrop-blur-md">
               <div className="glass-l2 edge-shimmer w-full max-w-2xl overflow-hidden rounded-lg border border-ink/10">
-                <div className="flex items-start justify-between gap-3 border-b border-ink/10 px-5 py-4">
+                <div className="flex items-start justify-between gap-3 px-5 py-4">
                   <div className="flex min-w-0 items-center gap-3">
                     <img src="/sdcodex.svg" alt="" className="h-10 w-10 shrink-0 object-contain" />
-                    <div className="min-w-0">
-                      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
-                        System update
-                      </div>
-                      <h2 className="truncate font-display text-lg font-semibold tracking-tight">
-                        {finished
-                          ? 'Update complete'
-                          : failed
-                            ? 'Update failed'
-                            : running
-                              ? 'Updating SDCodex'
-                              : 'Ready to update'}
-                      </h2>
-                    </div>
+                    <h2 className="min-w-0 truncate font-display text-lg font-semibold tracking-tight">
+                      {finished
+                        ? 'Update complete'
+                        : failed
+                          ? 'Update failed'
+                          : running
+                            ? 'Updating SDCodex'
+                            : 'Ready to update'}
+                    </h2>
                   </div>
                   <button
                     type="button"
@@ -1648,10 +1644,7 @@ export function Plugins() {
                   <p className="mt-3 font-mono text-[11px] text-ink-faint">{statusText}</p>
                 </div>
 
-                <div className="flex items-center justify-between gap-3 border-t border-ink/10 px-5 py-3">
-                  <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
-                    {updates?.rebuild?.mode ? `${updates.rebuild.mode} · self-updater` : 'self-updater'}
-                  </span>
+                <div className="flex items-center justify-end gap-3 px-5 py-3">
                   <button
                     type="button"
                     onClick={() => setShowRebuildLog(false)}
