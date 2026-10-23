@@ -501,6 +501,21 @@ def list_installed() -> list:
         mf = read_manifest(p)
         if not mf:
             continue
+        nav_items = mf.get("nav_items", []) if isinstance(mf.get("nav_items"), list) else []
+        entry_page = mf.get("entry_page", "")
+        if not entry_page and not nav_items:
+            # Page-only plugins (nav_items cleared so the core sidebar stays
+            # clean) still need a landing page for the plugin space.
+            try:
+                pages = sorted(
+                    f[:-5]
+                    for f in os.listdir(os.path.join(p, "pages"))
+                    if f.endswith(".html") and f != "settings.html" and not f.startswith("settings-")
+                )
+            except OSError:
+                pages = []
+            if pages:
+                entry_page = pages[0]
         out.append(
             {
                 "id": mf.get("id", item),
@@ -509,8 +524,8 @@ def list_installed() -> list:
                 "description": mf.get("description", ""),
                 "repository": mf.get("repository", ""),
                 "icon": mf.get("icon", ""),
-                "entry_page": mf.get("entry_page", ""),
-                "nav_items": mf.get("nav_items", []) if isinstance(mf.get("nav_items"), list) else [],
+                "entry_page": entry_page,
+                "nav_items": nav_items,
                 "settings": mf.get("settings", []) if isinstance(mf.get("settings"), list) else [],
                 "task_status": mf.get("task_status") if isinstance(mf.get("task_status"), dict) else None,
                 "assistant_actions": mf.get("assistant_actions") if isinstance(mf.get("assistant_actions"), list) else [],

@@ -19,7 +19,6 @@ export default function PluginView({
 }) {
   const current = page ?? plugin.nav_items[0]?.page ?? plugin.entry_page ?? '';
   const frameRef = useRef<HTMLIFrameElement>(null);
-
   // Plugins live in their own document, so the core palette is pushed in via
   // postMessage whenever the frame (re)loads or the user switches themes.
   useEffect(() => {
@@ -44,6 +43,20 @@ export default function PluginView({
       window.removeEventListener(THEME_CHANGED_EVENT, post);
     };
   }, [current, plugin.id]);
+
+  if (!current) {
+    return (
+      <div className="glass-l1 flex min-h-[320px] flex-col items-center justify-center gap-2 rounded-lg p-6 text-center">
+        <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+          No page configured
+        </p>
+        <p className="max-w-md text-sm text-ink-muted">
+          {plugin.name} does not declare a landing page. Add <code>entry_page</code> or a{' '}
+          <code>nav_items</code> entry to its <code>plugin.json</code>.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div>
