@@ -1,0 +1,18 @@
+# Local development stack.
+#
+# The default project uses `container_name: sdcodex`, which is the same name the
+# deployment checkout uses (e.g. /home/naked/games/SDCodex). Running plain
+# `docker compose up` here therefore STOPS the deployed app and takes its name
+# (the app logs "Session terminated, killing shell... ...killed." and exits 143).
+#
+# Always develop with this override:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# It renames the project and container and tags the image separately so the
+# deployment container is never touched.
+name: sdcodex-dev
+
+services:
+  sdcodex:
+    image: sdcodex:dev
+    container_name: sdcodex-dev
