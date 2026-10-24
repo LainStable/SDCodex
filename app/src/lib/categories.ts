@@ -21,7 +21,30 @@ const API_TO_FOLDER: Record<string, string> = {
   Other: 'Other',
 };
 
+/** Folder categories written by the scanner (they are not Civitai API types,
+    but must pass through unchanged — otherwise Embedding/LyCORIS/Motion rows
+    collapsed into "Other" and their tabs read 0). */
+const FOLDER_CATEGORIES = new Set([
+  'Checkpoint',
+  'Embedding',
+  'Hypernetwork',
+  'AestheticGradient',
+  'LORA',
+  'LyCORIS',
+  'DoRA',
+  'Controlnet',
+  'Upscaler',
+  'Motion',
+  'VAE',
+  'Poses',
+  'Wildcards',
+  'Workflows',
+  'Detection',
+  'Other',
+]);
+
 export function folderForModelType(apiType: string): string {
+  if (FOLDER_CATEGORIES.has(apiType)) return apiType;
   return API_TO_FOLDER[apiType] ?? 'Other';
 }
 
