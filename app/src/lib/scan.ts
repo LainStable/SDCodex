@@ -575,6 +575,44 @@ export async function identifyUnknownModels(
   return identified;
 }
 
+export interface ScannedMatch {
+  modelId: number;
+  versionId: number;
+  name: string;
+  type: string;
+  baseModel: string;
+}
+
+/** Hash one browser-scanned file and return its Civitai match (or null). */
+export async function identifyScannedRecord(record: {
+  type: string;
+  dirKey?: string;
+  filename: string;
+  dirPath?: string;
+  name?: string;
+}): Promise<ScannedMatch | null> {
+  const roots = await boundFolders(record.type);
+  const root = roots.find((r) => r.key === record.dirKey) ?? roots[0];
+  if (!root || !(await ensurePermission(root.dir, 'read'))) return null;
+  let dir = root.dir;
+  const parts = record.filename.split('/').filter(Boolean);
+  for (const part of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(part);
+  const leaf = parts[parts.length - 1] ?? record.filename;
+  const file = await (await dir.getFileHandle(leaf)).getFile();
+  const hash = await sha256Hex(file);
+  const version = await fetchVersionByHash(hash);
+  return {
+    modelId: version.modelId ?? 0,
+    versionId: version.id,
+    name: version.model?.name ?? record.name ?? leaf,
+    type: record.type,
+    baseModel:
+      version.baseModel ||
+      (await inferBaseModel(file)) ||
+      baseModelFromPath(`${record.dirPath ?? ''}/${record.filename}`),
+  };
+}
+
 export async function resolveBound(type: string): Promise<FileSystemDirectoryHandle | null> {
   return getHandle(`dir_${type}`);
 }

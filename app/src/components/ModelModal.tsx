@@ -243,6 +243,9 @@ function UpdateMetadata({
   const [searched, setSearched] = useState(false);
   const [adopting, setAdopting] = useState<number | null>(null);
   const [preferredVersionId, setPreferredVersionId] = useState<number | null>(null);
+  // Which candidate's version list is expanded (Select no longer commits the
+  // first version blindly).
+  const [expanded, setExpanded] = useState<number | null>(null);
 
   const search = async () => {
     if (!q.trim()) return;
@@ -279,23 +282,23 @@ function UpdateMetadata({
     }
   };
 
-  const adopt = async (id: number) => {
-    setAdopting(id);
+  const adopt = async (id: number, versionId?: number) => {
+    setAdopting(versionId ?? id);
     setError(null);
     try {
       const full = await fetchModel(id);
-      const v0 =
-        full.modelVersions.find((version) => version.id === preferredVersionId) ??
+      const v =
+        full.modelVersions.find((version) => version.id === (versionId ?? preferredVersionId)) ??
         full.modelVersions[0];
-      if (!v0) throw new Error('Model has no versions');
+      if (!v) throw new Error('Model has no versions');
       await onAdopt({
         modelId: full.id,
-        versionId: v0.id,
+        versionId: v.id,
         name: full.name,
         type: full.type,
-        baseModel: v0.baseModel,
+        baseModel: v.baseModel,
       });
-      setDone(`Matched as ${full.name} — loading details…`);
+      setDone(`Matched as ${full.name}${v.name ? ` · ${v.name}` : ''} — loading details…`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Adopt failed');
     } finally {
@@ -327,39 +330,84 @@ function UpdateMetadata({
       {done && <p className="mt-2 font-mono text-[11px] text-status-active">{done}</p>}
       {searched && cands.length > 0 && !done && (
         <ul className="mt-2 space-y-1.5">
-          {cands.map((c) => (
-            <li
-              key={c.id}
-              className="flex items-center gap-2 rounded border border-white/[0.06] px-2 py-1.5"
-            >
-              {c.modelVersions?.[0]?.images?.[0]?.url && (
-                <img
-                  src={c.modelVersions[0].images[0].url}
-                  alt={`${c.name} preview`}
-                  loading="lazy"
-                  className="h-11 w-11 shrink-0 rounded border border-white/10 object-cover"
-                />
-              )}
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold">{c.name}</div>
-                <div className="truncate font-mono text-[10px] text-ink-faint">
-                  {c.type} · {c.modelVersions[0]?.baseModel ?? '—'} · @{c.creator?.username ?? '—'}
+          {cands.map((c) => {
+            const versions = c.modelVersions ?? [];
+            const open = expanded === c.id;
+            return (
+              <li key={c.id} className="rounded border border-white/[0.06] px-2 py-1.5">
+                <div className="flex items-center gap-2">
+                  {versions[0]?.images?.[0]?.url && (
+                    <img
+                      src={versions[0].images[0].url}
+                      alt={`${c.name} preview`}
+                      loading="lazy"
+                      className="h-11 w-11 shrink-0 rounded border border-white/10 object-cover"
+                    />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold">{c.name}</div>
+                    <div className="truncate font-mono text-[10px] text-ink-faint">
+                      {c.type} · {versions.length} version{versions.length === 1 ? '' : 's'} · @
+                      {c.creator?.username ?? '—'}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    title="Open model page in new tab"
+                    aria-label="Open model page in new tab"
+                    onClick={() => window.open(`https://civitai.com/models/${c.id}`, '_blank')}
+                    className="ml-auto shrink-0 rounded border border-white/10 px-2 py-0.5 font-mono text-[10px] text-ink-muted hover:border-white/25 hover:text-white"
+                  >
+                    ↗
+                  </button>
+                  <GhostButton
+                    disabled={adopting !== null}
+                    onClick={() => {
+                      if (versions.length <= 1) {
+                        void adopt(c.id, versions[0]?.id);
+                      } else {
+                        setExpanded((cur) => (cur === c.id ? null : c.id));
+                      }
+                    }}
+                  >
+                    {adopting !== null && versions.some((v) => v.id === adopting)
+                      ? '…'
+                      : open
+                        ? 'Close'
+                        : 'Select'}
+                  </GhostButton>
                 </div>
-              </div>
-              <button
-                type="button"
-                title="Open model page in new tab"
-                aria-label="Open model page in new tab"
-                onClick={() => window.open(`https://civitai.com/models/${c.id}`, '_blank')}
-                className="ml-auto shrink-0 rounded border border-white/10 px-2 py-0.5 font-mono text-[10px] text-ink-muted hover:border-white/25 hover:text-white"
-              >
-                ↗
-              </button>
-              <GhostButton disabled={adopting !== null} onClick={() => void adopt(c.id)}>
-                {adopting === c.id ? '…' : 'Select'}
-              </GhostButton>
-            </li>
-          ))}
+                {open && (
+                  <div className="mt-1.5 space-y-1 border-t border-white/[0.06] pt-1.5">
+                    <p className="font-mono text-[10px] text-ink-faint">
+                      Choose the version this file matches:
+                    </p>
+                    {versions.map((v) => (
+                      <button
+                        key={v.id}
+                        type="button"
+                        disabled={adopting !== null}
+                        onClick={() => void adopt(c.id, v.id)}
+                        className={`flex w-full items-center gap-2 rounded border px-2 py-1 text-left transition-colors ${
+                          preferredVersionId === v.id
+                            ? 'border-primary/50 bg-primary/15'
+                            : 'border-white/10 bg-white/[0.03] hover:border-white/25'
+                        } disabled:opacity-50`}
+                      >
+                        <span className="min-w-0 flex-1 truncate text-xs font-semibold">{v.name}</span>
+                        <span className="shrink-0 font-mono text-[10px] text-ink-faint">
+                          {v.baseModel || '—'}
+                        </span>
+                        <span className="shrink-0 font-mono text-[10px] text-ink-faint">
+                          {adopting === v.id ? 'matching…' : `#${v.id}`}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -404,7 +452,11 @@ export default function ModelModal({
   const baseModelId = target.kind === 'civitai' ? target.modelId : (target.modelId ?? 0);
   // Adopted via Update-metadata: flips an unknown entry into the full view.
   const [adoptedId, setAdoptedId] = useState<number | null>(null);
+  const [adoptedVersionId, setAdoptedVersionId] = useState<number | null>(null);
   const modelId = adoptedId ?? baseModelId;
+  // Update-metadata button (hash + rematch an already-matched local file).
+  const [rematching, setRematching] = useState(false);
+  const [rematchMsg, setRematchMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!modelId) return;
@@ -416,12 +468,11 @@ export default function ModelModal({
     setEmbedded(null);
     fetchModel(modelId, ctl.signal)
       .then((m) => {
-        if (target.kind === 'local' && 'versionId' in target && target.versionId) {
-          const v = m.modelVersions.find((x) => x.id === target.versionId);
-          setVersionId(v?.id ?? m.modelVersions[0]?.id ?? null);
-        } else {
-          setVersionId(m.modelVersions[0]?.id ?? null);
-        }
+        const wanted =
+          adoptedVersionId ??
+          (target.kind === 'local' && 'versionId' in target ? target.versionId : null);
+        const v = m.modelVersions.find((x) => x.id === wanted);
+        setVersionId(v?.id ?? m.modelVersions[0]?.id ?? null);
         setModel(m);
       })
       .catch((e) => {
@@ -527,6 +578,54 @@ export default function ModelModal({
     }
   };
 
+  /** Hash the local file again and rematch it (row or browser record). */
+  const rematchModel = async () => {
+    if (target.kind !== 'local') return;
+    setRematching(true);
+    setRematchMsg(null);
+    try {
+      let match: AdoptedMatch | null = null;
+      if (target.rowId != null) {
+        const { apiPost, backendAvailable } = await import('../lib/backend');
+        if (!(await backendAvailable())) throw new Error('Backend unreachable');
+        const r = await apiPost<{ ok: boolean; match?: AdoptedMatch; error?: string }>(
+          `/library/${target.rowId}/rematch`,
+          {},
+        );
+        if (!r.ok || !r.match) throw new Error(r.error || 'No Civitai match for this file.');
+        match = r.match;
+      } else if (target.record && target.dirKey && target.relativePath) {
+        const { identifyScannedRecord } = await import('../lib/scan');
+        const found = await identifyScannedRecord({
+          type: target.type,
+          dirKey: target.dirKey,
+          filename: target.relativePath,
+          dirPath: target.path?.includes('/')
+            ? target.path.slice(0, target.path.lastIndexOf('/'))
+            : '',
+          name: target.title,
+        });
+        if (!found) throw new Error('No Civitai match for this file.');
+        const { adoptScannedMatch } = await import('../lib/library');
+        adoptScannedMatch(target.record.modelId, target.record.versionId, found);
+        match = found;
+      }
+      if (!match) throw new Error('This entry cannot be rematched.');
+      setRematchMsg(`Matched as ${match.name} — refreshed.`);
+      setAdoptedId(match.modelId);
+      setAdoptedVersionId(match.versionId);
+      const full = await fetchModel(match.modelId);
+      setModel(full);
+      setVersionId(match.versionId);
+      setImgIdx(0);
+      onLibraryChanged?.();
+    } catch (e) {
+      setRematchMsg(e instanceof Error ? e.message : 'Rematch failed');
+    } finally {
+      setRematching(false);
+    }
+  };
+
   // Local-only entries (no Civitai id yet): known fields + metadata matcher.
   if (target.kind === 'local' && !modelId) {
     const t = target;
@@ -559,6 +658,7 @@ export default function ModelModal({
             onAdopt={async (m) => {
               await adoptMatch(t, m, () => onLibraryChanged?.());
               setAdoptedId(m.modelId);
+              setAdoptedVersionId(m.versionId);
             }}
           />
         </div>
@@ -840,6 +940,28 @@ export default function ModelModal({
                   })}
                   {(version.files ?? []).length === 0 && (
                     <p className="mt-2 font-mono text-[11px] text-ink-faint">No file list published.</p>
+                  )}
+                  {target.kind === 'local' && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void rematchModel()}
+                        disabled={rematching}
+                        title="Hash this file and match it again on Civitai"
+                        className="mt-2 w-full rounded border border-white/20 bg-white/5 px-2 py-0.5 font-mono text-[10px] text-ink-muted hover:border-white/35 hover:bg-white/10 hover:text-white disabled:cursor-default disabled:opacity-60"
+                      >
+                        {rematching ? 'Hashing…' : 'Update metadata'}
+                      </button>
+                      {rematchMsg && (
+                        <p
+                          className={`mt-1 font-mono text-[10px] ${
+                            rematchMsg.startsWith('Matched') ? 'text-status-active' : 'text-[#f87171]'
+                          }`}
+                        >
+                          {rematchMsg}
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
               </div>

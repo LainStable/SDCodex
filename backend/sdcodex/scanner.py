@@ -365,6 +365,99 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
     ), found_ids
 
 
+def _apply_civitai_match(row, version, path, api_key=None):
+    """Persist a Civitai version onto an existing row; returns the match."""
+    files = row.get_files() or {}
+    try:
+        model_id = int(version.get("modelId") or 0)
+        version_id = int(version.get("id") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not model_id or not version_id:
+        return None
+
+    # A second copy of an already-identified file: merge and drop this row.
+    existing = Download.query.filter_by(model_id=model_id, version_id=version_id).first()
+    if existing is not None and existing.id != row.id:
+        merged = dict(existing.get_files() or {})
+        for key, value in files.items():
+            if value and not merged.get(key):
+                merged[key] = value
+        existing.set_files(merged)
+        if not existing.base_model:
+            existing.base_model = version.get("baseModel") or None
+        db.session.delete(row)
+        db.session.commit()
+        return {
+            "modelId": existing.model_id,
+            "versionId": existing.version_id,
+            "name": existing.name,
+            "type": existing.type or "",
+            "baseModel": existing.base_model or "",
+        }
+
+    base_name = os.path.splitext(os.path.basename(path))[0]
+    file_dir = os.path.dirname(path)
+    new_files = dict(files)
+    new_files["model"] = path
+
+    metadata_path = os.path.join(file_dir, f"{base_name}.metadata.json")
+    if not os.path.exists(metadata_path):
+        try:
+            full_model = api.get_model(model_id, api_key)
+            with open(metadata_path, "w", encoding="utf-8") as handle:
+                json.dump(full_model, handle, indent=4)
+        except Exception as exc:
+            print(f"Failed to download metadata for {base_name}: {exc}")
+    if os.path.exists(metadata_path):
+        new_files["metadata"] = metadata_path
+
+    image_path = _find_image(file_dir, base_name)
+    if not os.path.exists(image_path) and version.get("images"):
+        image_url = version["images"][0]["url"]
+        ext = (
+            ".png" if ".png" in image_url
+            else ".jpg" if (".jpg" in image_url or ".jpeg" in image_url)
+            else ".webp"
+        )
+        image_path = os.path.join(file_dir, f"{sanitize_filename(base_name)}{ext}")
+        try:
+            download_file(image_url, image_path, api_key)
+        except Exception as exc:
+            print(f"Failed to download image for {base_name}: {exc}")
+    if os.path.exists(image_path):
+        new_files["image"] = image_path
+
+    row.model_id = model_id
+    row.version_id = version_id
+    row.name = ((version.get("model") or {}).get("name")) or row.name
+    row.base_model = version.get("baseModel") or infer_base_model(path) or row.base_model
+    row.set_files(new_files)
+    db.session.commit()
+    return {
+        "modelId": row.model_id,
+        "versionId": row.version_id,
+        "name": row.name,
+        "type": row.type or "",
+        "baseModel": row.base_model or "",
+    }
+
+
+def identify_row(row, api_key=None):
+    """Hash one row's model file and persist the Civitai match it returns."""
+    path = (row.get_files() or {}).get("model") or ""
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        version = api.get_model_version_by_hash(_cached_sha256(path), api_key)
+    except Exception as exc:
+        print(f"Failed to identify {os.path.basename(path)}: {exc}")
+        return None
+    if not version:
+        return None
+    return _apply_civitai_match(row, version, path, api_key)
+
+
 def identify_unmatched(api_key=None, progress_callback=None):
     """Hash and Civitai-match every library row that is still unidentified.
 
@@ -375,79 +468,13 @@ def identify_unmatched(api_key=None, progress_callback=None):
     total = len(rows)
     identified = 0
     for index, row in enumerate(rows, start=1):
-        files = row.get_files() or {}
-        path = files.get("model") or ""
+        path = (row.get_files() or {}).get("model") or ""
         display = os.path.basename(path) or row.name or "model"
         if progress_callback:
             progress_callback(
                 int(index / max(1, total) * 100), f"Identifying {display} ({index}/{total})"
             )
-        if not path or not os.path.isfile(path):
-            continue
-        try:
-            file_hash = _cached_sha256(path)
-            version = api.get_model_version_by_hash(file_hash, api_key)
-        except Exception as exc:
-            print(f"Failed to identify {display}: {exc}")
-            continue
-        if not version:
-            continue
-        version_id = version.get("id")
-        model_id = version.get("modelId")
-        if not version_id or not model_id:
-            continue
-
-        # A second copy of an already-identified file: merge and drop this row.
-        existing = Download.query.filter_by(model_id=model_id, version_id=version_id).first()
-        if existing is not None and existing.id != row.id:
-            merged = dict(existing.get_files() or {})
-            for key, value in files.items():
-                if value and not merged.get(key):
-                    merged[key] = value
-            existing.set_files(merged)
-            db.session.delete(row)
-            db.session.commit()
+        if identify_row(row, api_key):
             identified += 1
-            continue
-
-        base_name = os.path.splitext(os.path.basename(path))[0]
-        file_dir = os.path.dirname(path)
-        new_files = dict(files)
-        new_files["model"] = path
-
-        metadata_path = os.path.join(file_dir, f"{base_name}.metadata.json")
-        if not os.path.exists(metadata_path):
-            try:
-                full_model = api.get_model(model_id, api_key)
-                with open(metadata_path, "w", encoding="utf-8") as handle:
-                    json.dump(full_model, handle, indent=4)
-            except Exception as exc:
-                print(f"Failed to download metadata for {display}: {exc}")
-        if os.path.exists(metadata_path):
-            new_files["metadata"] = metadata_path
-
-        image_path = _find_image(file_dir, base_name)
-        if not os.path.exists(image_path) and version.get("images"):
-            image_url = version["images"][0]["url"]
-            ext = (
-                ".png" if ".png" in image_url
-                else ".jpg" if (".jpg" in image_url or ".jpeg" in image_url)
-                else ".webp"
-            )
-            image_path = os.path.join(file_dir, f"{sanitize_filename(base_name)}{ext}")
-            try:
-                download_file(image_url, image_path, api_key)
-            except Exception as exc:
-                print(f"Failed to download image for {display}: {exc}")
-        if os.path.exists(image_path):
-            new_files["image"] = image_path
-
-        row.model_id = int(model_id)
-        row.version_id = int(version_id)
-        row.name = ((version.get("model") or {}).get("name")) or row.name
-        row.base_model = version.get("baseModel") or infer_base_model(path) or row.base_model
-        row.set_files(new_files)
-        db.session.commit()
-        identified += 1
 
     return identified, f"Identified {identified} of {total} unmatched models.", []

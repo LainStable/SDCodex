@@ -640,6 +640,23 @@ def library_updates():
     )
 
 
+@api_v1.post("/library/<int:row_id>/rematch")
+def library_rematch(row_id: int):
+    """Hash a library file again and rematch it (Update metadata button)."""
+    user, err = _require_user()
+    if err:
+        return err
+    from .scanner import identify_row
+
+    row = db.session.get(Download, row_id)
+    if row is None:
+        return jsonify({"error": "not found"}), 404
+    match = identify_row(row, user.api_key or None)
+    if not match:
+        return jsonify({"ok": False, "error": "No Civitai match for this file."}), 404
+    return jsonify({"ok": True, "match": match})
+
+
 @api_v1.put("/library/<int:row_id>/identify")
 def library_identify(row_id: int):
     """Adopt a Civitai match for an unidentified row (Update metadata)."""
