@@ -1,3 +1,7 @@
+import os
+import threading
+import time
+
 import requests
 
 BASE_URL = "https://civitai.com/api/v1"
@@ -13,6 +17,47 @@ _session = requests.Session()
 _session.headers.update({"User-Agent": USER_AGENT})
 
 
+class CivitaiRateLimited(Exception):
+    """Raised locally (no network call) while a 429 cooldown is active."""
+
+
+# Civitai returns 429 quickly when several background checks run at once
+# (library update badges, base-model lookups, scans). Serialize outbound calls
+# and back off globally after a 429 so the app stops hammering it.
+MIN_INTERVAL = float(os.environ.get("CIVITAI_MIN_INTERVAL", "0.5"))
+_RATE_LOCK = threading.Lock()
+_RATE_NEXT_AT = 0.0
+_RATE_COOLDOWN_UNTIL = 0.0
+_RATE_COOLDOWN = 60.0
+
+
+def rate_limit_check() -> None:
+    with _RATE_LOCK:
+        if time.time() < _RATE_COOLDOWN_UNTIL:
+            raise CivitaiRateLimited("Civitai 429 cooldown — try again shortly")
+
+
+def rate_limit_wait() -> None:
+    global _RATE_NEXT_AT
+    with _RATE_LOCK:
+        now = time.time()
+        start = max(now, _RATE_NEXT_AT)
+        _RATE_NEXT_AT = start + MIN_INTERVAL
+        delay = start - now
+    if delay > 0:
+        time.sleep(delay)
+
+
+def rate_limit_note(status: int) -> None:
+    global _RATE_COOLDOWN_UNTIL, _RATE_COOLDOWN
+    with _RATE_LOCK:
+        if status == 429:
+            _RATE_COOLDOWN_UNTIL = max(_RATE_COOLDOWN_UNTIL, time.time() + _RATE_COOLDOWN)
+            _RATE_COOLDOWN = min(_RATE_COOLDOWN * 2, 900.0)
+        elif 200 <= status < 300:
+            _RATE_COOLDOWN = 60.0
+
+
 def _get_headers(api_key=None):
     headers = {}
     if api_key:
@@ -21,12 +66,15 @@ def _get_headers(api_key=None):
 
 
 def _get(path, params=None, api_key=None):
+    rate_limit_check()
+    rate_limit_wait()
     response = _session.get(
         f"{BASE_URL}{path}",
         params=params,
         headers=_get_headers(api_key),
         timeout=TIMEOUT,
     )
+    rate_limit_note(response.status_code)
     response.raise_for_status()
     return response.json()
 

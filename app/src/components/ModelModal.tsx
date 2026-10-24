@@ -457,6 +457,14 @@ export default function ModelModal({
   // Update-metadata button (hash + rematch an already-matched local file).
   const [rematching, setRematching] = useState(false);
   const [rematchMsg, setRematchMsg] = useState<string | null>(null);
+  // File-on-disk rename.
+  const [diskPath, setDiskPath] = useState(() =>
+    target.kind === 'local' ? (target.path ?? target.relativePath ?? '') : '',
+  );
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameMsg, setRenameMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!modelId) return;
@@ -483,6 +491,14 @@ export default function ModelModal({
     return () => ctl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelId]);
+
+  useEffect(() => {
+    if (target.kind !== 'local') return;
+    setDiskPath(target.path ?? target.relativePath ?? '');
+    setRenaming(false);
+    setRenameMsg(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -575,6 +591,52 @@ export default function ModelModal({
       setCoverMessage(e instanceof Error ? e.message : 'Could not save library cover.');
     } finally {
       setSavingCover(false);
+    }
+  };
+
+  /** Rename the model file, both JSON sidecars and the preview on disk. */
+  const renameDiskFile = async () => {
+    if (target.kind !== 'local') return;
+    const value = renameValue.trim();
+    if (!value) return;
+    setRenameBusy(true);
+    setRenameMsg(null);
+    try {
+      if (target.rowId != null) {
+        const { apiPost, backendAvailable } = await import('../lib/backend');
+        if (!(await backendAvailable())) throw new Error('Backend unreachable');
+        const r = await apiPost<{
+          ok: boolean;
+          name?: string;
+          files?: Record<string, string>;
+          error?: string;
+        }>(`/library/${target.rowId}/rename`, { name: value });
+        if (!r.ok) throw new Error(r.error || 'Rename failed.');
+        if (r.files?.model) setDiskPath(r.files.model);
+        setRenameMsg(`Renamed to ${r.name}.`);
+      } else if (target.dirKey && target.relativePath) {
+        const { renameScannedFiles } = await import('../lib/scan');
+        const res = await renameScannedFiles({
+          type: target.type,
+          dirKey: target.dirKey,
+          filename: target.relativePath,
+          name: value,
+        });
+        const leaf = res.filename.split('/').pop() ?? res.filename;
+        const dir = target.path?.includes('/')
+          ? target.path.slice(0, target.path.lastIndexOf('/') + 1)
+          : '';
+        setDiskPath(`${dir}${leaf}`);
+        setRenameMsg(`Renamed to ${leaf}.`);
+      } else {
+        throw new Error('This entry cannot be renamed.');
+      }
+      setRenaming(false);
+      onLibraryChanged?.();
+    } catch (e) {
+      setRenameMsg(e instanceof Error ? e.message : 'Rename failed.');
+    } finally {
+      setRenameBusy(false);
     }
   };
 
@@ -964,6 +1026,82 @@ export default function ModelModal({
                     </>
                   )}
                 </div>
+
+                {target.kind === 'local' &&
+                  (() => {
+                    const fullPath = diskPath.trim();
+                    const filename = fullPath.split('/').filter(Boolean).pop() ?? '';
+                    if (!filename) return null;
+                    const ext = filename.includes('.') ? filename.slice(filename.lastIndexOf('.')) : '';
+                    const base = ext ? filename.slice(0, -ext.length) : filename;
+                    return (
+                      <div className="glass-l1 mt-3 rounded-lg p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <h3 className="font-display text-sm font-semibold">File on disk</h3>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRenameValue(base);
+                              setRenameMsg(null);
+                              setRenaming((open) => !open);
+                            }}
+                            className="rounded border border-white/20 bg-white/5 px-2 py-0.5 font-mono text-[10px] text-ink-muted hover:border-white/35 hover:bg-white/10 hover:text-white"
+                          >
+                            {renaming ? 'Cancel' : 'Rename'}
+                          </button>
+                        </div>
+                        <p className="mt-1 truncate font-mono text-[12px] text-ink" title={filename}>
+                          {filename}
+                        </p>
+                        {fullPath !== filename && (
+                          <p
+                            className="mt-0.5 truncate font-mono text-[10px] text-ink-faint"
+                            title={fullPath}
+                          >
+                            {fullPath}
+                          </p>
+                        )}
+                        {renaming && (
+                          <div className="mt-2 flex flex-col gap-1.5">
+                            <p className="font-mono text-[10px] text-ink-faint">
+                              Model file, both JSON sidecars and the preview image are renamed.
+                            </p>
+                            <div className="flex gap-1.5">
+                              <input
+                                value={renameValue}
+                                onChange={(e) => setRenameValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') void renameDiskFile();
+                                  if (e.key === 'Escape') setRenaming(false);
+                                }}
+                                aria-label="New file name"
+                                className="min-w-0 flex-1 rounded border border-white/10 bg-obsidian-lowest px-2 py-1 font-mono text-[11px] text-ink outline-none placeholder:text-ink-faint focus:border-primary"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => void renameDiskFile()}
+                                disabled={renameBusy}
+                                className="rounded border border-white/20 bg-white/5 px-2 py-0.5 font-mono text-[10px] text-ink-muted hover:border-white/35 hover:bg-white/10 hover:text-white disabled:opacity-50"
+                              >
+                                {renameBusy ? 'Renaming…' : 'Rename'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        {renameMsg && (
+                          <p
+                            className={`mt-1 font-mono text-[10px] ${
+                              renameMsg.startsWith('Renamed')
+                                ? 'text-status-active'
+                                : 'text-[#f87171]'
+                            }`}
+                          >
+                            {renameMsg}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
               </div>
             </div>
           </>

@@ -57,6 +57,28 @@ export function upsertScanned(entry: ScannedModel): ScannedModel[] {
 }
 
 /** Fill in the architecture after reading it from the weights on disk. */
+/** Point a scanned record at renamed files on disk (model + preview). */
+export function renameScannedFileRecord(
+  dirKey: string,
+  oldFilename: string,
+  newFilename: string,
+): void {
+  const list = loadScanned();
+  const index = list.findIndex((e) => e.dirKey === dirKey && e.filename === oldFilename);
+  if (index < 0) return;
+  const entry = list[index];
+  const oldLeaf = oldFilename.split('/').pop() ?? oldFilename;
+  const newLeaf = newFilename.split('/').pop() ?? newFilename;
+  const oldBase = oldLeaf.replace(/\.[^.]+$/, '');
+  const newBase = newLeaf.replace(/\.[^.]+$/, '');
+  const imageName =
+    entry.imageName && entry.imageName.startsWith(oldBase)
+      ? `${newBase}${entry.imageName.slice(oldBase.length)}`
+      : entry.imageName;
+  list[index] = { ...entry, filename: newFilename, imageName };
+  persist(list);
+}
+
 export function setScannedBaseModel(modelId: number, versionId: number, baseModel: string): boolean {
   const list = loadScanned();
   const index = list.findIndex((e) => e.modelId === modelId && e.versionId === versionId);

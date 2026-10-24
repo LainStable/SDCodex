@@ -4,7 +4,7 @@
 
 import { fetchVersionByHash } from './civitai';
 import { ensurePermission, getHandle, putHandle } from './idb';
-import { loadScanned, upsertScanned } from './library';
+import { loadScanned, renameScannedFileRecord, upsertScanned } from './library';
 import { isScanCancelled } from './scanstate';
 import { getDirectories } from './settings';
 import { apiGet, apiPost, backendAvailable } from './backend';
@@ -605,6 +605,94 @@ export async function identifyUnknownModels(
   onMsg(summary);
   onProgress?.(total, total, summary);
   return identified;
+}
+
+const RENAME_SUFFIXES = [
+  '.metadata.json',
+  '.cm-info.json',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.preview.png',
+  '.preview.jpeg',
+  '.preview.jpg',
+  '.preview.webp',
+] as const;
+
+/** Rename a browser-scanned model file, its sidecars and previews. */
+export async function renameScannedFiles(input: {
+  type: string;
+  dirKey?: string;
+  filename: string;
+  name: string;
+}): Promise<{ filename: string; path: string }> {
+  const roots = await boundFolders(input.type);
+  const root = roots.find((r) => r.key === input.dirKey) ?? roots[0];
+  if (!root || !(await ensurePermission(root.dir, 'readwrite'))) {
+    throw new Error('Reconnect this model folder to rename files.');
+  }
+  let dir = root.dir;
+  const parts = input.filename.split('/').filter(Boolean);
+  const leaf = parts.pop() ?? input.filename;
+  for (const part of parts) dir = await dir.getDirectoryHandle(part);
+
+  const ext = leaf.includes('.') ? leaf.slice(leaf.lastIndexOf('.')) : '';
+  let base = input.name.trim();
+  if (ext && base.toLowerCase().endsWith(ext.toLowerCase())) base = base.slice(0, -ext.length);
+  if (!base || base === '.' || base === '..' || /[\\/\0]/.test(base)) {
+    throw new Error('Enter a valid file name (no slashes).');
+  }
+  const oldBase = ext ? leaf.slice(0, -ext.length) : leaf;
+  const newFilename = [...parts, `${base}${ext}`].join('/');
+  if (base === oldBase) return { filename: input.filename, path: `/${newFilename}` };
+
+  const renames: Array<{ old: string; next: string }> = [];
+  // The model file keeps its own extension (oldBase is extension-less).
+  let modelClash = true;
+  try {
+    await dir.getFileHandle(`${base}${ext}`);
+  } catch {
+    modelClash = false;
+  }
+  if (modelClash) throw new Error(`${base}${ext} already exists.`);
+  renames.push({ old: leaf, next: `${base}${ext}` });
+  for (const suffix of RENAME_SUFFIXES) {
+    const old = `${oldBase}${suffix}`;
+    try {
+      await dir.getFileHandle(old);
+    } catch {
+      continue;
+    }
+    const next = `${base}${suffix}`;
+    if (old === next) continue;
+    let clash = true;
+    try {
+      await dir.getFileHandle(next);
+    } catch {
+      clash = false;
+    }
+    if (clash) throw new Error(`${next} already exists.`);
+    renames.push({ old, next });
+  }
+  if (renames.length === 0) throw new Error('Nothing to rename.');
+
+  for (const { old, next } of renames) {
+    const handle = await dir.getFileHandle(old);
+    const movable = handle as FileSystemFileHandle & { move?: (name: string) => Promise<void> };
+    if (typeof movable.move === 'function') {
+      await movable.move(next);
+      continue;
+    }
+    const file = await handle.getFile();
+    const target = await dir.getFileHandle(next, { create: true });
+    const writable = await target.createWritable();
+    await writable.write(file);
+    await writable.close();
+    await dir.removeEntry(old);
+  }
+  renameScannedFileRecord(input.dirKey ?? root.key, input.filename, newFilename);
+  return { filename: newFilename, path: `/${newFilename}` };
 }
 
 export interface ScannedMatch {

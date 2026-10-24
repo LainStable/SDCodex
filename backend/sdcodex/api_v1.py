@@ -45,9 +45,14 @@ def _civitai_get(url: str, headers: dict, *, timeout=(5, 30), max_redirects: int
             or parsed.password
         ):
             raise ValueError("URL must be an HTTPS Civitai address")
+        from . import api as _civitai_api
+
+        _civitai_api.rate_limit_check()
+        _civitai_api.rate_limit_wait()
         response = requests.get(
             current, headers=headers, timeout=timeout, stream=True, allow_redirects=False
         )
+        _civitai_api.rate_limit_note(response.status_code)
         if response.status_code in (301, 302, 303, 307, 308):
             location = response.headers.get("Location") or ""
             response.close()
@@ -512,8 +517,9 @@ def library():
 # Latest Civitai version per model id, reused across library views so opening
 # the Library does not hammer the API. 10 minutes is short enough that a fresh
 # release shows up soon after the user refreshes.
-_LIBRARY_UPDATE_TTL = 600
+_LIBRARY_UPDATE_TTL = 3600
 _LIBRARY_UPDATE_CACHE: dict = {}
+_LIBRARY_UPDATE_FAILED: dict = {}
 _LIBRARY_UPDATE_LOCK = threading.Lock()
 # Model ids with a background refresh in flight (never block a request on these).
 _LIBRARY_UPDATE_INFLIGHT: set = set()
@@ -546,7 +552,7 @@ def _schedule_library_updates(model_ids: list, api_key) -> bool:
 
     def _run():
         try:
-            with ThreadPoolExecutor(max_workers=4) as pool:
+            with ThreadPoolExecutor(max_workers=2) as pool:
                 list(pool.map(lambda mid: _latest_civitai_version(mid, api_key), fresh))
         finally:
             with _LIBRARY_UPDATE_INFLIGHT_LOCK:
@@ -562,12 +568,18 @@ def _latest_civitai_version(model_id: int, api_key: str | None):
         hit = _LIBRARY_UPDATE_CACHE.get(model_id)
         if hit and now - hit[0] < _LIBRARY_UPDATE_TTL:
             return hit[1]
+        if _LIBRARY_UPDATE_FAILED.get(model_id, 0) > now:
+            return None
     from . import api as civitai_api
 
     try:
         full = civitai_api.get_model(model_id, api_key)
     except Exception as error:
         print(f"Library update check failed for model {model_id}: {error}")
+        # Do not retry a failing/429 model on every poll — the client asks
+        # again quickly and would hammer Civitai.
+        with _LIBRARY_UPDATE_LOCK:
+            _LIBRARY_UPDATE_FAILED[model_id] = now + 900
         return None
     versions = full.get("modelVersions") or []
     latest = versions[0] if versions else None
@@ -581,6 +593,7 @@ def _latest_civitai_version(model_id: int, api_key: str | None):
     }
     with _LIBRARY_UPDATE_LOCK:
         _LIBRARY_UPDATE_CACHE[model_id] = (now, info)
+        _LIBRARY_UPDATE_FAILED.pop(model_id, None)
     return info
 
 
@@ -638,6 +651,88 @@ def library_updates():
             "truncated": len(wanted) > len(model_ids),
         }
     )
+
+
+@api_v1.post("/library/<int:row_id>/rename")
+def library_rename(row_id: int):
+    """Rename a library model file (plus its sidecars and previews)."""
+    user, err = _require_user()
+    if err:
+        return err
+    data = request.get_json(force=True, silent=True) or {}
+    requested = str(data.get("name") or "").strip()
+    row = db.session.get(Download, row_id)
+    if row is None:
+        return jsonify({"error": "not found"}), 404
+    files = row.get_files() or {}
+    model_path = files.get("model") or ""
+    if not model_path or not os.path.isfile(model_path):
+        return jsonify({"error": "The model file is not reachable from the server."}), 400
+
+    directory = os.path.dirname(model_path)
+    filename = os.path.basename(model_path)
+    old_base, model_ext = os.path.splitext(filename)
+    new_base = requested
+    if model_ext and new_base.lower().endswith(model_ext.lower()):
+        new_base = new_base[: -len(model_ext)]
+    new_base = new_base.strip()
+    if (
+        not new_base
+        or len(new_base) > 200
+        or new_base in (".", "..")
+        or any(ch in new_base for ch in ("/", "\\", "\x00"))
+        or any(ord(ch) < 32 for ch in new_base)
+    ):
+        return jsonify({"error": "Enter a valid file name (no slashes)."}), 400
+    if new_base == old_base:
+        return jsonify({"ok": True, "name": new_base, "files": files})
+
+    suffixes = (
+        ".metadata.json",
+        ".cm-info.json",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+        ".preview.png",
+        ".preview.jpeg",
+        ".preview.jpg",
+        ".preview.webp",
+    )
+    renames = []
+    # The model file keeps its own extension (old_base is extension-less).
+    model_target = os.path.join(directory, f"{new_base}{model_ext}")
+    if os.path.exists(model_target):
+        return jsonify({"error": f"{os.path.basename(model_target)} already exists."}), 400
+    renames.append((model_path, model_target))
+    for suffix in suffixes:
+        source = os.path.join(directory, f"{old_base}{suffix}")
+        if not os.path.isfile(source):
+            continue
+        target = os.path.join(directory, f"{new_base}{suffix}")
+        if os.path.exists(target):
+            return jsonify({"error": f"{os.path.basename(target)} already exists."}), 400
+        renames.append((source, target))
+    if not renames:
+        return jsonify({"error": "Nothing to rename."}), 400
+
+    try:
+        for source, target in renames:
+            os.rename(source, target)
+    except OSError as exc:
+        return jsonify({"error": f"Rename failed: {exc}"}), 400
+
+    moved = {source: target for source, target in renames}
+    updated = dict(files)
+    for key in ("model", "metadata", "image"):
+        value = updated.get(key)
+        if value in moved:
+            updated[key] = moved[value]
+    row.set_files(updated)
+    if not row.model_id or row.name == old_base:
+        row.name = new_base
+    db.session.commit()
+    return jsonify({"ok": True, "name": new_base, "files": updated})
 
 
 @api_v1.post("/library/<int:row_id>/rematch")

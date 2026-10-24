@@ -410,6 +410,7 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
                           modelId: r.modelId || undefined,
                           versionId: r.versionId || undefined,
                           rowId: r.id,
+                          path: r.files?.model,
                         })
                       }
                       className="block w-full text-left"
