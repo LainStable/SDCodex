@@ -44,8 +44,12 @@ function persist(list: ScannedModel[]): void {
 }
 
 export function upsertScanned(entry: ScannedModel): ScannedModel[] {
+  // Replace by id *and* by file: a rescan that identifies a file must not leave
+  // its old unidentified (stand-in id) record behind as a duplicate card.
   const list = loadScanned().filter(
-    (e) => !(e.modelId === entry.modelId && e.versionId === entry.versionId),
+    (e) =>
+      !(e.modelId === entry.modelId && e.versionId === entry.versionId) &&
+      !(e.dirKey === entry.dirKey && e.filename === entry.filename),
   );
   const next = [...list, entry];
   persist(next);

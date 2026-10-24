@@ -97,6 +97,25 @@ def _version_from_metadata(data, filename):
     if not isinstance(data, dict):
         return None
 
+    # StabilityMatrix model cache (`<name>.metadata.json` with a nested
+    # `civitai` version object plus snake_case file fields).
+    civitai = data.get("civitai")
+    if isinstance(civitai, dict) and civitai.get("id") and civitai.get("modelId"):
+        version = dict(civitai)
+        version.setdefault("modelId", civitai.get("modelId"))
+        if not version.get("baseModel"):
+            version["baseModel"] = data.get("base_model") or ""
+        if not version.get("model"):
+            version["model"] = {
+                "name": data.get("model_name") or civitai.get("name") or "Unknown Model",
+                "type": data.get("model_type") or "Other",
+            }
+        if not version.get("files"):
+            version["files"] = [
+                {"name": filename, "hashes": {"SHA256": data.get("sha256") or ""}}
+            ]
+        return version
+
     # StabilityMatrix ConnectedModelInfo (`.cm-info.json`, PascalCase fields).
     if data.get("ModelId") and data.get("VersionId"):
         try:
@@ -161,7 +180,7 @@ def _version_from_metadata(data, filename):
 
 
 META_SUFFIXES = ('.metadata.json', '.cm-info.json')
-IMAGE_SUFFIXES = ('.webp', '.png', '.jpg', '.jpeg', '.preview.png')
+IMAGE_SUFFIXES = ('.webp', '.png', '.jpg', '.jpeg', '.preview.png', '.preview.jpeg', '.preview.jpg', '.preview.webp')
 
 
 def _read_sidecar(file_dir, base_name):
@@ -180,6 +199,22 @@ def _read_sidecar(file_dir, base_name):
         except (OSError, ValueError):
             continue
     return None, None
+
+
+def _stand_in_id(model_type, path):
+    """Stable id for an unidentified file (same formula as older scans)."""
+    import zlib
+
+    return zlib.crc32(f"{model_type}/{path}".encode()) & 0x7FFFFFFF
+
+
+def _drop_stale_stand_in(path, model_type, keep_id=None):
+    """Remove the unidentified row left behind when a file gets matched."""
+    stale = Download.query.filter_by(
+        model_id=0, version_id=_stand_in_id(model_type, path)
+    ).first()
+    if stale is not None and stale.id != keep_id:
+        db.session.delete(stale)
 
 
 def _find_image(file_dir, base_name):
@@ -218,6 +253,7 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
     identified = {}
     sidecar_identified = set()
     sidecars = {}
+    sidecar_data = {}
     pending = []
     for index, filepath in enumerate(model_files, start=1):
         if not os.path.isfile(filepath):
@@ -232,6 +268,8 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
         sidecar_path, sidecar = _read_sidecar(file_dir, base_name)
         if sidecar_path:
             sidecars[filepath] = sidecar_path
+            if isinstance(sidecar, dict):
+                sidecar_data[filepath] = sidecar
         version = _version_from_metadata(sidecar, filename) if sidecar is not None else None
         if version:
             identified[filepath] = version
@@ -259,29 +297,33 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
             # Unknown (maybe not hosted on Civitai): still list the model.
             # Reuse a sidecar image / info file when the folder already has
             # them; the placeholder covers the rest.
-            import zlib
-
             downloaded_files = {'model': filepath}
             if metadata_path and os.path.exists(metadata_path):
                 downloaded_files['metadata'] = metadata_path
             if os.path.exists(image_path):
                 downloaded_files['image'] = image_path
-            stand_in = zlib.crc32(f"{model_type}/{filepath}".encode()) & 0x7FFFFFFF
+            stand_in = _stand_in_id(model_type, filepath)
             existing = Download.query.filter_by(model_id=0, version_id=stand_in).first()
             inferred_base = infer_base_model(filepath)
+            meta = sidecar_data.get(filepath) or {}
+            display_name = str(meta.get("model_name") or "").strip() or base_name
+            meta_base = str(meta.get("base_model") or "").strip()
+            preview = str(meta.get("preview_url") or "").strip()
+            if preview and os.path.isfile(preview):
+                downloaded_files["image"] = preview
             if not existing:
                 download = Download(
                     model_id=0,
                     version_id=stand_in,
-                    name=base_name,
+                    name=display_name or base_name,
                     type=model_type,
                 )
                 download.set_files(downloaded_files)
-                download.base_model = inferred_base or None
+                download.base_model = meta_base or inferred_base or None
                 db.session.add(download)
             else:
                 existing.set_files(downloaded_files)
-                existing.base_model = inferred_base or existing.base_model
+                existing.base_model = meta_base or inferred_base or existing.base_model
             updated_count += 1
             if not existing:
                 new_count += 1
@@ -340,6 +382,7 @@ def scan_directory(directory, model_type, api_key=None, progress_callback=None):
                 downloaded_files['image'] = image_path
 
         existing = Download.query.filter_by(model_id=model_id, version_id=version_id).first()
+        _drop_stale_stand_in(filepath, model_type)
         if not existing:
             download = Download(
                 model_id=model_id,
@@ -375,6 +418,8 @@ def _apply_civitai_match(row, version, path, api_key=None):
         return None
     if not model_id or not version_id:
         return None
+
+    _drop_stale_stand_in(path, row.type or "", keep_id=row.id)
 
     # A second copy of an already-identified file: merge and drop this row.
     existing = Download.query.filter_by(model_id=model_id, version_id=version_id).first()

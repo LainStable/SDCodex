@@ -165,7 +165,16 @@ function baseModelFromSidecar(json: unknown): string {
 /** Sidecar files living next to a model. Civitai's scan writes
     `<base>.metadata.json`; StabilityMatrix writes `<base>.cm-info.json`. */
 const META_SUFFIXES = ['.metadata.json', '.cm-info.json'] as const;
-const IMAGE_SUFFIXES = ['.png', '.jpg', '.jpeg', '.webp', '.preview.png'] as const;
+const IMAGE_SUFFIXES = [
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.preview.png',
+  '.preview.jpeg',
+  '.preview.jpg',
+  '.preview.webp',
+] as const;
 
 async function readModelSidecar(
   dir: FileSystemDirectoryHandle,
@@ -228,6 +237,24 @@ export function identityFromSidecar(
       baseModel: String(data.BaseModel || '').trim(),
       hash: hashOf(data.Hashes),
     };
+  }
+
+  // StabilityMatrix model cache: `<name>.metadata.json` with a nested
+  // `civitai` version object next to snake_case file fields.
+  const civitai = data.civitai;
+  if (civitai && typeof civitai === 'object' && !Array.isArray(civitai)) {
+    const c = civitai as Record<string, unknown>;
+    const modelId = num(c.modelId);
+    const versionId = num(c.id);
+    if (modelId && versionId) {
+      return {
+        modelId,
+        versionId,
+        name: String(data.model_name || c.name || '').trim(),
+        baseModel: String(c.baseModel || data.base_model || '').trim(),
+        hash: typeof data.sha256 === 'string' ? data.sha256.trim().toLowerCase().slice(0, 12) : '',
+      };
+    }
   }
 
   const versions = Array.isArray(data.modelVersions)
@@ -405,6 +432,7 @@ export async function scanDir(
   // file or a StabilityMatrix cm-info file (plus an image) is recorded without
   // touching the weights. Hashing is deferred until the tree is fully walked.
   const pending: typeof files = [];
+  const sidecarData = new Map<string, Record<string, unknown>>();
   let checked = 0;
   for (const f of files) {
     if (isScanCancelled()) throw new Error('Scan cancelled');
@@ -413,6 +441,7 @@ export async function scanDir(
     seen.add(`${f.dirKey}/${f.rel}`);
     checked += 1;
     const sidecar = await readModelSidecar(f.dir, base);
+    if (sidecar) sidecarData.set(f.rel, sidecar.data);
     const identity = sidecar ? identityFromSidecar(sidecar.data, name) : null;
     if (!identity) {
       pending.push(f);
@@ -486,12 +515,15 @@ export async function scanDir(
       }
     }
     const imageName = await findSidecarImage(f.dir, base);
+    const meta = sidecarData.get(f.rel) ?? {};
+    const displayName = String(meta.model_name ?? '').trim() || base;
+    const metaBase = String(meta.base_model ?? '').trim();
     upsertScanned({
       modelId: 0,
       versionId: pathId(`${f.dirKey}/${f.rel}`),
-      name: base,
+      name: displayName,
       type,
-      baseModel: inferred || baseModelFromPath(`${f.dirPath}/${f.rel}`),
+      baseModel: metaBase || inferred || baseModelFromPath(`${f.dirPath}/${f.rel}`),
       dirKey: f.dirKey,
       dirPath: f.dirPath,
       filename: f.rel,
