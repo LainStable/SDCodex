@@ -907,10 +907,13 @@ export function PluginTaskFloat({
     detail: string;
     message: string;
     startedAt: number;
+    /** Controls the plugin exposes for this task ("pause", "stop"). */
+    actions?: string[];
   };
   const [tasks, setTasks] = useState<PluginTask[]>([]);
   const [dismissed, setDismissed] = useState(false);
   const [now, setNow] = useState(() => Date.now() / 1000);
+  const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -921,7 +924,7 @@ export function PluginTaskFloat({
         if (!(await backendAvailable())) return;
         const st = await apiGet<{ tasks?: PluginTask[] }>('/plugin-tasks');
         if (!live) return;
-        const running = (st.tasks ?? []).filter((t) => t.state === 'running' || t.state === 'cancelling');
+        const running = (st.tasks ?? []).filter((t) => t.state === 'running' || t.state === 'cancelling' || t.state === 'paused');
         setTasks(running);
         if (running.length === 0) setDismissed(false);
         setNow(Date.now() / 1000);
@@ -938,6 +941,19 @@ export function PluginTaskFloat({
   }, []);
 
   if (tasks.length === 0 || dismissed) return null;
+
+  const runAction = async (task: PluginTask, action: 'pause' | 'stop') => {
+    const key = `${task.pluginId}:${action}`;
+    setBusy(key);
+    try {
+      const { apiPost } = await import('../lib/backend');
+      await apiPost(`/plugin-tasks/${task.pluginId}/${action}`, {});
+    } catch {
+      /* the plugin refused or went away — the poll shows the real state */
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const elapsed = (task: PluginTask) => {
     if (!task.startedAt) return '';
@@ -992,13 +1008,35 @@ export function PluginTaskFloat({
                 </span>
                 <span className="shrink-0">{elapsed(task)}</span>
               </div>
-              <button
-                type="button"
-                onClick={() => onOpen(task.pluginId, task.page)}
-                className="mt-2 w-full rounded border border-white/15 py-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-muted hover:bg-white/5 hover:text-white"
-              >
-                Open {task.pluginName} →
-              </button>
+              <div className="mt-2 flex gap-1.5">
+                {task.actions?.includes('pause') ? (
+                  <button
+                    type="button"
+                    onClick={() => void runAction(task, 'pause')}
+                    disabled={busy === `${task.pluginId}:pause`}
+                    className="flex-1 rounded border border-white/15 py-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-muted hover:bg-white/5 hover:text-white disabled:opacity-40"
+                  >
+                    Pause
+                  </button>
+                ) : null}
+                {task.actions?.includes('stop') ? (
+                  <button
+                    type="button"
+                    onClick={() => void runAction(task, 'stop')}
+                    disabled={busy === `${task.pluginId}:stop`}
+                    className="flex-1 rounded border border-status-alert/40 bg-status-alert/10 py-1 font-mono text-[10px] uppercase tracking-[0.06em] text-status-alert hover:bg-status-alert/20 disabled:opacity-40"
+                  >
+                    Stop
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => onOpen(task.pluginId, task.page)}
+                  className="flex-1 rounded border border-white/15 py-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-muted hover:bg-white/5 hover:text-white"
+                >
+                  Open {task.pluginName} →
+                </button>
+              </div>
             </li>
           );
         })}

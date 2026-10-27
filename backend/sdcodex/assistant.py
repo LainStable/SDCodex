@@ -129,6 +129,8 @@ def _collect_plugin_tasks(cookie: str) -> list[dict]:
                 continue
             current = payload.get("current")
             total = payload.get("total")
+            meta_actions = meta.get("actions")
+            actions = sorted(meta_actions.keys()) if isinstance(meta_actions, dict) else []
             tasks.append(
                 {
                     "pluginId": plugin["id"],
@@ -140,6 +142,8 @@ def _collect_plugin_tasks(cookie: str) -> list[dict]:
                     "detail": str(payload.get("detail") or ""),
                     "message": str(payload.get("message") or ""),
                     "startedAt": payload.get("started_at") or 0,
+                    # Which controls the plugin exposes for this task.
+                    "actions": actions,
                 }
             )
     return tasks

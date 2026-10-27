@@ -1364,6 +1364,54 @@ def plugin_tasks():
     return jsonify({"tasks": assistant.plugin_tasks(request.headers.get("Cookie", ""))})
 
 
+@api_v1.post("/plugin-tasks/<plugin_id>/<action>")
+def plugin_task_action(plugin_id: str, action: str):
+    """Forward a pause/stop to a plugin's running task.
+
+    A plugin declares the controls it offers in its manifest::
+
+        "task_status": {"label": "RemBG", "path": "/rembg/api/batch/status",
+                        "page": "studio",
+                        "actions": {"pause": "/rembg/api/batch/pause",
+                                    "stop": "/rembg/api/batch/cancel"}}
+
+    The floating task notification shows a button per declared action and
+    posts here; the core forwards the call to the plugin with the caller's
+    own session.
+    """
+    user, err = _require_user()
+    if err:
+        return err
+    if action not in ("pause", "stop"):
+        return jsonify({"error": "unknown action"}), 400
+
+    from . import assistant
+    from . import updater as updater_mod
+
+    plugin = next((p for p in updater_mod.list_installed() if p.get("id") == plugin_id), None)
+    if plugin is None:
+        return jsonify({"error": "plugin is not installed"}), 404
+    meta = plugin.get("task_status") or {}
+    actions = meta.get("actions") if isinstance(meta.get("actions"), dict) else {}
+    path = str(actions.get(action) or "").strip()
+    if not path.startswith("/"):
+        name = meta.get("label") or plugin.get("name") or plugin_id
+        return jsonify({"error": f"{name} does not support {action}"}), 400
+
+    cookie = request.headers.get("Cookie", "")
+    with assistant._plugin_session(cookie) as probe_cookie:
+        response, payload = assistant._probe(path, probe_cookie, method="POST", body={})
+    ok = 200 <= response.status_code < 300
+    body = payload if isinstance(payload, dict) else {}
+    return jsonify({
+        "ok": ok,
+        "action": action,
+        "status": response.status_code,
+        "message": str(body.get("message") or body.get("state") or ""),
+        "error": str(body.get("error") or ""),
+    }), (200 if ok else 502)
+
+
 # ------------------------------------------------------------ assistant ---
 
 @api_v1.get("/assistant/status")
