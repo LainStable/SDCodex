@@ -166,14 +166,17 @@ function baseModelFromSidecar(json: unknown): string {
     `<base>.metadata.json`; StabilityMatrix writes `<base>.cm-info.json`. */
 const META_SUFFIXES = ['.metadata.json', '.cm-info.json'] as const;
 const IMAGE_SUFFIXES = [
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.webp',
+  // The `.preview` marker is the canonical preview name
+  // (`<base>.preview.webp`), so it wins over a bare `<base>.webp` left
+  // behind by an older download.
   '.preview.png',
   '.preview.jpeg',
   '.preview.jpg',
   '.preview.webp',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
 ] as const;
 
 async function readModelSidecar(

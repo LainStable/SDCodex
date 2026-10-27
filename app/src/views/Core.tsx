@@ -1016,7 +1016,7 @@ export function PluginTaskFloat({
                     disabled={busy === `${task.pluginId}:pause`}
                     className="flex-1 rounded border border-white/15 py-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-muted hover:bg-white/5 hover:text-white disabled:opacity-40"
                   >
-                    Pause
+                    {task.state === 'paused' ? '▶ Resume' : 'Pause'}
                   </button>
                 ) : null}
                 {task.actions?.includes('stop') ? (
@@ -1026,7 +1026,7 @@ export function PluginTaskFloat({
                     disabled={busy === `${task.pluginId}:stop`}
                     className="flex-1 rounded border border-status-alert/40 bg-status-alert/10 py-1 font-mono text-[10px] uppercase tracking-[0.06em] text-status-alert hover:bg-status-alert/20 disabled:opacity-40"
                   >
-                    Stop
+                    Cancel
                   </button>
                 ) : null}
                 <button

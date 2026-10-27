@@ -858,6 +858,7 @@ def library_set_cover(row_id: int):
         fetch_headers["Authorization"] = f"Bearer {user.api_key}"
 
     temporary_path = None
+    stale_image = ""
     try:
         response = _civitai_get(image_url, fetch_headers)
         try:
@@ -865,11 +866,17 @@ def library_set_cover(row_id: int):
                 return jsonify({"error": f"Civitai returned {response.status_code}"}), 502
             if not (response.headers.get("Content-Type") or "").lower().startswith("image/"):
                 return jsonify({"error": "Civitai did not return an image"}), 502
-            existing_image = bool(image_path and os.path.isfile(image_path))
-            if not image_path or not existing_image:
-                content_type = response.headers.get("Content-Type", "").lower()
-                ext = ".png" if "png" in content_type else ".jpg" if "jpeg" in content_type else ".webp"
-                image_path = os.path.join(model_dir, os.path.splitext(os.path.basename(model_path))[0] + ext)
+            content_type = response.headers.get("Content-Type", "").lower()
+            ext = ".png" if "png" in content_type else ".jpg" if "jpeg" in content_type else ".webp"
+            # The preview always carries the `.preview` marker before the
+            # extension: `<model name>.preview.<ext>`.
+            model_base = os.path.splitext(os.path.basename(model_path))[0]
+            target_path = os.path.join(model_dir, f"{model_base}.preview{ext}")
+            if image_path and os.path.realpath(image_path) != os.path.realpath(target_path):
+                # The old preview keeps its legacy name — drop it so the
+                # folder holds exactly one image for this model.
+                stale_image = image_path
+            image_path = target_path
             fd, temporary_path = tempfile.mkstemp(prefix=".sdcodex-preview-", dir=model_dir)
             total = 0
             with os.fdopen(fd, "wb") as output:
@@ -884,6 +891,11 @@ def library_set_cover(row_id: int):
             response.close()
         os.replace(temporary_path, image_path)
         temporary_path = None
+        if stale_image and os.path.isfile(stale_image):
+            try:
+                os.remove(stale_image)
+            except OSError:
+                pass
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except requests.RequestException as exc:

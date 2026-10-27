@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 import { hexToRgba } from './ui';
 import { FanIcon } from './fanIcon';
 import { AssistantBar } from './assistantBar';
@@ -596,7 +596,7 @@ export function Topbar({
   assistant?: { configured: boolean; model: string; onAction: (action: AssistantAction) => void };
 }) {
   return (
-    <div className="mb-4 flex items-center gap-2">
+    <div className="flex items-center gap-2">
       <div className="glass-l1 flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2">
         {assistant?.configured ? (
           <AssistantBar model={assistant.model} onAction={assistant.onAction} />
@@ -635,6 +635,19 @@ export function Topbar({
         onSpaceCore={onSpaceCore}
         onSpacePlugin={onSpacePlugin}
       />
+    </div>
+  );
+}
+
+export function Header({
+  view,
+  go,
+  ...topbarProps
+}: { view: ViewId; go: (v: ViewId) => void } & Omit<ComponentProps<typeof Topbar>, 'go'>) {
+  return (
+    <div className="sticky top-4 md:top-5 z-20 -mx-4 bg-obsidian-bg/80 px-4 pb-4 md:-mx-5 md:px-5">
+      <MobileNav view={view} go={go} />
+      <Topbar go={go} {...topbarProps} />
     </div>
   );
 }

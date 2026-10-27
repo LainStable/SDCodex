@@ -335,7 +335,9 @@ def download_model(model_id, version_id, api_key=None, progress_callback=None, i
 
         model_ext = os.path.splitext(original_filename)[1][:32]
         model_filename = f"{safe_base_name}{model_ext}"
-        image_filename = f"{safe_base_name}.webp"
+        # Preview images carry the `.preview` marker before the extension, so
+        # they are never mistaken for another model file in the same folder.
+        image_filename = f"{safe_base_name}.preview.webp"
 
         preview_image_url = None
         if version.get('images'):
@@ -394,7 +396,7 @@ def download_model(model_id, version_id, api_key=None, progress_callback=None, i
         # left beside a valid model.
         if preview_image_url:
             image_ext = _preview_extension(preview_image_url)
-            image_path = os.path.join(base_dir, f"{safe_base_name}{image_ext}")
+            image_path = os.path.join(base_dir, f"{safe_base_name}.preview{image_ext}")
 
             print(f"Downloading image to {image_path}...")
             with tempfile.NamedTemporaryFile(

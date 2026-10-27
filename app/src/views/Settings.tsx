@@ -28,6 +28,7 @@ import {
   setCustomDir,
   setDirColor,
   setOrganizeByBase,
+  SETTINGS_CHANGED_EVENT,
 } from '../lib/settings';
 import { fetchMe } from '../lib/civitai';
 import {
@@ -256,6 +257,18 @@ function Dirs() {
     return () => {
       live = false;
     };
+  }, []);
+
+  // The server owns the download flags. When a settings pull lands (on login
+  // or when the view reappears) the boxes must show the stored value instead
+  // of whatever the page happened to load with.
+  useEffect(() => {
+    const sync = () => {
+      setStability(getStabilityMatrix());
+      setOrganize(getOrganizeByBase());
+    };
+    window.addEventListener(SETTINGS_CHANGED_EVENT, sync);
+    return () => window.removeEventListener(SETTINGS_CHANGED_EVENT, sync);
   }, []);
 
   // Merge saved rows into drafts without clobbering unsaved edits.

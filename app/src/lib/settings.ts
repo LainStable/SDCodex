@@ -93,12 +93,27 @@ export function getStabilityMatrix(): boolean {
   return read(STABILITYMATRIX_KEY) === '1';
 }
 
+/** Fired whenever a settings value changes so open views can re-read it. */
+export const SETTINGS_CHANGED_EVENT = 'sdcodex:settings-changed';
+
+/* Local edits the server has not accepted yet. A settings pull that lands
+   between the click and the save must not undo the click. */
+const pending = new Set<string>();
+
+function notifySettingsChanged(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(SETTINGS_CHANGED_EVENT));
+}
+
 export function setStabilityMatrix(on: boolean): void {
   write(STABILITYMATRIX_KEY, on ? '1' : '0');
+  pending.add(STABILITYMATRIX_KEY);
+  notifySettingsChanged();
 }
 
 export function setOrganizeByBase(on: boolean): void {
   write(ORGANIZE_KEY, on ? '1' : '0');
+  pending.add(ORGANIZE_KEY);
+  notifySettingsChanged();
 }
 
 /** Mirrors OldCode Setting dir_<type> rows. */
@@ -215,6 +230,7 @@ export async function pullSettings(): Promise<boolean> {
       civitaiApiKey: string;
       apiMirror?: string;
       organizeByBase?: boolean;
+      stabilitymatrix?: boolean;
     }>('/settings');
     write('sdcodex.dirs.v1', JSON.stringify(s.dirs ?? {}));
     write(COLORS_KEY, JSON.stringify(s.colors ?? {}));
@@ -224,9 +240,20 @@ export async function pullSettings(): Promise<boolean> {
     if (s.apiMirror === 'civitai.red' || s.apiMirror === 'civitai.com') {
       write(API_MIRROR, s.apiMirror);
     }
-    if (typeof s.organizeByBase === 'boolean') {
+    // The server owns these two flags. Without this the checkbox showed
+    // whatever localStorage happened to hold while the setting itself was
+    // on (or off) on the server — the box looked like it unticked itself.
+    // A local edit the server has not accepted yet is never overwritten.
+    let changed = false;
+    if (typeof s.organizeByBase === 'boolean' && !pending.has(ORGANIZE_KEY)) {
       write(ORGANIZE_KEY, s.organizeByBase ? '1' : '0');
+      changed = true;
     }
+    if (typeof s.stabilitymatrix === 'boolean' && !pending.has(STABILITYMATRIX_KEY)) {
+      write(STABILITYMATRIX_KEY, s.stabilitymatrix ? '1' : '0');
+      changed = true;
+    }
+    if (changed) notifySettingsChanged();
     return true;
   } catch {
     return false;
@@ -245,6 +272,9 @@ export async function pushSettings(): Promise<void> {
       organizeByBase: getOrganizeByBase(),
       stabilitymatrix: getStabilityMatrix(),
     });
+    // The server has the values now: a later pull may write them back.
+    pending.clear();
+    notifySettingsChanged();
   } catch {
     /* standalone mode — local cache stands */
   }

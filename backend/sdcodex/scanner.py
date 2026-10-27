@@ -180,7 +180,10 @@ def _version_from_metadata(data, filename):
 
 
 META_SUFFIXES = ('.metadata.json', '.cm-info.json')
-IMAGE_SUFFIXES = ('.webp', '.png', '.jpg', '.jpeg', '.preview.png', '.preview.jpeg', '.preview.jpg', '.preview.webp')
+# The `.preview` marker is the canonical preview name (`<base>.preview.webp`),
+# so it wins over a bare `<base>.webp` left behind by an older download.
+IMAGE_SUFFIXES = ('.preview.png', '.preview.jpeg', '.preview.jpg', '.preview.webp',
+                  '.webp', '.png', '.jpg', '.jpeg')
 
 
 def _read_sidecar(file_dir, base_name):

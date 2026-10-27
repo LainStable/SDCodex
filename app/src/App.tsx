@@ -6,7 +6,7 @@ import PluginView from './views/PluginView';
 import ModelModal, { type ModalTarget } from './components/ModelModal';
 import { Queue, BootstrapCard, DownloadFloat, PluginTaskFloat, ScanFloat } from './views/Core';
 import Home from './views/Home';
-import { MobileNav, Sidebar, Topbar, type UpdateState, type ViewId } from './components/chrome';
+import { Header, Sidebar, type UpdateState, type ViewId } from './components/chrome';
 import {
   addToQueue,
   clearCompleted,
@@ -698,10 +698,10 @@ export default function App() {
         />
 
         <main className="min-w-0 flex-1 p-4 md:p-5">
-          <MobileNav view={view} go={go} />
-          <Topbar
-            installMode={installMode}
+          <Header
+            view={view}
             go={go}
+            installMode={installMode}
             profileLabel={initials(profile)}
             avatarUrl={profile?.avatar ?? ''}
             signedIn={authed}
@@ -753,7 +753,9 @@ export default function App() {
               searchSpec={creatorSearch.spec ?? null}
             />
           )}
-          {space.kind === 'core' && view === 'library' && <Library key={libKey} onOpen={(t) => setModal(t)} />}
+          {space.kind === 'core' && view === 'library' && (
+            <Library refreshToken={libKey} onOpen={(t) => setModal(t)} />
+          )}
           {space.kind === 'core' && view === 'queue' && (
             <Queue
               items={queue}

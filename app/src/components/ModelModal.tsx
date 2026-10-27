@@ -215,13 +215,26 @@ async function saveLibraryCover(
     blob.type === 'image/png' ? '.png' :
     blob.type === 'image/jpeg' ? '.jpg' :
     blob.type === 'image/webp' ? '.webp' : null;
-  const filename =
-    target.imageName ??
-    `${modelFilename.replace(/\.[^.]+$/, '')}${extension ?? '.webp'}`;
+  const modelBase = modelFilename.replace(/\.[^.]+$/, '');
+  const existing = target.imageName ?? '';
+  // The preview keeps the `.preview` marker before the extension:
+  // `<model name>.preview.<ext>`.
+  const filename = /\.preview\.[^.]+$/i.test(existing)
+    ? existing
+    : `${modelBase}.preview${extension ?? '.webp'}`;
   const image = await dir.getFileHandle(filename, { create: true });
   const writable = await image.createWritable();
   await writable.write(blob);
   await writable.close();
+  if (existing && existing !== filename) {
+    // The old preview kept its legacy name — remove it so the folder holds
+    // exactly one image for this model.
+    try {
+      await dir.removeEntry(existing);
+    } catch {
+      /* already gone or not removable */
+    }
+  }
   const { setScannedImageName } = await import('../lib/library');
   if (!setScannedImageName(target.dirKey, target.relativePath, filename)) {
     throw new Error('Image was saved, but the scanned library record could not be updated.');

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { BASE_MODELS } from '../lib/civitai';
 import { MODEL_TYPES, getDirectories, getDirColors } from '../lib/settings';
 import { folderForModelType } from '../lib/categories';
@@ -42,7 +42,16 @@ const fileUrl = (absPath: string) => `/api/files?path=${encodeURIComponent(absPa
    `key`. Keep the grid where the user left it instead of jumping to the top. */
 let savedScrollY = 0;
 
-export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }) {
+export default function Library({
+  onOpen,
+  refreshToken = 0,
+}: {
+  onOpen: (t: ModalTarget) => void;
+  /** Bumped when the data changed under us (a metadata update, a forget).
+      The list refreshes in place, so the filters and the scroll position
+      survive instead of being thrown away by a remount. */
+  refreshToken?: number;
+}) {
   const [query, setQuery] = useState('');
   const [bases, setBases] = useState<string[]>([]);
   const [scanned, setScanned] = useState<ScannedModel[]>(loadScanned);
@@ -130,6 +139,49 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
     return MODEL_TYPES.filter((t) => present.has(t));
   }, [serverRows, scanned]);
 
+  // Resolve browser-scanned preview images through their bound folders, and
+  // backfill the architecture for records scanned before it was inferred.
+  const resolvePreviews = useCallback(async () => {
+    const canReadFolders =
+      typeof (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker === 'function';
+    const { getHandle } = await import('../lib/idb');
+    const { resolveRecordBaseModel } = await import('../lib/scan');
+    const { setScannedBaseModelByFile } = await import('../lib/library');
+    const found: Record<string, string> = {};
+    let patched = false;
+    for (const s of loadScanned()) {
+      if (canReadFolders && s.imageName) {
+        const key = `${s.dirKey}/${s.filename}`;
+        try {
+          const dir = await getHandle(s.dirKey);
+          if (!dir) throw new Error('unbound');
+          const parts = s.filename.split('/').filter(Boolean);
+          let cur = dir;
+          for (const part of parts.slice(0, -1)) cur = await cur.getDirectoryHandle(part);
+          const fh = await cur.getFileHandle(s.imageName);
+          const file = await fh.getFile();
+          if (file.type.startsWith('image/')) found[key] = URL.createObjectURL(file);
+        } catch {
+          /* unlinked or missing — card keeps its placeholder */
+        }
+      }
+      if (s.baseModel) continue;
+      // Sidecar metadata first, then the weights header; the folder search
+      // also repairs records saved before per-path keys existed.
+      const hit = await resolveRecordBaseModel(s);
+      if (hit && setScannedBaseModelByFile(s.dirKey, s.filename, hit.baseModel, hit)) patched = true;
+    }
+    if (Object.keys(found).length > 0) setLocalPreviews(found);
+    if (patched) setScanned(loadScanned());
+  }, []);
+
+  const reloadRows = useCallback(async () => {
+    const rows = await fetchServerRows();
+    if (!rows) return;
+    setServerRows(rows);
+    setServerState('ready');
+  }, []);
+
   useEffect(() => {
     let live = true;
     let timer: number | null = null;
@@ -163,48 +215,23 @@ export default function Library({ onOpen }: { onOpen: (t: ModalTarget) => void }
     void loadRows();
     const onFocus = () => void loadRows();
     window.addEventListener('focus', onFocus);
-    // Resolve browser-scanned preview images through their bound folders, and
-    // backfill the architecture for records scanned before it was inferred.
-    void (async () => {
-      const canReadFolders =
-        typeof (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker === 'function';
-      const { getHandle } = await import('../lib/idb');
-      const { resolveRecordBaseModel } = await import('../lib/scan');
-      const { setScannedBaseModelByFile } = await import('../lib/library');
-      const found: Record<string, string> = {};
-      let patched = false;
-      for (const s of loadScanned()) {
-        if (canReadFolders && s.imageName) {
-          const key = `${s.dirKey}/${s.filename}`;
-          try {
-            const dir = await getHandle(s.dirKey);
-            if (!dir) throw new Error('unbound');
-            const parts = s.filename.split('/').filter(Boolean);
-            let cur = dir;
-            for (const part of parts.slice(0, -1)) cur = await cur.getDirectoryHandle(part);
-            const fh = await cur.getFileHandle(s.imageName);
-            const file = await fh.getFile();
-            if (file.type.startsWith('image/')) found[key] = URL.createObjectURL(file);
-          } catch {
-            /* unlinked or missing — card keeps its placeholder */
-          }
-        }
-        if (s.baseModel) continue;
-        // Sidecar metadata first, then the weights header; the folder search
-        // also repairs records saved before per-path keys existed.
-        const hit = await resolveRecordBaseModel(s);
-        if (hit && setScannedBaseModelByFile(s.dirKey, s.filename, hit.baseModel, hit)) patched = true;
-      }
-      if (!live) return;
-      if (Object.keys(found).length > 0) setLocalPreviews(found);
-      if (patched) setScanned(loadScanned());
-    })();
+    void resolvePreviews();
     return () => {
       live = false;
       if (timer !== null) window.clearTimeout(timer);
       window.removeEventListener('focus', onFocus);
     };
-  }, []);
+  }, [resolvePreviews]);
+
+  // A metadata update (or a forget) changed the rows under us: reload them
+  // in place. Remounting the view instead would throw away the active
+  // filters and put the grid back at the top.
+  useEffect(() => {
+    if (!refreshToken) return;
+    setScanned(loadScanned());
+    void reloadRows();
+    void resolvePreviews();
+  }, [refreshToken, reloadRows, resolvePreviews]);
 
   // Ask the backend which installed models have a newer Civitai version. The
   // backend answers immediately from cache and refreshes the rest in the
