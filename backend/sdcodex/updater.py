@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import threading
 import time
+from pathlib import Path
 
 import requests
 
@@ -571,6 +572,41 @@ def list_installed() -> list:
     return out
 
 
+def _warn_duplicate_handlers(plugin_path: str) -> None:
+    """Warn about two handlers sharing a name inside one plugin module.
+
+    Flask derives a route's endpoint from the view function's ``__name__``,
+    so a second handler with the same name aborts the blueprint registration
+    half-way: the routes before it work, everything after it (often the
+    plugin's whole vendored UI) silently disappears.
+    """
+    import ast
+
+    try:
+        files = sorted(Path(plugin_path).glob("*.py"))
+    except OSError:
+        return
+    for file in files:
+        try:
+            tree = ast.parse(file.read_text(encoding="utf-8", errors="ignore"))
+        except (OSError, SyntaxError):
+            continue
+        seen: dict = {}
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                seen.setdefault(node.name, []).append(node.lineno)
+        for name, lines in seen.items():
+            if len(lines) > 1:
+                logger.warning(
+                    "Plugin '%s': %s defines %s() twice (lines %s) — Flask will "
+                    "stop registering the blueprint at the second one",
+                    Path(plugin_path).name,
+                    file.name,
+                    name,
+                    ", ".join(str(line) for line in lines),
+                )
+
+
 def load_plugins(app) -> list:
     """Import each installed plugin's entrypoint (``module:func``) and init it.
 
@@ -606,13 +642,21 @@ def load_plugins(app) -> list:
             fn = getattr(mod, func_name)
             from . import db as _db
 
+            _warn_duplicate_handlers(p["path"])
             try:
                 fn(app, _db, mf)
             except TypeError:
                 fn(app, _db)
             loaded.append(p["id"])
         except Exception as e:
-            logger.warning("Plugin '%s' init skipped: %s", p["id"], e)
+            logger.warning(
+                "Plugin '%s' init skipped: %s — the plugin may be only partly "
+                "registered (a blueprint that failed mid-way leaves its later "
+                "routes missing, so a page can load with no data)",
+                p["id"],
+                e,
+                exc_info=True,
+            )
     return loaded
 
 
