@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { hexToRgba } from './ui';
 import { FanIcon } from './fanIcon';
 import { AssistantBar } from './assistantBar';
@@ -596,7 +596,7 @@ export function Topbar({
   assistant?: { configured: boolean; model: string; onAction: (action: AssistantAction) => void };
 }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="mb-4 flex items-center gap-2 md:pr-12">
       <div className="glass-l1 flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2">
         {assistant?.configured ? (
           <AssistantBar model={assistant.model} onAction={assistant.onAction} />
@@ -624,30 +624,22 @@ export function Topbar({
       >
         {installMode}
       </span>
-      <UserMenu
-        go={go}
-        profileLabel={profileLabel}
-        avatarUrl={avatarUrl}
-        signedIn={signedIn}
-        onSignOut={onSignOut}
-        space={space}
-        plugins={plugins}
-        onSpaceCore={onSpaceCore}
-        onSpacePlugin={onSpacePlugin}
-      />
-    </div>
-  );
-}
-
-export function Header({
-  view,
-  go,
-  ...topbarProps
-}: { view: ViewId; go: (v: ViewId) => void } & Omit<ComponentProps<typeof Topbar>, 'go'>) {
-  return (
-    <div className="sticky top-4 md:top-5 z-20 -mx-4 bg-obsidian-bg/80 px-4 pb-4 md:-mx-5 md:px-5">
-      <MobileNav view={view} go={go} />
-      <Topbar go={go} {...topbarProps} />
+      {/* The account/radial menu stays in the top-right corner while the page
+          scrolls; the search bar and the mode badge scroll away with it. The
+          row reserves the button's width so nothing slides underneath. */}
+      <div className="md:fixed md:right-5 md:top-5 md:z-40">
+        <UserMenu
+          go={go}
+          profileLabel={profileLabel}
+          avatarUrl={avatarUrl}
+          signedIn={signedIn}
+          onSignOut={onSignOut}
+          space={space}
+          plugins={plugins}
+          onSpaceCore={onSpaceCore}
+          onSpacePlugin={onSpacePlugin}
+        />
+      </div>
     </div>
   );
 }
